@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: ort
+          POSTGRES_PASSWORD: ort
+          POSTGRES_DB: ort
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ort"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_HOST: localhost
+      DATABASE_PORT: "5432"
+      DATABASE_NAME: ort
+      DATABASE_USER: ort
+      DATABASE_PASSWORD: ort
+      DJANGO_DEBUG: "1"
+      ORT_TASK_BACKEND: django.tasks.backends.immediate.ImmediateBackend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Abhängigkeiten installieren
+        run: pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+      - name: Aufgelöste Versionen
+        run: pip freeze
+      - name: Migrationen passen zu den Modellen
+        working-directory: backend
+        run: python manage.py makemigrations --check --dry-run -v 3
+      - name: Django-Tests
+        working-directory: backend
+        run: pytest -q
+      - name: SQL-Kern gegen PostgreSQL 17 (33 Referenztests)
+        env:
+          ORT_TEST_PGHOST: localhost
+          PGUSER: ort
+          PGPASSWORD: ort
+        run: python eventlog/test_projections.py
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - name: Abhängigkeiten installieren
+        working-directory: frontend
+        run: npm install --no-audit --no-fund
+      - name: Typen prüfen
+        working-directory: frontend
+        run: npm run typecheck
+      - name: Bauen
+        working-directory: frontend
+        run: npm run build
+
+  stack:
+    runs-on: ubuntu-latest
+    env:
+      ORT_DOMAIN: localhost
+      ORT_VERSION: ci
+    steps:
+      - uses: actions/checkout@v5
+      - name: Secrets anlegen
+        working-directory: deploy
+        run: |
+          mkdir -p secrets
+          openssl rand -hex 24 > secrets/db_password
+          openssl rand -hex 48 > secrets/django_secret_key
+          chmod 644 secrets/*
+      - name: Image bauen
+        working-directory: deploy
+        run: docker compose build
+      - name: Stack starten
+        working-directory: deploy
+        run: docker compose up -d
+      - name: Administrator anlegen
+        working-directory: deploy
+        run: |
+          for i in $(seq 1 40); do
+            docker compose exec -T web python -c "import urllib.request as u; u.urlopen('http://localhost:8000/healthz')" && break
+            sleep 3
+          done
+          docker compose exec -T -e DJANGO_SUPERUSER_PASSWORD=ci-admin-passwort web \
+            python manage.py createsuperuser --noinput --username admin --email admin@example.org
+      - name: Durchgehender Test durch den Proxy
+        run: |
+          pip install requests
+          python deploy/smoke_test.py https://localhost admin ci-admin-passwort
+      - name: Hash-Ketten prüfen
+        working-directory: deploy
+        run: docker compose exec -T web python manage.py verify_chain
+      - name: Sicherung und Wiederherstellung
+        working-directory: deploy
+        run: |
+          docker compose exec -T db pg_dump -Fc -U ort ort > /tmp/ort.dump
+          docker compose exec -T db createdb -U ort ort_restore
+          docker compose exec -T db pg_restore -U ort -d ort_restore --no-owner < /tmp/ort.dump
+          docker compose exec -T -e DATABASE_NAME=ort_restore web python manage.py verify_chain
+      - name: Protokolle bei Fehler
+        if: failure()
+        working-directory: deploy
+        run: |
+          docker compose ps -a
+          docker compose logs --tail 200

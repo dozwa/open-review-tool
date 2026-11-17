@@ -1,0 +1,106 @@
+name: open-review-tool
+
+x-app: &app
+  image: ghcr.io/dozwa/open-review-tool:${ORT_VERSION:-local}
+  build:
+    context: ..
+  environment:
+    DATABASE_HOST: db
+    DATABASE_NAME: ort
+    DATABASE_USER: ort
+    DATABASE_PASSWORD_FILE: /run/secrets/db_password
+    DJANGO_SECRET_KEY_FILE: /run/secrets/django_secret_key
+    DJANGO_ALLOWED_HOSTS: ${ORT_DOMAIN:?ORT_DOMAIN fehlt}
+  secrets:
+    - db_password
+    - django_secret_key
+  networks:
+    - backend
+
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ort
+      POSTGRES_USER: ort
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets:
+      - db_password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - backend
+
+  migrate:
+    <<: *app
+    command: ["python", "manage.py", "migrate", "--noinput"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    <<: *app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+        restart: true
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/healthz')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  worker:
+    <<: *app
+    command: ["python", "manage.py", "db_worker"]
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+        restart: true
+      migrate:
+        condition: service_completed_successfully
+
+  proxy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      ORT_DOMAIN: ${ORT_DOMAIN:?ORT_DOMAIN fehlt}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      web:
+        condition: service_healthy
+    networks:
+      - backend
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
+
+secrets:
+  db_password:
+    file: ./secrets/db_password
+  django_secret_key:
+    file: ./secrets/django_secret_key
+
+networks:
+  backend:

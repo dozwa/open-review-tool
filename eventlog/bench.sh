@@ -4,7 +4,7 @@ set -e
 P=/usr/lib/postgresql/16/bin; T=$(mktemp -d); chmod 777 $T
 RUN="su nobody -s /bin/bash -c"; [ "$(id -u)" != "0" ] && RUN="bash -c"
 $RUN "$P/initdb -D $T/data -A trust -U pg >/dev/null && $P/pg_ctl -D $T/data -o '-k $T -p 5497 -c listen_addresses=' -l $T/log -w start >/dev/null"
-cat schema.sql projections.sql > $T/setup.sql
+cat ../backend/eventcore/sql/*.sql > $T/setup.sql
 cat > $T/load.sql <<'SQL'
 INSERT INTO review (review_id, title) VALUES ('00000000-0000-0000-0000-000000000001','Bench');
 DO $$

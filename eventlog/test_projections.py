@@ -10,6 +10,9 @@ from sklearn.metrics import cohen_kappa_score
 
 PG = "/usr/lib/postgresql/16/bin"
 HERE = os.path.dirname(os.path.abspath(__file__))
+SQL_DIR = os.path.join(HERE, "..", "backend", "eventcore", "sql")
+# Externer Server statt Wegwerf-Instanz: ORT_TEST_PGHOST (+ PGPORT, PGUSER, PGPASSWORD, ORT_TEST_PGDATABASE)
+EXT_HOST = os.environ.get("ORT_TEST_PGHOST")
 REVIEW = "00000000-0000-0000-0000-000000000001"
 
 
@@ -34,8 +37,16 @@ def run_psql(sock, port, sql, user_run):
     with open(path, "w") as f:
         f.write(sql)
     os.chmod(path, 0o644)
-    out = subprocess.run(user_run + [f"{PG}/psql -h {sock} -p {port} -U pg -d postgres -v ON_ERROR_STOP=1 -At -F '|' -f {path}"],
-                         capture_output=True, text=True)
+    if EXT_HOST:
+        db = os.environ.get("ORT_TEST_PGDATABASE", "ort_sqltest")
+        user = os.environ.get("PGUSER", "postgres")
+        pgport = os.environ.get("PGPORT", "5432")
+        base = f"psql -h {EXT_HOST} -p {pgport} -U {user} -v ON_ERROR_STOP=1 -At"
+        subprocess.run(["bash", "-c", f"{base} -d postgres -c 'DROP DATABASE IF EXISTS {db}' -c 'CREATE DATABASE {db}'"], check=True, capture_output=True)
+        cmd = ["bash", "-c", f"{base} -d {db} -F '|' -f {path}"]
+    else:
+        cmd = user_run + [f"{PG}/psql -h {sock} -p {port} -U pg -d postgres -v ON_ERROR_STOP=1 -At -F '|' -f {path}"]
+    out = subprocess.run(cmd, capture_output=True, text=True)
     if out.returncode != 0:
         print(out.stdout, out.stderr)
         raise SystemExit("psql failed")
@@ -57,12 +68,13 @@ def main():
     os.chmod(tmp, 0o777)
     run = ["su", "nobody", "-s", "/bin/bash", "-c"] if os.geteuid() == 0 else ["bash", "-c"]
     port = 5498
-    subprocess.run(run + [f"{PG}/initdb -D {tmp}/data -A trust -U pg >/dev/null"], check=True)
-    subprocess.run(run + [f"{PG}/pg_ctl -D {tmp}/data -o '-k {tmp} -p {port} -c listen_addresses=' -l {tmp}/log -w start >/dev/null"], check=True)
+    if not EXT_HOST:
+        subprocess.run(run + [f"{PG}/initdb -D {tmp}/data -A trust -U pg >/dev/null"], check=True)
+        subprocess.run(run + [f"{PG}/pg_ctl -D {tmp}/data -o '-k {tmp} -p {port} -c listen_addresses=' -l {tmp}/log -w start >/dev/null"], check=True)
     failures = 0
     try:
         log = Log()
-        setup = open(os.path.join(HERE, "schema.sql")).read() + open(os.path.join(HERE, "projections.sql")).read()
+        setup = "".join(open(os.path.join(SQL_DIR, f)).read() + "\n" for f in sorted(os.listdir(SQL_DIR)) if f.endswith(".sql"))
         setup += f"\nINSERT INTO review (review_id, title) VALUES ('{REVIEW}','Test');\n"
         sys_actor = uid(9, 0)
 
@@ -239,7 +251,8 @@ SELECT n_items, percent_agreement FROM percent_agreement('{stC}', 'include');
         n, p = sections["PCT_MAYBE"][0].split("|")
         check("Prozent-Agreement Maybe→Include", n == "5" and abs(float(p) - 0.6) < 1e-12, f"n={n}, {float(p):.3f} (erwartet 5, 0.600)")
     finally:
-        subprocess.run(run + [f"{PG}/pg_ctl -D {tmp}/data -m fast stop >/dev/null"])
+        if not EXT_HOST:
+            subprocess.run(run + [f"{PG}/pg_ctl -D {tmp}/data -m fast stop >/dev/null"])
         shutil.rmtree(tmp, ignore_errors=True)
     print(f"\n{'ALLE TESTS BESTANDEN' if failures == 0 else f'{failures} FEHLER'}")
     sys.exit(1 if failures else 0)

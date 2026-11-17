@@ -4,3 +4,10 @@ __pycache__/
 .env
 *.csv
 .DS_Store
+node_modules/
+frontend/dist/
+backend/staticfiles/
+backend/frontend_dist/
+deploy/secrets/
+deploy/.env
+.pytest_cache/

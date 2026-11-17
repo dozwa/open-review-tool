@@ -1,5 +1,5 @@
--- Event-Log für Screening-Entscheidungen (Entwurf v0.1, PostgreSQL 16)
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
+-- Event-Log für Screening-Entscheidungen (v0.3)
+-- Hash über die eingebaute Funktion sha256(); die Erweiterung pgcrypto wird nicht benötigt.
 
 CREATE TABLE review (
   review_id   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -37,7 +37,7 @@ BEGIN
   SELECT hash INTO v_prev FROM event WHERE review_id = p_review AND seq = v_seq - 1;
   INSERT INTO event (review_id, seq, type, actor_id, stage_instance_id, payload, prev_hash, hash)
   VALUES (p_review, v_seq, p_type, p_actor, p_stage, p_payload, v_prev,
-          digest(coalesce(v_prev, ''::bytea) || convert_to(p_type || p_payload::text, 'UTF8'), 'sha256'));
+          sha256(coalesce(v_prev, ''::bytea) || convert_to(p_type || p_payload::text, 'UTF8')));
   RETURN v_seq;
 END $$;
 
