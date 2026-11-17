@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { api, canManage, canVote, errorText, ReviewDetail, Stage } from "./api";
 
 const ROLE_LABEL: Record<string, string> = { owner: "Owner", admin: "Admin", reviewer: "Reviewer", viewer: "Viewer" };
+const IMPORT_STATUS: Record<string, string> = { pending: "wartet", running: "läuft", done: "fertig", failed: "fehlgeschlagen" };
 
 function stageState(stage: Stage): string {
   if (stage.closed) return "geschlossen";
@@ -57,7 +58,7 @@ export function ReviewPage() {
       <h1>{review.title}</h1>
       <p className="muted">
         Deine Rolle: {ROLE_LABEL[review.role] ?? review.role} · {review.n_records - review.n_duplicates} Records
-        {review.n_duplicates > 0 && <> ({review.n_duplicates} Dubletten erkannt)</>}
+        {review.n_duplicates > 0 && <> · erkannte Dubletten: {review.n_duplicates}</>}
       </p>
       {error && <p className="error">{error}</p>}
       {notice && <p className="notice">{notice}</p>}
@@ -90,10 +91,10 @@ export function ReviewPage() {
           {review.imports.map((b) => (
             <li key={b.id}>
               <span>
-                {b.filename} <span className="badge">{b.status}</span>
+                {b.filename} <span className="badge">{IMPORT_STATUS[b.status] ?? b.status}</span>
                 <br />
                 <span className="muted">
-                  {b.status === "failed" ? b.error : `${b.n_records} Einträge, ${b.n_duplicates} Dubletten`}
+                  {b.status === "failed" ? b.error : `Einträge: ${b.n_records}, davon Dubletten: ${b.n_duplicates}`}
                   {b.source && ` · ${b.source}`}
                 </span>
               </span>
