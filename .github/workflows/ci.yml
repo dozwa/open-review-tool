@@ -104,6 +104,18 @@ jobs:
         run: |
           pip install requests
           python deploy/smoke_test.py https://localhost admin ci-admin-passwort
+      - name: Oberfläche im Browser prüfen
+        run: |
+          pip install playwright
+          playwright install --with-deps chromium
+          python deploy/ui_check.py https://localhost admin ci-admin-passwort /tmp/ui
+      - name: Bildschirmfotos ablegen
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bildschirmfotos
+          path: /tmp/ui
+          if-no-files-found: ignore
       - name: Hash-Ketten prüfen
         working-directory: deploy
         run: docker compose exec -T web python manage.py verify_chain

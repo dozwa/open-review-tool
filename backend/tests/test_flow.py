@@ -65,8 +65,10 @@ def make_client(username, staff=False):
 
 
 def upload(client, review_id, name, text):
-    return client.post(f"/api/reviews/{review_id}/imports",
-                       {"file": io.BytesIO(text.encode()), "source": "Test"}, format="multipart")
+    upload_file = io.BytesIO(text.encode())
+    upload_file.name = name
+    return client.post(f"/api/reviews/{review_id}/imports", {"file": upload_file, "source": "Test"},
+                       format="multipart")
 
 
 @pytest.fixture
