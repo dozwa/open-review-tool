@@ -19,19 +19,28 @@ with sync_playwright() as p:
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
 
+    def shot(name):
+        """Bildschirmfoto plus Seitentext im Protokoll; prüft, dass nichts seitlich übersteht (390 px breit)."""
+        page.screenshot(path=OUT / f"{name}.png", full_page=True)
+        overflow = page.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth")
+        print(f"\n===== {name} (seitlicher Überstand: {overflow}px) =====")
+        print(page.locator("body").inner_text())
+        if overflow > 0:
+            errors.append(f"{name}: Inhalt steht {overflow}px seitlich über")
+
     page.goto(BASE + "/")
     page.get_by_label("Benutzername").fill(USER)
     page.get_by_label("Passwort").fill(PASSWORD)
-    page.screenshot(path=OUT / "1-anmeldung.png")
+    shot("1-anmeldung")
     page.get_by_role("button", name="Anmelden").click()
 
     expect(page.get_by_role("heading", name="Reviews")).to_be_visible()
     page.get_by_role("link", name=re.compile("Smoke-Test")).first.click()
     expect(page.get_by_role("heading", name="Stufen")).to_be_visible()
-    page.screenshot(path=OUT / "2-review.png", full_page=True)
+    shot("2-review")
 
     # Neue Stufe über das Formular öffnen
-    page.get_by_label("Name").fill("UI-Stufe")
+    page.get_by_label("Name", exact=True).fill("UI-Stufe")
     page.get_by_role("button", name="Stufe öffnen").click()
     expect(page.get_by_text("Stufe geöffnet.")).to_be_visible()
     page.get_by_role("link", name="Screenen").click()
@@ -39,7 +48,7 @@ with sync_playwright() as p:
     # Screening: Tastatur und Schaltfläche
     expect(page.get_by_text("0 von 4 bewertet")).to_be_visible()
     expect(page.locator("mark.inc").first).to_be_visible()  # Keyword-Hervorhebung
-    page.screenshot(path=OUT / "3-screening.png", full_page=True)
+    shot("3-screening")
     page.keyboard.press("i")
     expect(page.get_by_text("1 von 4 bewertet")).to_be_visible()
     page.get_by_role("button", name="Exclude (e)").click()
@@ -48,19 +57,19 @@ with sync_playwright() as p:
     # Auswertung: verblindet, dann entblinden
     page.get_by_role("link", name="Auswertung").click()
     expect(page.get_by_text("Die Stufe ist verblindet.")).to_be_visible()
-    page.screenshot(path=OUT / "4-auswertung-verblindet.png", full_page=True)
+    shot("4-auswertung-verblindet")
     page.get_by_role("button", name="Entblinden").click()
     expect(page.get_by_role("heading", name="Entscheidungen")).to_be_visible()
-    page.screenshot(path=OUT / "5-auswertung-offen.png", full_page=True)
+    shot("5-auswertung-offen")
 
     # Geschlossene Stufe aus dem Smoke-Test: Entscheidungen und Übereinstimmung
     page.get_by_role("link", name="← Review").click()
     page.get_by_role("listitem").filter(has_text="Titel/Abstract").get_by_role("link", name="Auswertung").click()
     expect(page.get_by_role("heading", name="Übereinstimmung")).to_be_visible()
     expect(page.get_by_text("75.0 %")).to_be_visible()
-    page.screenshot(path=OUT / "6-auswertung-geschlossen.png", full_page=True)
+    shot("6-auswertung-geschlossen")
 
     browser.close()
     if errors:
-        raise SystemExit("JavaScript-Fehler im Browser:\n" + "\n".join(errors))
+        raise SystemExit("Fehler in der Oberfläche:\n" + "\n".join(errors))
     print("OBERFLÄCHE GEPRÜFT")
