@@ -94,6 +94,15 @@ fn dedup_key_without_doi() {
 }
 
 #[test]
+fn sample_file_imports_with_duplicate() {
+    let review =
+        ort_core::Review::create_in_memory(ort_core::Identity::generate("owner").unwrap(), "Beispiel").unwrap();
+    let batch = review.import_file("sample.ris", include_str!("fixtures/sample.ris"), "Beispiel").unwrap();
+    assert_eq!(batch.status, "done", "{}", batch.error);
+    assert_eq!((batch.n_records, batch.n_duplicates), (5, 1));
+}
+
+#[test]
 fn format_detection() {
     assert_eq!(detect_format("a.bib", "").unwrap(), "bibtex");
     assert_eq!(detect_format("a.ris", "").unwrap(), "ris");

@@ -1,8 +1,0 @@
-.git
-**/node_modules
-**/__pycache__
-frontend/dist
-backend/staticfiles
-backend/frontend_dist
-deploy/secrets
-docs

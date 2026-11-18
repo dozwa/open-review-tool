@@ -1,5 +1,0 @@
-pytest>=8
-pytest-django>=4.9
-numpy
-scikit-learn
-requests

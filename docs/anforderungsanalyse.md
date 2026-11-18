@@ -312,7 +312,7 @@ Die JBI-Anforderungen sind zusammen mit den früheren Anforderungen in sechs Pha
 | Zotero-Sync Review → Zotero (Tags, Collections, stabile Item-Keys) | Must | 2 | Zotero-Ziel |
 | `prisma_counts` und Flussdiagramm (PRISMA 2020/ScR), Gründe nach Phase getrennt | Must | 2 | PRISMA-ScR Item 14 |
 | Export der ausgeschlossenen Volltexte mit Grund und Zitation | Must | 2 | JBI |
-| Agreement-Bericht mit Bootstrap-Konfidenzintervallen pro Stufe und Runde | Should | 2 | Erledigt in v0.2 (SQL/Python), UI fehlt |
+| Agreement-Bericht mit Bootstrap-Konfidenzintervallen pro Stufe und Runde | Should | 2 | Erledigt; Prozent und Alpha mit Intervall in der Oberfläche, Cohen-Paare noch ohne |
 | Snapshot-Export (JSON Lines und Prüfsumme), z. B. für OSF | Should | 2 | Event-Log |
 | Seed-Referenzen und Seed-Recall-Check (Suchversionen selbst ab Phase 2, siehe Reporting) | Should | 3 | JBI 3-Step Search |
 | Begriffsernte aus Seed-Referenzen (Textwörter, MeSH) | Could | 3 | JBI 10.2.5 |
@@ -330,8 +330,8 @@ Die JBI-Anforderungen sind zusammen mit den früheren Anforderungen in sechs Pha
 **Vor Phase 1 zu entscheiden:**
 
 - [ ] Reihenfolge: Soll das Tool im eigenen Scoping Review schon die Suche begleiten? Dann gehen Suchversionen und Seed-Referenzen aus Phase 3 nach vorne, sonst werden sie später nachdokumentiert.
-- [ ] Oberfläche: Argilla-Fork oder eine schlanke eigene Web-Oberfläche direkt auf dem Event-Log. Mein Vorschlag ist die eigene Oberfläche, weil Argilla weder Stufen noch Runden noch Kriterienversionen kennt.
-- [ ] Betrieb: selbst gehosteter Server für Teams oder lokale Einzelplatzversion. Davon hängt ab, ob der Zotero-Sync über die Web API (Gruppenbibliothek) oder die lokale API läuft.
+- [x] Oberfläche: eigene Oberfläche direkt auf dem Event-Log, kein Argilla-Fork.
+- [x] Betrieb: native Mac-App, Zusammenarbeit über Austauschdateien (18.11.2026). Damit liegt für den Zotero-Sync die lokale API nahe.
 - [ ] Lizenz festlegen, z. B. Apache-2.0 wie Argilla und ASReview.
 - [ ] Peters et al. 2022 (Protokoll) vor dem Kriterienschema und Pollock et al. 2023 (Extraktion/Darstellung) vor Phase 4 auswerten.
 
@@ -431,6 +431,29 @@ Entschieden am 17.11.2026: Entscheidungen, Kriterien und Stufenübergänge werde
 - Eine empirische Studie mit Praktikern nennt fünf Probleme: Evolution der Ereignisschemata, steile Lernkurve, wenig verfügbare Technologie, Neuaufbau von Projektionen und Datenschutz ([Overeem et al. 2021](https://ar5iv.labs.arxiv.org/html/2104.01146)).
 
 **Begrenzung des Risikos (mein Vorschlag):** Nur der Entscheidungskern wird event-sourced. Bibliografische Records, Nutzer und PDFs bleiben normale Tabellen. Pro Review gibt es einen einzigen geordneten Ereignisstrom; das ist überschaubar und braucht keine eigene Event-Store-Software. Ereignisse tragen von Anfang an eine Schemaversion, damit spätere Änderungen über Upcasting möglich bleiben, eine der in der Studie genannten Taktiken.
+
+## Entscheidung: native Mac-App mit Austauschdateien
+
+Entschieden am 18.11.2026: Das Tool wird eine native Mac-App (Rust-Kern, Oberfläche mit Tauri 2) statt eines
+selbst gehosteten Servers mit Django, PostgreSQL und Docker. Ein Server ist für kleine Review-Teams eine hohe Hürde,
+und schon der Docker-Build war auf einem Mac der Zielgruppe nicht zuverlässig. Teams arbeiten über Dateien zusammen.
+
+| Frage | Lösung |
+| --- | --- |
+| Wer darf was? | Jede Person hat einen Ed25519-Schlüssel (privat im macOS-Schlüsselbund). Jedes Ereignis ist signiert. Rollen stehen als `MemberRoleSet` im Log, mit dem öffentlichen Schlüssel der Person |
+| Wie kommen Stimmen zusammen? | Die Leitung verteilt Pakete (`.ortpkg`), Mitglieder schicken Rückmeldungen (`.ortvotes`) mit ihren eigenen Ereignissen. Einlesen ist eine Vereinigung nach `event_id` und idempotent |
+| Verblindung ohne Server | Ein Paket enthält in verblindeten Stufen nur die eigenen Stimmen der Person. Was nicht in der Datei steht, kann niemand sehen |
+| Ordnung ohne zentrale `seq` | Je Person eine Hash-Kette für Verwaltung (`main`) und je Stufe eine für Stimmen und Markierungen. Pakete lassen verblindete Ketten ganz weg, ohne Lücken. Über Personen hinweg ordnet der Zeitstempel |
+| Externe Prüfbarkeit | Hash über kanonisches JSON nach RFC 8785 statt `jsonb::text`; Gleitkommazahlen sind im Payload nicht erlaubt |
+| Snapshot | Menge der Köpfe aller Ketten plus Hash darüber (`SnapshotTaken`) |
+
+**Was dagegen spricht:** Kein Live-Abgleich; Konflikte sieht die Leitung erst, wenn Rückmeldungen da sind. Die
+Leitung hat alle Daten lokal und muss sich beim Mitscreenen an die Verblindung der Oberfläche halten. Uhren, die
+falsch gehen, können die Reihenfolge von Konsens oder Rollenwechseln verschieben. Rollen werden beim Einlesen nach
+dem Stand nach dem Zusammenführen geprüft, nicht zum Zeitpunkt jedes Ereignisses.
+
+Fachliche Regeln, Projektionen und Kennzahlen bleiben gleich; sie sind nach Rust portiert und gegen dieselben
+Referenzwerte getestet. Die PostgreSQL-Abschnitte unten beschreiben den Stand vom 17.11.2026.
 
 ## Ereigniskatalog (Entwurf v0.2)
 
@@ -568,7 +591,7 @@ HAVING bool_or(decision = 'include') AND bool_or(decision = 'exclude');
 
 - [ ] Der Zeilen-Trigger sperrt UPDATE und DELETE, aber nicht TRUNCATE oder Superuser-Zugriffe. Zusätzlich Rechte entziehen (`REVOKE TRUNCATE`) und die Hash-Kette regelmäßig prüfen. Die Kette macht Manipulation erkennbar, verhindert sie aber nicht.
 - [ ] Datenschutz: Ein unveränderliches Log kollidiert mit dem Löschrecht. Darum stehen nur Pseudonym-IDs im Log, Klarnamen in einer separaten, löschbaren Tabelle. Overeem et al. nennen Datenschutz ausdrücklich als Problem ([2021](https://ar5iv.labs.arxiv.org/html/2104.01146)).
-- [ ] Die Hash-Bildung über `jsonb::text` ist innerhalb von PostgreSQL deterministisch. Für einen Export mit Prüfung außerhalb ist eine kanonische JSON-Serialisierung nötig.
+- [x] Die Hash-Bildung über `jsonb::text` ist nur innerhalb von PostgreSQL deterministisch. Erledigt mit der Mac-App: kanonisches JSON nach RFC 8785.
 - [ ] Payload-Schemata pro Ereignistyp festlegen (JSON Schema) und die Upcasting-Regeln für `schema_version` > 1 vorbereiten.
 - [ ] Klären: Zotero-Gruppenbibliothek über die Web API oder pro Person über die lokale API (ab Zotero 10).
 
