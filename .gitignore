@@ -11,3 +11,4 @@ backend/frontend_dist/
 deploy/secrets/
 deploy/.env
 .pytest_cache/
+target/
