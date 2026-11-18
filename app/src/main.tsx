@@ -1,14 +1,42 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { HashRouter, Link, Route, Routes, useNavigate } from "react-router-dom";
+import { HashRouter, NavLink, Route, Routes, useNavigate } from "react-router-dom";
 import { open, save } from "@tauri-apps/plugin-dialog";
 
 import { api, BUNDLE_FILTER, errorText, importSummary, Person, ReviewListItem, safeFileName } from "./api";
 import { ReviewPage } from "./ReviewPage";
 import { ScreeningPage, StagePage } from "./StagePages";
+import { RefreshContext, ROLE_LABEL, useRefreshSidebar } from "./shared";
+import { Avatar, Banner, Icon } from "./ui";
 import "./styles.css";
 
-const ROLE_LABEL: Record<string, string> = { owner: "Owner", admin: "Admin", reviewer: "Reviewer", viewer: "Viewer" };
+/** Aktionen, die von überall erreichbar sind. */
+function useGlobalActions(me: Person, onDone: (message: string, reviewId?: string) => void, onError: (e: string) => void) {
+  const importBundle = async () => {
+    const path = await open({ multiple: false, directory: false, filters: BUNDLE_FILTER });
+    if (typeof path !== "string") return;
+    try {
+      const result = await api.importBundle(path);
+      onDone(importSummary(result), result.review_id);
+    } catch (e) {
+      onError(errorText(e));
+    }
+  };
+  const exportIdentity = async () => {
+    const path = await save({
+      defaultPath: `${safeFileName(me.name)}.ortid`,
+      filters: [{ name: "Identitätsdatei", extensions: ["ortid"] }],
+    });
+    if (!path) return;
+    try {
+      await api.exportIdentity(path);
+      onDone("Identitätsdatei gespeichert. Schick sie der Person, die das Review leitet.");
+    } catch (e) {
+      onError(errorText(e));
+    }
+  };
+  return { importBundle, exportIdentity };
+}
 
 function Setup({ onDone }: { onDone: (me: Person) => void }) {
   const [name, setName] = useState("");
@@ -25,39 +53,76 @@ function Setup({ onDone }: { onDone: (me: Person) => void }) {
   }
 
   return (
-    <form className="card narrow" onSubmit={submit}>
-      <h1>Willkommen</h1>
-      <p>
-        Unter diesem Namen sehen dich die anderen im Team. Die App erzeugt dazu einen Schlüssel, mit dem sie
-        jede deiner Entscheidungen signiert. Der private Schlüssel bleibt im Schlüsselbund dieses Macs.
-      </p>
-      <label>
-        Dein Name
-        <input value={name} onChange={(e) => setName(e.target.value)} autoFocus required />
-      </label>
-      {error && <p className="error">{error}</p>}
-      <button className="primary" type="submit">Weiter</button>
-    </form>
+    <div className="setup" data-tauri-drag-region>
+      <form className="setup-card" onSubmit={submit}>
+        <img className="setup-logo" src="/logo.svg" alt="" />
+        <h1>Open Review Tool</h1>
+        <p className="subtitle">Screening für Scoping und Systematic Reviews. Ohne Server, ohne Konto.</p>
+        <label className="field">
+          <span>Wie heißt du?</span>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Vor- und Nachname" autoFocus required />
+        </label>
+        <p className="hint">
+          <Icon name="key" size={14} /> Die App erzeugt einen Schlüssel, mit dem sie jede deiner Entscheidungen signiert.
+          Er bleibt im Schlüsselbund dieses Macs.
+        </p>
+        {error && <Banner kind="error">{error}</Banner>}
+        <button className="primary large" type="submit">Los geht’s</button>
+      </form>
+    </div>
   );
 }
 
-function ReviewsPage({ me }: { me: Person }) {
+function Sidebar({ me, reviews, onImport, onIdentity, onNew }: {
+  me: Person;
+  reviews: ReviewListItem[] | null;
+  onImport: () => void;
+  onIdentity: () => void;
+  onNew: () => void;
+}) {
+  return (
+    <aside className="sidebar">
+      <div className="sidebar-top" data-tauri-drag-region />
+      <nav className="sidebar-nav">
+        <NavLink to="/" end className="nav-item">
+          <Icon name="inbox" /> Übersicht
+        </NavLink>
+        <div className="nav-section">
+          <span>Reviews</span>
+          <button className="plain" onClick={onNew} title="Neues Review" aria-label="Neues Review">
+            <Icon name="plus" size={14} />
+          </button>
+        </div>
+        {reviews?.length === 0 && <p className="nav-empty">Noch keine Reviews</p>}
+        {(reviews ?? []).map((r) => (
+          <NavLink key={r.id} to={`/reviews/${r.id}`} className="nav-item" title={r.title}>
+            <Icon name="file" />
+            <span className="nav-label">{r.title}</span>
+            {r.role && <span className="nav-meta">{ROLE_LABEL[r.role]?.[0]}</span>}
+          </NavLink>
+        ))}
+      </nav>
+      <div className="sidebar-bottom">
+        <button className="nav-item" onClick={onImport}>
+          <Icon name="download" /> Paket einlesen
+        </button>
+        <button className="me" onClick={onIdentity} title="Identitätsdatei speichern">
+          <Avatar name={me.name} size={26} />
+          <span>
+            <strong>{me.name}</strong>
+            <small>Identitätsdatei speichern</small>
+          </span>
+        </button>
+      </div>
+    </aside>
+  );
+}
+
+function Home({ me, onImport, onIdentity }: { me: Person; onImport: () => void; onIdentity: () => void }) {
   const navigate = useNavigate();
-  const [reviews, setReviews] = useState<ReviewListItem[] | null>(null);
+  const refresh = useRefreshSidebar();
   const [title, setTitle] = useState("");
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-
-  async function load() {
-    try {
-      setReviews(await api.reviews());
-    } catch (e) {
-      setError(errorText(e));
-    }
-  }
-  useEffect(() => {
-    load();
-  }, []);
 
   async function create(event: React.FormEvent) {
     event.preventDefault();
@@ -65,80 +130,112 @@ function ReviewsPage({ me }: { me: Person }) {
     try {
       const review = await api.createReview(title);
       setTitle("");
+      refresh();
       navigate(`/reviews/${review.id}`);
     } catch (e) {
       setError(errorText(e));
     }
   }
 
-  async function importBundle() {
-    setError("");
-    setNotice("");
-    const path = await open({ multiple: false, directory: false, filters: BUNDLE_FILTER });
-    if (typeof path !== "string") return;
-    try {
-      const result = await api.importBundle(path);
-      setNotice(importSummary(result));
-      await load();
-    } catch (e) {
-      setError(errorText(e));
-    }
-  }
+  const steps = [
+    ["Identität teilen", "Jede Person schickt ihre Identitätsdatei an die Leitung."],
+    ["Review anlegen", "Die Leitung importiert die Treffer und öffnet eine Stufe."],
+    ["Pakete verteilen", "Jedes Mitglied bekommt ein Paket – verblindet nur mit den eigenen Stimmen."],
+    ["Screenen", "Mit i, e und m geht es schnell. Danach eine Rückmeldung speichern."],
+    ["Zusammenführen", "Die Leitung liest Rückmeldungen ein, klärt Konflikte und schließt ab."],
+  ];
 
-  async function exportIdentity() {
-    setError("");
-    const path = await save({
-      defaultPath: `${safeFileName(me.name)}.ortid`,
-      filters: [{ name: "Identitätsdatei", extensions: ["ortid"] }],
-    });
-    if (!path) return;
-    try {
-      await api.exportIdentity(path);
-      setNotice("Identitätsdatei gespeichert. Schick sie der Person, die das Review leitet.");
-    } catch (e) {
-      setError(errorText(e));
-    }
+  return (
+    <div className="home">
+      <div className="hero">
+        <h1>Hallo {me.name.split(" ")[0]}</h1>
+        <p className="subtitle">Alle Entscheidungen werden signiert und lückenlos protokolliert. Zusammengearbeitet wird über Dateien.</p>
+      </div>
+      {error && <Banner kind="error">{error}</Banner>}
+      <div className="action-cards">
+        <form className="action-card" onSubmit={create}>
+          <div className="action-icon"><Icon name="plus" size={20} /></div>
+          <h2>Neues Review</h2>
+          <p>Du leitest das Review, importierst Treffer und lädst dein Team ein.</p>
+          <div className="inline-form">
+            <input id="new-review-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Titel des Reviews" required />
+            <button className="primary" type="submit">Anlegen</button>
+          </div>
+        </form>
+        <div className="action-card">
+          <div className="action-icon"><Icon name="download" size={20} /></div>
+          <h2>Bei einem Review mitmachen</h2>
+          <p>Schick zuerst deine Identitätsdatei an die Leitung. Das Paket, das du dann bekommst, liest du hier ein.</p>
+          <div className="inline-actions">
+            <button onClick={onIdentity}>Identitätsdatei speichern</button>
+            <button className="primary" onClick={onImport}>Paket einlesen</button>
+          </div>
+        </div>
+      </div>
+      <h2 className="section-title">So funktioniert’s</h2>
+      <ol className="steps">
+        {steps.map(([t, d], i) => (
+          <li key={t}>
+            <span className="step-num">{i + 1}</span>
+            <strong>{t}</strong>
+            <span>{d}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+function Shell({ me }: { me: Person }) {
+  const navigate = useNavigate();
+  const [reviews, setReviews] = useState<ReviewListItem[] | null>(null);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+
+  const refresh = useCallback(() => {
+    api.reviews().then(setReviews).catch((e) => setError(errorText(e)));
+  }, []);
+  useEffect(refresh, [refresh]);
+
+  const actions = useGlobalActions(
+    me,
+    (message, reviewId) => {
+      setError("");
+      setNotice(message);
+      refresh();
+      if (reviewId) navigate(`/reviews/${reviewId}`);
+    },
+    (e) => {
+      setNotice("");
+      setError(e);
+    },
+  );
+
+  function newReview() {
+    navigate("/");
+    setTimeout(() => document.getElementById("new-review-title")?.focus(), 50);
   }
 
   return (
-    <>
-      <h1>Reviews</h1>
-      {error && <p className="error">{error}</p>}
-      {notice && <p className="notice">{notice}</p>}
-      {reviews === null && !error && <p>Lade …</p>}
-      {reviews !== null && reviews.length === 0 && (
-        <p className="muted">Noch kein Review auf diesem Mac. Lege eines an oder lies ein Paket ein, das du bekommen hast.</p>
-      )}
-      <ul className="list">
-        {(reviews ?? []).map((r) => (
-          <li key={r.id}>
-            <Link to={`/reviews/${r.id}`}>{r.title}</Link>
-            <span className="badge">{r.role ? ROLE_LABEL[r.role] ?? r.role : "kein Mitglied"}</span>
-          </li>
-        ))}
-      </ul>
-
-      <section className="card">
-        <h2>Mitmachen</h2>
-        <p className="muted">
-          Wer ein Review leitet, braucht zuerst deine Identitätsdatei. Danach bekommst du ein Paket (.ortpkg), das du
-          hier einliest.
-        </p>
-        <div className="actions">
-          <button onClick={exportIdentity}>Identitätsdatei speichern</button>
-          <button className="primary" onClick={importBundle}>Paket oder Rückmeldung einlesen</button>
+    <RefreshContext.Provider value={refresh}>
+      <div className="shell">
+        <Sidebar me={me} reviews={reviews} onImport={actions.importBundle} onIdentity={actions.exportIdentity} onNew={newReview} />
+        <div className="content">
+          <div className="content-drag" data-tauri-drag-region />
+          <main>
+            {error && <Banner kind="error" onClose={() => setError("")}>{error}</Banner>}
+            {notice && <Banner kind="notice" onClose={() => setNotice("")}>{notice}</Banner>}
+            <Routes>
+              <Route path="/" element={<Home me={me} onImport={actions.importBundle} onIdentity={actions.exportIdentity} />} />
+              <Route path="/reviews/:reviewId" element={<ReviewPage />} />
+              <Route path="/reviews/:reviewId/stages/:stageId" element={<StagePage />} />
+              <Route path="/reviews/:reviewId/stages/:stageId/screen" element={<ScreeningPage />} />
+              <Route path="*" element={<p>Seite nicht gefunden.</p>} />
+            </Routes>
+          </main>
         </div>
-      </section>
-
-      <form className="card" onSubmit={create}>
-        <h2>Neues Review</h2>
-        <label>
-          Titel
-          <input value={title} onChange={(e) => setTitle(e.target.value)} required />
-        </label>
-        <button className="primary" type="submit">Anlegen</button>
-      </form>
-    </>
+      </div>
+    </RefreshContext.Provider>
   );
 }
 
@@ -150,36 +247,28 @@ function App() {
     api.identity().then(setMe).catch((e) => setError(errorText(e)));
   }, []);
 
-  if (error) return <main><p className="error">{error}</p></main>;
-  if (me === undefined) return <main><p>Lade …</p></main>;
-  if (me === null) {
-    return (
-      <main>
-        <Setup onDone={setMe} />
-      </main>
-    );
-  }
+  if (error) return <div className="setup"><Banner kind="error">{error}</Banner></div>;
+  if (me === undefined) return <div className="setup" />;
+  if (me === null) return <Setup onDone={setMe} />;
   return (
     <HashRouter>
-      <header className="topbar">
-        <Link to="/" className="brand">Open Review Tool</Link>
-        <span title={`ID ${me.actor_id}`}>{me.name}</span>
-      </header>
-      <main>
-        <Routes>
-          <Route path="/" element={<ReviewsPage me={me} />} />
-          <Route path="/reviews/:reviewId" element={<ReviewPage />} />
-          <Route path="/reviews/:reviewId/stages/:stageId" element={<StagePage />} />
-          <Route path="/reviews/:reviewId/stages/:stageId/screen" element={<ScreeningPage />} />
-          <Route path="*" element={<p>Seite nicht gefunden. <Link to="/">Zur Übersicht</Link></p>} />
-        </Routes>
-      </main>
+      <Shell me={me} />
     </HashRouter>
   );
 }
 
-createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-);
+async function start() {
+  const native = "__TAURI_INTERNALS__" in window;
+  document.documentElement.classList.toggle("native", native);
+  // Vorschau im Browser (nur Entwicklung): Rust-Befehle durch Beispieldaten ersetzen.
+  if (import.meta.env.DEV && !native) {
+    await import("./dev/mock").then((m) => m.installMock());
+  }
+  createRoot(document.getElementById("root")!).render(
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>,
+  );
+}
+
+start();

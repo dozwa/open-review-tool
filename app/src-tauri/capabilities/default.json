@@ -2,6 +2,12 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Rechte des Hauptfensters: Grundfunktionen und Dateidialoge. Dateien liest und schreibt nur der Rust-Teil.",
-  "windows": ["main"],
-  "permissions": ["core:default", "dialog:default"]
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "dialog:default"
+  ]
 }

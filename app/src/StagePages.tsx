@@ -3,6 +3,8 @@ import { Link, useParams } from "react-router-dom";
 import { ask, save } from "@tauri-apps/plugin-dialog";
 
 import { api, canManage, canVote, Conflict, Criteria, errorText, Estimate, Progress, RecordItem, safeFileName, StageDetail, Summary } from "./api";
+import { stageState } from "./ReviewPage";
+import { Avatar, Banner, DECISION_PARTS, DecisionBar, Empty, Group, Icon, Kbd, PageHeader, Pill, Row, Stat } from "./ui";
 
 const DECISION_LABEL: Record<string, string> = { include: "Include", exclude: "Exclude", maybe: "Maybe" };
 
@@ -31,20 +33,28 @@ function Highlighted({ text, criteria }: { text: string; criteria: Criteria }) {
   );
 }
 
-function RecordView({ record, criteria }: { record: RecordItem; criteria: Criteria }) {
+function RecordView({ record, criteria, large = false }: { record: RecordItem; criteria: Criteria; large?: boolean }) {
+  const meta = [record.authors, record.journal, record.year].filter(Boolean).join(" · ");
   return (
-    <article>
+    <article className={large ? "record record-large" : "record"}>
       <h2><Highlighted text={record.title || "(ohne Titel)"} criteria={criteria} /></h2>
-      <p className="muted">
-        {[record.authors, record.year, record.journal].filter(Boolean).join(" · ")}
-        {record.doi && <> · <button className="link" onClick={() => api.openUrl(`https://doi.org/${record.doi}`)}>DOI</button></>}
+      <p className="record-meta">
+        {meta}
+        {record.doi && (
+          <> · <button className="link" onClick={() => api.openUrl(`https://doi.org/${record.doi}`)}>doi:{record.doi}</button></>
+        )}
       </p>
-      <p className="abstract">
-        {record.abstract ? <Highlighted text={record.abstract} criteria={criteria} /> : <em>Kein Abstract vorhanden.</em>}
-      </p>
+      {record.abstract ? (
+        <p className="abstract"><Highlighted text={record.abstract} criteria={criteria} /></p>
+      ) : (
+        <p className="abstract missing">Kein Abstract vorhanden.</p>
+      )}
+      {record.keywords && <div className="chips">{record.keywords.split(";").map((k) => k.trim()).filter(Boolean).map((k) => <span className="chip" key={k}>{k}</span>)}</div>}
     </article>
   );
 }
+
+// ---------------------------------------------------------------- Screening
 
 export function ScreeningPage() {
   const { reviewId = "", stageId = "" } = useParams();
@@ -55,6 +65,7 @@ export function ScreeningPage() {
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [last, setLast] = useState("");
 
   const loadNext = useCallback(async () => {
     const next = await api.next(reviewId, stageId);
@@ -76,12 +87,13 @@ export function ScreeningPage() {
   }, [reviewId, stageId, loadNext]);
 
   const send = useCallback(
-    async (action: (recordId: string) => Promise<void>) => {
+    async (action: (recordId: string) => Promise<void>, label: string) => {
       if (!record || busy) return;
       setBusy(true);
       setError("");
       try {
         await action(record.id);
+        setLast(label);
         await loadNext();
       } catch (e) {
         setError(errorText(e));
@@ -93,83 +105,108 @@ export function ScreeningPage() {
   );
 
   const vote = useCallback(
-    (decision: string) => send((id) => api.vote(reviewId, stageId, id, decision, reasons, note)),
+    (decision: string) => send((id) => api.vote(reviewId, stageId, id, decision, reasons, note), DECISION_LABEL[decision]),
     [send, reviewId, stageId, reasons, note],
   );
 
-  // Tastatur: i = Include, e = Exclude, m = Maybe. Nicht, solange in einem Feld getippt wird.
+  // Tastatur: i = Include, e = Exclude, m = Maybe, 1–9 = Ausschlussgrund. Nicht, solange in einem Feld getippt wird.
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
       if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
       if (event.ctrlKey || event.metaKey || event.altKey) return;
       const decision = ({ i: "include", e: "exclude", m: "maybe" } as Record<string, string>)[event.key.toLowerCase()];
-      if (decision) vote(decision);
+      if (decision) {
+        vote(decision);
+        return;
+      }
+      const n = Number(event.key);
+      const reason = detail?.criteria.exclusion_reasons[n - 1];
+      if (n >= 1 && reason) setReasons((r) => (r.includes(reason) ? r.filter((x) => x !== reason) : [...r, reason]));
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [vote]);
+  }, [vote, detail]);
 
-  if (!detail) return <p>{error || "Lade …"}</p>;
+  if (!detail) return error ? <Banner kind="error">{error}</Banner> : null;
   const { stage, criteria } = detail;
+  const pct = progress ? Math.round((progress.done / Math.max(progress.total, 1)) * 100) : 0;
 
   return (
-    <>
-      <p><Link to={`/reviews/${reviewId}`}>← Review</Link> · <Link to={`/reviews/${reviewId}/stages/${stageId}`}>Auswertung</Link></p>
-      <h1>{stage.name}</h1>
-      {progress && (
+    <div className="screening">
+      <div className="screening-top">
+        <Link to={`/reviews/${reviewId}`} className="back-link"><Icon name="back" size={14} /> Review</Link>
+        <div className="screening-title">
+          <strong>{stage.name}</strong>
+          {stage.blind_active && <Pill tone="violet"><Icon name="lock" size={11} /> verblindet</Pill>}
+        </div>
+        <span className="screening-count">{progress ? `${progress.done} / ${progress.total}` : ""}</span>
+      </div>
+      <div className="progress-line"><span style={{ width: `${pct}%` }} /></div>
+
+      {error && <Banner kind="error" onClose={() => setError("")}>{error}</Banner>}
+      {stage.closed && <Empty icon="lock" title="Diese Stufe ist geschlossen" />}
+      {!record && !stage.closed && (
+        <Empty icon="check" title="Alles bewertet">
+          Speichere im Review unter „Austausch“ eine Rückmeldung und schick sie an die Leitung.
+          <div><Link className="button primary" to={`/reviews/${reviewId}`}>Zum Review</Link></div>
+        </Empty>
+      )}
+      {record && !stage.closed && (
         <>
-          <progress value={progress.done} max={Math.max(progress.total, 1)} />
-          <p className="muted">{progress.done} von {progress.total} bewertet{stage.blind_active && " · verblindet"}</p>
+          <div className="reading">
+            <RecordView record={record} criteria={criteria} large />
+          </div>
+          <div className="decision-dock">
+            {criteria.exclusion_reasons.length > 0 && (
+              <div className="reasons" role="group" aria-label="Ausschlussgründe">
+                {criteria.exclusion_reasons.map((reason, i) => (
+                  <button
+                    key={reason}
+                    className={`chip toggle ${reasons.includes(reason) ? "on" : ""}`}
+                    aria-pressed={reasons.includes(reason)}
+                    onClick={() => setReasons(reasons.includes(reason) ? reasons.filter((r) => r !== reason) : [...reasons, reason])}
+                  >
+                    {i < 9 && <Kbd>{i + 1}</Kbd>} {reason}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="dock-row">
+              <input className="note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Notiz (optional)" aria-label="Notiz" />
+              <button className="ghost" disabled={busy} onClick={() => send((id) => api.flag(reviewId, stageId, id, note), "Zur Klärung")} title="Nicht entscheidbar, zur Klärung geben">
+                <Icon name="flag" size={14} /> Klärung
+              </button>
+            </div>
+            <div className="vote-buttons">
+              <button className="vote vote-include" disabled={busy} onClick={() => vote("include")}>
+                <Icon name="check" /> Include <Kbd>I</Kbd>
+              </button>
+              <button className="vote vote-maybe" disabled={busy} onClick={() => vote("maybe")}>
+                <Icon name="help" /> Maybe <Kbd>M</Kbd>
+              </button>
+              <button className="vote vote-exclude" disabled={busy} onClick={() => vote("exclude")}>
+                <Icon name="x" /> Exclude <Kbd>E</Kbd>
+              </button>
+            </div>
+            {last && <p className="last-vote">Gespeichert: {last}</p>}
+          </div>
         </>
       )}
-      {error && <p className="error">{error}</p>}
-      {stage.closed && <p className="notice">Diese Stufe ist geschlossen.</p>}
-      {!record && !stage.closed && <p className="notice">Du hast alle Records dieser Stufe bewertet. Speichere auf der Review-Seite eine Rückmeldung und schick sie an die Person, die das Review leitet.</p>}
-      {record && !stage.closed && (
-        <div className="card">
-          <RecordView record={record} criteria={criteria} />
-          {criteria.exclusion_reasons.length > 0 && (
-            <fieldset>
-              <legend>Ausschlussgründe</legend>
-              {criteria.exclusion_reasons.map((reason) => (
-                <label className="check" key={reason}>
-                  <input
-                    type="checkbox"
-                    checked={reasons.includes(reason)}
-                    onChange={(e) => setReasons(e.target.checked ? [...reasons, reason] : reasons.filter((r) => r !== reason))}
-                  />
-                  {reason}
-                </label>
-              ))}
-            </fieldset>
-          )}
-          <label>
-            Notiz
-            <input value={note} onChange={(e) => setNote(e.target.value)} />
-          </label>
-          <div className="decision-bar">
-            <button className="include" disabled={busy} onClick={() => vote("include")}>Include (i)</button>
-            <button className="maybe" disabled={busy} onClick={() => vote("maybe")}>Maybe (m)</button>
-            <button className="exclude" disabled={busy} onClick={() => vote("exclude")}>Exclude (e)</button>
-          </div>
-          <button className="link" disabled={busy} onClick={() => send((id) => api.flag(reviewId, stageId, id, note))}>
-            Nicht entscheidbar, zur Klärung geben
-          </button>
-        </div>
-      )}
-    </>
+    </div>
   );
 }
 
+// ---------------------------------------------------------------- Auswertung
+
 function fmt(value: number | null | undefined, digits = 2): string {
-  return value === null || value === undefined ? "–" : value.toFixed(digits);
+  return value === null || value === undefined ? "–" : value.toLocaleString("de-DE", { minimumFractionDigits: digits, maximumFractionDigits: digits });
 }
 
-/** Konfidenzintervall in Klammern, z. B. „(0,41–0,63)“. */
+/** Konfidenzintervall, z. B. „95-%-KI 0,41–0,63“. */
 function ci(e: Estimate, scale = 1, digits = 2, unit = ""): string {
-  if (e.ci_low === null || e.ci_high === null) return "";
-  return `(${(e.ci_low * scale).toFixed(digits)}–${(e.ci_high * scale).toFixed(digits)}${unit})`;
+  if (e.ci_low === null || e.ci_high === null) return "kein Intervall";
+  return `95-%-KI ${fmt(e.ci_low * scale, digits)}–${fmt(e.ci_high * scale, digits)}${unit}`;
 }
 
 export function StagePage() {
@@ -207,141 +244,141 @@ export function StagePage() {
     }
   }
 
+  if (!detail || !summary) return error ? <Banner kind="error">{error}</Banner> : null;
+  const { stage, role, criteria } = detail;
+  const manage = canManage(role);
+  const d = summary.decisions;
+  const a = summary.agreement;
+  const maxVotes = Math.max(1, ...(summary.reviewers ?? []).map((r) => r.n_votes));
+
   async function unblind() {
-    const ok = await ask("Stufe entblinden? Danach sehen alle, die ein neues Paket bekommen, die Stimmen der anderen.", {
-      title: "Entblinden", kind: "warning", okLabel: "Entblinden", cancelLabel: "Abbrechen",
+    const ok = await ask("Danach sehen alle, die ein neues Paket bekommen, die Stimmen der anderen. Das lässt sich nicht zurücknehmen.", {
+      title: "Stufe entblinden?", kind: "warning", okLabel: "Entblinden", cancelLabel: "Abbrechen",
     });
     if (ok) await run(() => api.unblind(reviewId, stageId), "Stufe entblindet. Schick den Mitgliedern ein neues Paket.");
   }
 
   async function closeStage() {
-    const ok = await ask("Stufe schließen? Danach sind keine Stimmen mehr möglich, auch keine nachgereichten.", {
-      title: "Stufe schließen", kind: "warning", okLabel: "Schließen", cancelLabel: "Abbrechen",
+    const ok = await ask("Danach sind keine Stimmen mehr möglich, auch keine nachgereichten. Der Stand wird als Snapshot festgehalten.", {
+      title: "Stufe schließen?", kind: "warning", okLabel: "Schließen", cancelLabel: "Abbrechen",
     });
     if (ok) await run(() => api.close(reviewId, stageId), "Stufe geschlossen, Snapshot erstellt.");
   }
 
   async function exportCsv() {
-    const path = await save({
-      defaultPath: `${safeFileName(detail!.stage.name)}.csv`,
-      filters: [{ name: "CSV", extensions: ["csv"] }],
-    });
+    const path = await save({ defaultPath: `${safeFileName(stage.name)}.csv`, filters: [{ name: "CSV", extensions: ["csv"] }] });
     if (path) await run(() => api.exportCsv(reviewId, stageId, path), "CSV gespeichert.");
   }
 
-  if (!detail || !summary) return <p>{error || "Lade …"}</p>;
-  const { stage, role, criteria } = detail;
-  const manage = canManage(role);
-  const d = summary.decisions;
-  const a = summary.agreement;
+  const counts: Record<string, number> = d ? { ...d } : {};
 
   return (
     <>
-      <p><Link to={`/reviews/${reviewId}`}>← Review</Link></p>
-      <h1>{stage.name}</h1>
-      <p className="muted">
-        {stage.n_records} Records · mindestens {stage.min_reviewers} Stimmen ·{" "}
-        {stage.closed ? "geschlossen" : stage.blind_active ? "verblindet" : "offen"}
-        {stage.seed !== null && ` · Stichprobe mit Seed ${stage.seed}`}
-      </p>
-      {error && <p className="error">{error}</p>}
-      {notice && <p className="notice">{notice}</p>}
+      <PageHeader
+        back={<Link to={`/reviews/${reviewId}`} className="back-link"><Icon name="back" size={14} /> Review</Link>}
+        title={stage.name}
+        subtitle={
+          <>
+            <Pill>{stageState(stage)}</Pill>
+            <span>{stage.n_records.toLocaleString("de-DE")} Records</span>
+            <span>mind. {stage.min_reviewers} Stimmen</span>
+            {stage.seed !== null && <span>Stichprobe, Seed {stage.seed}</span>}
+          </>
+        }
+      >
+        {!stage.blind_active && <button onClick={exportCsv}><Icon name="csv" size={14} /> CSV</button>}
+        {manage && stage.blind_active && <button onClick={unblind}><Icon name="eye" size={14} /> Entblinden</button>}
+        {manage && !stage.closed && <button onClick={closeStage}><Icon name="lock" size={14} /> Schließen</button>}
+        {canVote(role) && !stage.closed && (
+          <Link className="button primary" to={`/reviews/${reviewId}/stages/${stageId}/screen`}><Icon name="play" size={14} /> Screenen</Link>
+        )}
+      </PageHeader>
+      {error && <Banner kind="error" onClose={() => setError("")}>{error}</Banner>}
+      {notice && <Banner kind="notice" onClose={() => setNotice("")}>{notice}</Banner>}
 
-      <div className="actions">
-        {canVote(role) && !stage.closed && <Link className="button primary" to={`/reviews/${reviewId}/stages/${stageId}/screen`}>Screenen</Link>}
-        {manage && stage.blind_active && <button onClick={unblind}>Entblinden</button>}
-        {manage && !stage.closed && <button onClick={closeStage}>Stufe schließen</button>}
-        {!stage.blind_active && <button onClick={exportCsv}>CSV exportieren</button>}
+      <div className="stats">
+        <Stat label="Dein Fortschritt" value={`${summary.progress.done} / ${summary.progress.total}`} detail={`${Math.round((summary.progress.done / Math.max(summary.progress.total, 1)) * 100)} % bewertet`} />
+        {a && <Stat label="Übereinstimmung" value={a.percent.percent_agreement == null ? "–" : `${fmt(a.percent.percent_agreement * 100, 1)} %`} detail={`${ci(a.percent_ci, 100, 1, " %")} · ${a.percent.n_items} Records`} />}
+        {a && <Stat label="Krippendorffs Alpha" value={fmt(a.krippendorff.alpha)} detail={ci(a.alpha_ci)} />}
+        {!a && <Stat label="Konflikte" value={<Icon name="lock" size={20} />} detail="sichtbar nach dem Entblinden" />}
       </div>
 
-      <section className="card">
-        <h2>Fortschritt</h2>
-        <p>Du: {summary.progress.done} von {summary.progress.total} bewertet.</p>
-        {summary.reviewers && (
-          <table>
-            <thead><tr><th>Person</th><th>Stimmen</th></tr></thead>
+      {d && (
+        <Group title="Entscheidungen">
+          <div className="decisions">
+            <DecisionBar counts={counts} />
+            <div className="decision-legend">
+              {DECISION_PARTS.map((p) => (
+                <Stat key={p.key} tone={p.tone} label={p.label} value={(counts[p.key] ?? 0).toLocaleString("de-DE")} />
+              ))}
+            </div>
+          </div>
+        </Group>
+      )}
+
+      {summary.reviewers && (
+        <Group title="Team" footer={stage.blind_active ? "Verblindet: Hier steht nur, wie viele Stimmen eingegangen sind. Neue Stimmen kommen über Rückmeldungen herein." : undefined}>
+          {summary.reviewers.length === 0 && <Row><span className="muted">Noch keine Stimmen eingegangen.</span></Row>}
+          {summary.reviewers.map((r) => (
+            <Row key={r.name}>
+              <span className="person"><Avatar name={r.name} /> {r.name}</span>
+              <span className="meter-cell">
+                <span className="meter"><span style={{ width: `${(r.n_votes / Math.max(stage.n_records, maxVotes)) * 100}%` }} /></span>
+                <span className="num">{r.n_votes}</span>
+              </span>
+            </Row>
+          ))}
+        </Group>
+      )}
+
+      {a && a.cohen_pairs.length > 0 && (
+        <Group title="Paare" footer="Kappa allein kann bei seltenen Einschlüssen täuschen (Kappa-Paradox); deshalb stehen Prozent und PABAK daneben. Intervalle: Perzentil-Bootstrap über Records.">
+          <table className="table">
+            <thead><tr><th>Paar</th><th className="num">Records</th><th className="num">Übereinstimmung</th><th className="num">Kappa</th><th className="num">PABAK</th></tr></thead>
             <tbody>
-              {summary.reviewers.map((r) => (
-                <tr key={r.name}><td>{r.name}</td><td>{r.n_votes}</td></tr>
+              {a.cohen_pairs.map((p) => (
+                <tr key={`${p.rater_a}-${p.rater_b}`}>
+                  <td>{p.rater_a} · {p.rater_b}</td>
+                  <td className="num">{p.n_items}</td>
+                  <td className="num">{p.p_o == null ? "–" : `${fmt(p.p_o * 100, 1)} %`}</td>
+                  <td className="num">{fmt(p.kappa)}</td>
+                  <td className="num">{fmt(p.pabak)}</td>
+                </tr>
               ))}
             </tbody>
           </table>
-        )}
-        {stage.blind_active && <p className="muted">Die Stufe ist verblindet. Entscheidungen, Konflikte und Übereinstimmung erscheinen nach dem Entblinden. Stimmen anderer kommen über deren Rückmeldungen herein.</p>}
-      </section>
-
-      {d && (
-        <section className="card">
-          <h2>Entscheidungen</h2>
-          <table>
-            <tbody>
-              <tr><td>Include</td><td>{d.include}</td></tr>
-              <tr><td>Exclude</td><td>{d.exclude}</td></tr>
-              {d.maybe > 0 && <tr><td>Maybe</td><td>{d.maybe}</td></tr>}
-              <tr><td>Widerspruch</td><td>{d.disagreement}</td></tr>
-              <tr><td>Zur Klärung</td><td>{d.needs_clarification}</td></tr>
-              <tr><td>Offen</td><td>{d.pending}</td></tr>
-            </tbody>
-          </table>
-        </section>
-      )}
-
-      {a && (
-        <section className="card">
-          <h2>Übereinstimmung</h2>
-          <p>
-            Prozentuale Übereinstimmung: {a.percent.percent_agreement == null ? "–" : `${(a.percent.percent_agreement * 100).toFixed(1)} %`}
-            {" "}{ci(a.percent_ci, 100, 1, " %")} über {a.percent.n_items} Records
-            <br />
-            Krippendorffs Alpha: {fmt(a.krippendorff.alpha)} {ci(a.alpha_ci)}
-          </p>
-          {a.cohen_pairs.length > 0 && (
-            <table>
-              <thead><tr><th>Paar</th><th>n</th><th>Kappa</th><th>PABAK</th></tr></thead>
-              <tbody>
-                {a.cohen_pairs.map((p) => (
-                  <tr key={`${p.rater_a}-${p.rater_b}`}>
-                    <td>{p.rater_a} / {p.rater_b}</td><td>{p.n_items}</td><td>{fmt(p.kappa)}</td><td>{fmt(p.pabak)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-          <p className="muted">
-            In Klammern: 95-%-Konfidenzintervall, Perzentil-Bootstrap über Records ({a.alpha_ci.n_boot} Ziehungen, Seed {a.alpha_ci.seed}).
-            Kappa allein kann bei seltenen Einschlüssen täuschen; deshalb stehen Prozent und PABAK daneben.
-          </p>
-        </section>
+        </Group>
       )}
 
       {!stage.blind_active && (
-        <section>
-          <h2>Konflikte und Klärung ({conflicts.length})</h2>
-          {conflicts.length === 0 && <p className="muted">Keine offenen Konflikte.</p>}
+        <>
+          <h2 className="section-title">Klärung <span className="count">{conflicts.length}</span></h2>
+          {conflicts.length === 0 && <Empty icon="check" title="Keine offenen Konflikte" />}
           {conflicts.map((c) => (
-            <div className="card" key={c.record.id}>
+            <div className="conflict" key={c.record.id}>
               <RecordView record={c.record} criteria={criteria} />
-              {c.status === "needs_clarification" && <p className="badge">als nicht entscheidbar markiert</p>}
-              <ul className="list">
+              <div className="votes">
+                {c.status === "needs_clarification" && <Pill tone="violet"><Icon name="flag" size={11} /> als nicht entscheidbar markiert</Pill>}
                 {c.votes.map((v) => (
-                  <li key={v.name}>
+                  <div className="vote-chip" key={v.name}>
+                    <Avatar name={v.name} size={22} />
                     <span>
-                      {v.name}: <strong>{DECISION_LABEL[v.decision] ?? v.decision}</strong>
-                      {v.reasons.length > 0 && <span className="muted"> · {v.reasons.join(", ")}</span>}
-                      {v.note && <span className="muted"> · {v.note}</span>}
+                      <strong>{v.name}</strong> <span className={`decision-text d-${v.decision}`}>{DECISION_LABEL[v.decision] ?? v.decision}</span>
+                      {(v.reasons.length > 0 || v.note) && <small>{[v.reasons.join(", "), v.note].filter(Boolean).join(" · ")}</small>}
                     </span>
-                  </li>
+                  </div>
                 ))}
-              </ul>
+              </div>
               {canVote(role) && !stage.closed && (
-                <div className="decision-bar">
-                  <button className="include" onClick={() => run(() => api.consensus(reviewId, stageId, c.record.id, "include"), "Konsens gespeichert.")}>Konsens: Include</button>
-                  <button className="exclude" onClick={() => run(() => api.consensus(reviewId, stageId, c.record.id, "exclude"), "Konsens gespeichert.")}>Konsens: Exclude</button>
+                <div className="conflict-actions">
+                  <span className="muted">Konsens</span>
+                  <button className="vote-include small" onClick={() => run(() => api.consensus(reviewId, stageId, c.record.id, "include"), "Konsens gespeichert.")}><Icon name="check" size={14} /> Include</button>
+                  <button className="vote-exclude small" onClick={() => run(() => api.consensus(reviewId, stageId, c.record.id, "exclude"), "Konsens gespeichert.")}><Icon name="x" size={14} /> Exclude</button>
                 </div>
               )}
             </div>
           ))}
-        </section>
+        </>
       )}
     </>
   );
