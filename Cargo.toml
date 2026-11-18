@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/ort-core"]
+members = ["crates/ort-core", "app/src-tauri"]
 
 [workspace.package]
 version = "0.2.0"

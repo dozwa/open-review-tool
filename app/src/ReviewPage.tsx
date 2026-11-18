@@ -1,10 +1,24 @@
 import React, { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { open, save } from "@tauri-apps/plugin-dialog";
 
-import { api, canManage, canVote, errorText, ReviewDetail, Stage } from "./api";
+import {
+  api,
+  BUNDLE_FILTER,
+  canManage,
+  canVote,
+  ChainReport,
+  errorText,
+  importSummary,
+  Member,
+  ReviewDetail,
+  safeFileName,
+  Stage,
+  StageParams,
+} from "./api";
 
 const ROLE_LABEL: Record<string, string> = { owner: "Owner", admin: "Admin", reviewer: "Reviewer", viewer: "Viewer" };
-const IMPORT_STATUS: Record<string, string> = { pending: "wartet", running: "läuft", done: "fertig", failed: "fehlgeschlagen" };
+const IMPORT_STATUS: Record<string, string> = { running: "läuft", done: "fertig", failed: "fehlgeschlagen" };
 
 function stageState(stage: Stage): string {
   if (stage.closed) return "geschlossen";
@@ -13,14 +27,15 @@ function stageState(stage: Stage): string {
 }
 
 export function ReviewPage() {
-  const { reviewId } = useParams();
+  const { reviewId = "" } = useParams();
   const [review, setReview] = useState<ReviewDetail | null>(null);
+  const [chain, setChain] = useState<ChainReport | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
   async function load() {
     try {
-      setReview(await api<ReviewDetail>(`/reviews/${reviewId}`));
+      setReview(await api.review(reviewId));
     } catch (e) {
       setError(errorText(e));
     }
@@ -29,20 +44,12 @@ export function ReviewPage() {
     load();
   }, [reviewId]);
 
-  // Solange ein Import läuft, regelmäßig nachladen.
-  const importing = review?.imports.some((b) => b.status === "pending" || b.status === "running") ?? false;
-  useEffect(() => {
-    if (!importing) return;
-    const timer = window.setInterval(load, 2000);
-    return () => window.clearInterval(timer);
-  }, [importing]);
-
-  async function run(action: () => Promise<unknown>, done: string) {
+  async function run(action: () => Promise<string | void>, done: string) {
     setError("");
     setNotice("");
     try {
-      await action();
-      setNotice(done);
+      const message = await action();
+      setNotice(message || done);
       await load();
     } catch (e) {
       setError(errorText(e));
@@ -51,6 +58,48 @@ export function ReviewPage() {
 
   if (!review) return <p>{error || "Lade …"}</p>;
   const manage = canManage(review.role);
+
+  async function importBundle() {
+    const path = await open({ multiple: false, directory: false, filters: BUNDLE_FILTER });
+    if (typeof path !== "string") return;
+    await run(async () => {
+      const result = await api.importBundle(path);
+      if (result.review_id !== reviewId) return `${importSummary(result)} Das war ein anderes Review.`;
+      const rejected = result.report.rejected;
+      return importSummary(result) + (rejected.length ? ` Abgewiesen: ${rejected.join(" · ")}` : "");
+    }, "");
+  }
+
+  async function exportReturn() {
+    const me = review!.members.find((m) => m.is_me);
+    const path = await save({
+      defaultPath: `${safeFileName(review!.title)} – Rückmeldung ${safeFileName(me?.name ?? "")}.ortvotes`,
+      filters: [{ name: "Rückmeldung", extensions: ["ortvotes"] }],
+    });
+    if (!path) return;
+    await run(async () => {
+      const n = await api.exportReturn(reviewId, path);
+      return `Rückmeldung mit ${n} eigenen Einträgen gespeichert. Schick sie an die Person, die das Review leitet.`;
+    }, "");
+  }
+
+  async function exportPackage(member: Member) {
+    const path = await save({
+      defaultPath: `${safeFileName(review!.title)} – Paket für ${safeFileName(member.name)}.ortpkg`,
+      filters: [{ name: "Paket", extensions: ["ortpkg"] }],
+    });
+    if (!path) return;
+    await run(() => api.exportPackage(reviewId, member.actor_id, path), `Paket für ${member.name} gespeichert.`);
+  }
+
+  async function verify() {
+    setError("");
+    try {
+      setChain(await api.verifyChain(reviewId));
+    } catch (e) {
+      setError(errorText(e));
+    }
+  }
 
   return (
     <>
@@ -75,13 +124,56 @@ export function ReviewPage() {
                 <span className="muted">{stage.n_records} Records · mindestens {stage.min_reviewers} Stimmen</span>
               </span>
               <span className="actions">
-                {canVote(review.role) && !stage.closed && <Link className="button primary" to={`/stages/${stage.id}/screen`}>Screenen</Link>}
-                <Link className="button" to={`/stages/${stage.id}`}>Auswertung</Link>
+                {canVote(review.role) && !stage.closed && (
+                  <Link className="button primary" to={`/reviews/${reviewId}/stages/${stage.id}/screen`}>Screenen</Link>
+                )}
+                <Link className="button" to={`/reviews/${reviewId}/stages/${stage.id}`}>Auswertung</Link>
               </span>
             </li>
           ))}
         </ul>
-        {manage && <StageForm review={review} onSubmit={(body) => run(() => api(`/reviews/${review.id}/stages`, { method: "POST", body }), "Stufe geöffnet.")} />}
+        {manage && <StageForm review={review} onSubmit={(params) => run(() => api.openStage(reviewId, params).then(() => {}), "Stufe geöffnet. Schick den Mitgliedern ein neues Paket.")} />}
+      </section>
+
+      <section className="card">
+        <h2>Austausch</h2>
+        <p className="muted">
+          Es gibt keinen Server. {manage
+            ? "Schick jedem Mitglied ein Paket. Bei verblindeten Stufen enthält es nur dessen eigene Stimmen. Rückmeldungen liest du hier ein."
+            : "Nach dem Screenen speicherst du eine Rückmeldung und schickst sie an die Person, die das Review leitet. Neue Pakete liest du hier ein."}
+        </p>
+        <div className="actions">
+          <button className="primary" onClick={importBundle}>Paket oder Rückmeldung einlesen</button>
+          {canVote(review.role) && <button onClick={exportReturn}>Rückmeldung speichern</button>}
+        </div>
+      </section>
+
+      <section className="card">
+        <h2>Mitglieder</h2>
+        <ul className="list">
+          {review.members.map((m) => (
+            <li key={m.actor_id}>
+              <span>
+                {m.name}{m.is_me && " (du)"} <span className="badge">{ROLE_LABEL[m.role] ?? m.role}</span>
+              </span>
+              {manage && (
+                <span className="actions">
+                  {!m.is_me && <button onClick={() => exportPackage(m)}>Paket speichern</button>}
+                  <select
+                    aria-label={`Rolle von ${m.name}`}
+                    value={m.role}
+                    onChange={(e) => run(() => api.setRole(reviewId, m.actor_id, e.target.value), "Rolle geändert.")}
+                  >
+                    {Object.entries(ROLE_LABEL).map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </select>
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+        {manage && <MemberForm onSubmit={(path, role) => run(async () => `${await api.addMember(reviewId, path, role)} ist jetzt Mitglied. Schick ein Paket.`, "")} />}
       </section>
 
       <section className="card">
@@ -101,27 +193,29 @@ export function ReviewPage() {
             </li>
           ))}
         </ul>
-        {manage && <ImportForm onSubmit={(form) => run(() => api(`/reviews/${review.id}/imports`, { method: "POST", form }), "Import gestartet.")} />}
+        {manage && <ImportForm onSubmit={(path, source) => run(async () => {
+          const batch = await api.importRecords(reviewId, path, source);
+          return batch.status === "failed" ? `Import fehlgeschlagen: ${batch.error}` : `${batch.n_records} Einträge importiert, davon ${batch.n_duplicates} Dubletten.`;
+        }, "")} />}
       </section>
 
-      <CriteriaSection review={review} onSubmit={(body) => run(() => api(`/reviews/${review.id}/criteria`, { method: "PUT", body }), "Neue Kriterienversion veröffentlicht.")} />
+      <CriteriaSection review={review} onSubmit={(body) => run(() => api.publishCriteria(reviewId, body).then(() => {}), "Neue Kriterienversion veröffentlicht.")} />
 
       <section className="card">
-        <h2>Mitglieder</h2>
-        <ul className="list">
-          {review.members.map((m) => (
-            <li key={m.username}>
-              {m.username} <span className="badge">{ROLE_LABEL[m.role] ?? m.role}</span>
-            </li>
-          ))}
-        </ul>
-        {manage && <MemberForm onSubmit={(body) => run(() => api(`/reviews/${review.id}/members`, { method: "POST", body }), "Mitglied gespeichert.")} />}
+        <h2>Nachweis</h2>
+        <p className="muted">Prüft Prüfsummen, Signaturen und Lückenlosigkeit aller Ereignisketten in diesem Review.</p>
+        <button onClick={verify}>Hash-Ketten prüfen</button>
+        {chain && (
+          <p className={chain.ok ? "notice" : "error"}>
+            {chain.ok ? `Alle ${chain.n_events} Ereignisse sind unversehrt.` : `${chain.n_bad} von ${chain.n_events} Ereignissen fehlerhaft: ${chain.problems.join(" · ")}`}
+          </p>
+        )}
       </section>
     </>
   );
 }
 
-function StageForm({ review, onSubmit }: { review: ReviewDetail; onSubmit: (body: Record<string, unknown>) => void }) {
+function StageForm({ review, onSubmit }: { review: ReviewDetail; onSubmit: (params: StageParams) => void }) {
   const [name, setName] = useState("Titel/Abstract");
   const [scope, setScope] = useState("all");
   const [sampleSize, setSampleSize] = useState(25);
@@ -136,6 +230,7 @@ function StageForm({ review, onSubmit }: { review: ReviewDetail; onSubmit: (body
       name, scope, blind, min_reviewers: minReviewers, maybe_as: maybeAs || null,
       kind: scope === "sample" ? "pilot" : scope === "from_stage" ? "fulltext" : "title_abstract",
       sample_size: scope === "sample" ? sampleSize : null,
+      seed: null,
       source_stage: scope === "from_stage" ? sourceStage : null,
     });
   }
@@ -193,31 +288,36 @@ function StageForm({ review, onSubmit }: { review: ReviewDetail; onSubmit: (body
   );
 }
 
-function ImportForm({ onSubmit }: { onSubmit: (form: FormData) => void }) {
-  const [file, setFile] = useState<File | null>(null);
+function ImportForm({ onSubmit }: { onSubmit: (path: string, source: string) => void }) {
+  const [path, setPath] = useState<string | null>(null);
   const [source, setSource] = useState("");
+
+  async function choose() {
+    const picked = await open({
+      multiple: false,
+      directory: false,
+      filters: [{ name: "RIS oder BibTeX", extensions: ["ris", "bib", "bibtex", "txt", "nbib"] }],
+    });
+    if (typeof picked === "string") setPath(picked);
+  }
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (!file) return;
-    const form = new FormData();
-    form.append("file", file);
-    form.append("source", source);
-    onSubmit(form);
+    if (path) onSubmit(path, source);
   }
 
   return (
     <form onSubmit={submit}>
       <h3>Datei importieren</h3>
-      <label>
-        RIS oder BibTeX
-        <input type="file" accept=".ris,.bib,.txt" onChange={(e) => setFile(e.target.files?.[0] ?? null)} required />
-      </label>
+      <div className="actions">
+        <button type="button" onClick={choose}>Datei wählen …</button>
+        <span className="muted">{path ? path.split("/").pop() : "RIS oder BibTeX"}</span>
+      </div>
       <label>
         Quelle, z. B. PubMed
         <input value={source} onChange={(e) => setSource(e.target.value)} />
       </label>
-      <button className="primary" type="submit">Importieren</button>
+      <button className="primary" type="submit" disabled={!path}>Importieren</button>
     </form>
   );
 }
@@ -228,10 +328,12 @@ function CriteriaSection({ review, onSubmit }: { review: ReviewDetail; onSubmit:
   const [include, setInclude] = useState(c.include_keywords.join(", "));
   const [exclude, setExclude] = useState(c.exclude_keywords.join(", "));
   const [reasons, setReasons] = useState(c.exclusion_reasons.join("\n"));
+  const [changeNote, setChangeNote] = useState("");
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
-    onSubmit({ text, include_keywords: include, exclude_keywords: exclude, exclusion_reasons: reasons });
+    onSubmit({ text, include_keywords: include, exclude_keywords: exclude, exclusion_reasons: reasons, change_note: changeNote });
+    setChangeNote("");
   }
 
   if (!canManage(review.role)) {
@@ -245,6 +347,7 @@ function CriteriaSection({ review, onSubmit }: { review: ReviewDetail; onSubmit:
   return (
     <section className="card">
       <h2>Kriterien (Version {c.version})</h2>
+      {c.change_note && <p className="muted">Letzte Änderung: {c.change_note}</p>}
       <form onSubmit={submit}>
         <label>
           Ein- und Ausschlusskriterien
@@ -262,29 +365,28 @@ function CriteriaSection({ review, onSubmit }: { review: ReviewDetail; onSubmit:
           Ausschlussgründe, einer je Zeile
           <textarea rows={3} value={reasons} onChange={(e) => setReasons(e.target.value)} />
         </label>
+        <label>
+          Was hat sich geändert?
+          <input value={changeNote} onChange={(e) => setChangeNote(e.target.value)} />
+        </label>
         <button type="submit">Als neue Version veröffentlichen</button>
       </form>
     </section>
   );
 }
 
-function MemberForm({ onSubmit }: { onSubmit: (body: Record<string, unknown>) => void }) {
-  const [username, setUsername] = useState("");
+function MemberForm({ onSubmit }: { onSubmit: (path: string, role: string) => void }) {
   const [role, setRole] = useState("reviewer");
 
-  function submit(event: React.FormEvent) {
-    event.preventDefault();
-    onSubmit({ username, role });
-    setUsername("");
+  async function choose() {
+    const path = await open({ multiple: false, directory: false, filters: [{ name: "Identitätsdatei", extensions: ["ortid"] }] });
+    if (typeof path === "string") onSubmit(path, role);
   }
 
   return (
-    <form onSubmit={submit}>
-      <h3>Mitglied hinzufügen oder Rolle ändern</h3>
-      <label>
-        Benutzername
-        <input value={username} onChange={(e) => setUsername(e.target.value)} required />
-      </label>
+    <div>
+      <h3>Mitglied hinzufügen</h3>
+      <p className="muted">Die Person speichert in ihrer App eine Identitätsdatei (.ortid) und schickt sie dir.</p>
       <label>
         Rolle
         <select value={role} onChange={(e) => setRole(e.target.value)}>
@@ -294,7 +396,7 @@ function MemberForm({ onSubmit }: { onSubmit: (body: Record<string, unknown>) =>
           <option value="owner">Owner</option>
         </select>
       </label>
-      <button type="submit">Speichern</button>
-    </form>
+      <button onClick={choose}>Identitätsdatei wählen …</button>
+    </div>
   );
 }

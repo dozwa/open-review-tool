@@ -5,7 +5,8 @@ __pycache__/
 *.csv
 .DS_Store
 node_modules/
-frontend/dist/
+app/dist/
+app/src-tauri/gen/
 backend/staticfiles/
 backend/frontend_dist/
 deploy/secrets/

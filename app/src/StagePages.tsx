@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { ask, save } from "@tauri-apps/plugin-dialog";
 
-import { api, canManage, canVote, Conflict, Criteria, errorText, Progress, RecordItem, StageDetail, Summary } from "./api";
+import { api, canManage, canVote, Conflict, Criteria, errorText, Estimate, Progress, RecordItem, safeFileName, StageDetail, Summary } from "./api";
 
 const DECISION_LABEL: Record<string, string> = { include: "Include", exclude: "Exclude", maybe: "Maybe" };
 
@@ -36,7 +37,7 @@ function RecordView({ record, criteria }: { record: RecordItem; criteria: Criter
       <h2><Highlighted text={record.title || "(ohne Titel)"} criteria={criteria} /></h2>
       <p className="muted">
         {[record.authors, record.year, record.journal].filter(Boolean).join(" · ")}
-        {record.doi && <> · <a href={`https://doi.org/${record.doi}`} target="_blank" rel="noreferrer">DOI</a></>}
+        {record.doi && <> · <button className="link" onClick={() => api.openUrl(`https://doi.org/${record.doi}`)}>DOI</button></>}
       </p>
       <p className="abstract">
         {record.abstract ? <Highlighted text={record.abstract} criteria={criteria} /> : <em>Kein Abstract vorhanden.</em>}
@@ -46,7 +47,7 @@ function RecordView({ record, criteria }: { record: RecordItem; criteria: Criter
 }
 
 export function ScreeningPage() {
-  const { stageId } = useParams();
+  const { reviewId = "", stageId = "" } = useParams();
   const [detail, setDetail] = useState<StageDetail | null>(null);
   const [record, setRecord] = useState<RecordItem | null>(null);
   const [progress, setProgress] = useState<Progress | null>(null);
@@ -56,31 +57,31 @@ export function ScreeningPage() {
   const [busy, setBusy] = useState(false);
 
   const loadNext = useCallback(async () => {
-    const next = await api<{ record: RecordItem | null; progress: Progress }>(`/stages/${stageId}/next`);
+    const next = await api.next(reviewId, stageId);
     setRecord(next.record);
     setProgress(next.progress);
     setReasons([]);
     setNote("");
-  }, [stageId]);
+  }, [reviewId, stageId]);
 
   useEffect(() => {
     (async () => {
       try {
-        setDetail(await api<StageDetail>(`/stages/${stageId}`));
+        setDetail(await api.stage(reviewId, stageId));
         await loadNext();
       } catch (e) {
         setError(errorText(e));
       }
     })();
-  }, [stageId, loadNext]);
+  }, [reviewId, stageId, loadNext]);
 
   const send = useCallback(
-    async (path: string, body: Record<string, unknown>) => {
+    async (action: (recordId: string) => Promise<void>) => {
       if (!record || busy) return;
       setBusy(true);
       setError("");
       try {
-        await api(`/stages/${stageId}/${path}`, { method: "POST", body: { record_id: record.id, ...body } });
+        await action(record.id);
         await loadNext();
       } catch (e) {
         setError(errorText(e));
@@ -88,10 +89,13 @@ export function ScreeningPage() {
         setBusy(false);
       }
     },
-    [record, busy, stageId, loadNext],
+    [record, busy, loadNext],
   );
 
-  const vote = useCallback((decision: string) => send("votes", { decision, reasons, note }), [send, reasons, note]);
+  const vote = useCallback(
+    (decision: string) => send((id) => api.vote(reviewId, stageId, id, decision, reasons, note)),
+    [send, reviewId, stageId, reasons, note],
+  );
 
   // Tastatur: i = Include, e = Exclude, m = Maybe. Nicht, solange in einem Feld getippt wird.
   useEffect(() => {
@@ -111,7 +115,7 @@ export function ScreeningPage() {
 
   return (
     <>
-      <p><Link to={`/reviews/${stage.review_id}`}>← Review</Link> · <Link to={`/stages/${stage.id}`}>Auswertung</Link></p>
+      <p><Link to={`/reviews/${reviewId}`}>← Review</Link> · <Link to={`/reviews/${reviewId}/stages/${stageId}`}>Auswertung</Link></p>
       <h1>{stage.name}</h1>
       {progress && (
         <>
@@ -121,7 +125,7 @@ export function ScreeningPage() {
       )}
       {error && <p className="error">{error}</p>}
       {stage.closed && <p className="notice">Diese Stufe ist geschlossen.</p>}
-      {!record && !stage.closed && <p className="notice">Du hast alle Records dieser Stufe bewertet.</p>}
+      {!record && !stage.closed && <p className="notice">Du hast alle Records dieser Stufe bewertet. Speichere auf der Review-Seite eine Rückmeldung und schick sie an die Person, die das Review leitet.</p>}
       {record && !stage.closed && (
         <div className="card">
           <RecordView record={record} criteria={criteria} />
@@ -149,7 +153,7 @@ export function ScreeningPage() {
             <button className="maybe" disabled={busy} onClick={() => vote("maybe")}>Maybe (m)</button>
             <button className="exclude" disabled={busy} onClick={() => vote("exclude")}>Exclude (e)</button>
           </div>
-          <button className="link" disabled={busy} onClick={() => send("flags", { note })}>
+          <button className="link" disabled={busy} onClick={() => send((id) => api.flag(reviewId, stageId, id, note))}>
             Nicht entscheidbar, zur Klärung geben
           </button>
         </div>
@@ -162,8 +166,14 @@ function fmt(value: number | null | undefined, digits = 2): string {
   return value === null || value === undefined ? "–" : value.toFixed(digits);
 }
 
+/** Konfidenzintervall in Klammern, z. B. „(0,41–0,63)“. */
+function ci(e: Estimate, scale = 1, digits = 2, unit = ""): string {
+  if (e.ci_low === null || e.ci_high === null) return "";
+  return `(${(e.ci_low * scale).toFixed(digits)}–${(e.ci_high * scale).toFixed(digits)}${unit})`;
+}
+
 export function StagePage() {
-  const { stageId } = useParams();
+  const { reviewId = "", stageId = "" } = useParams();
   const [detail, setDetail] = useState<StageDetail | null>(null);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [conflicts, setConflicts] = useState<Conflict[]>([]);
@@ -172,29 +182,51 @@ export function StagePage() {
 
   const load = useCallback(async () => {
     try {
-      const d = await api<StageDetail>(`/stages/${stageId}`);
+      const d = await api.stage(reviewId, stageId);
       setDetail(d);
-      setSummary(await api<Summary>(`/stages/${stageId}/summary`));
-      setConflicts(d.stage.blind_active ? [] : await api<Conflict[]>(`/stages/${stageId}/conflicts`));
+      setSummary(await api.summary(reviewId, stageId));
+      setConflicts(d.stage.blind_active ? [] : await api.conflicts(reviewId, stageId));
     } catch (e) {
       setError(errorText(e));
     }
-  }, [stageId]);
+  }, [reviewId, stageId]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  async function run(path: string, body: Record<string, unknown> | undefined, done: string) {
+  async function run(action: () => Promise<unknown>, done: string) {
     setError("");
     setNotice("");
     try {
-      await api(`/stages/${stageId}/${path}`, { method: "POST", body: body ?? {} });
+      await action();
       setNotice(done);
       await load();
     } catch (e) {
       setError(errorText(e));
     }
+  }
+
+  async function unblind() {
+    const ok = await ask("Stufe entblinden? Danach sehen alle, die ein neues Paket bekommen, die Stimmen der anderen.", {
+      title: "Entblinden", kind: "warning", okLabel: "Entblinden", cancelLabel: "Abbrechen",
+    });
+    if (ok) await run(() => api.unblind(reviewId, stageId), "Stufe entblindet. Schick den Mitgliedern ein neues Paket.");
+  }
+
+  async function closeStage() {
+    const ok = await ask("Stufe schließen? Danach sind keine Stimmen mehr möglich, auch keine nachgereichten.", {
+      title: "Stufe schließen", kind: "warning", okLabel: "Schließen", cancelLabel: "Abbrechen",
+    });
+    if (ok) await run(() => api.close(reviewId, stageId), "Stufe geschlossen, Snapshot erstellt.");
+  }
+
+  async function exportCsv() {
+    const path = await save({
+      defaultPath: `${safeFileName(detail!.stage.name)}.csv`,
+      filters: [{ name: "CSV", extensions: ["csv"] }],
+    });
+    if (path) await run(() => api.exportCsv(reviewId, stageId, path), "CSV gespeichert.");
   }
 
   if (!detail || !summary) return <p>{error || "Lade …"}</p>;
@@ -205,7 +237,7 @@ export function StagePage() {
 
   return (
     <>
-      <p><Link to={`/reviews/${stage.review_id}`}>← Review</Link></p>
+      <p><Link to={`/reviews/${reviewId}`}>← Review</Link></p>
       <h1>{stage.name}</h1>
       <p className="muted">
         {stage.n_records} Records · mindestens {stage.min_reviewers} Stimmen ·{" "}
@@ -216,14 +248,10 @@ export function StagePage() {
       {notice && <p className="notice">{notice}</p>}
 
       <div className="actions">
-        {canVote(role) && !stage.closed && <Link className="button primary" to={`/stages/${stage.id}/screen`}>Screenen</Link>}
-        {manage && stage.blind_active && <button onClick={() => run("unblind", undefined, "Stufe entblindet.")}>Entblinden</button>}
-        {manage && !stage.closed && (
-          <button onClick={() => window.confirm("Stufe schließen? Danach sind keine Stimmen mehr möglich.") && run("close", undefined, "Stufe geschlossen, Snapshot erstellt.")}>
-            Stufe schließen
-          </button>
-        )}
-        {!stage.blind_active && <a className="button" href={`/api/stages/${stage.id}/export.csv`}>CSV exportieren</a>}
+        {canVote(role) && !stage.closed && <Link className="button primary" to={`/reviews/${reviewId}/stages/${stageId}/screen`}>Screenen</Link>}
+        {manage && stage.blind_active && <button onClick={unblind}>Entblinden</button>}
+        {manage && !stage.closed && <button onClick={closeStage}>Stufe schließen</button>}
+        {!stage.blind_active && <button onClick={exportCsv}>CSV exportieren</button>}
       </div>
 
       <section className="card">
@@ -234,12 +262,12 @@ export function StagePage() {
             <thead><tr><th>Person</th><th>Stimmen</th></tr></thead>
             <tbody>
               {summary.reviewers.map((r) => (
-                <tr key={r.username}><td>{r.username}</td><td>{r.n_votes}</td></tr>
+                <tr key={r.name}><td>{r.name}</td><td>{r.n_votes}</td></tr>
               ))}
             </tbody>
           </table>
         )}
-        {stage.blind_active && <p className="muted">Die Stufe ist verblindet. Entscheidungen, Konflikte und Übereinstimmung erscheinen nach dem Entblinden.</p>}
+        {stage.blind_active && <p className="muted">Die Stufe ist verblindet. Entscheidungen, Konflikte und Übereinstimmung erscheinen nach dem Entblinden. Stimmen anderer kommen über deren Rückmeldungen herein.</p>}
       </section>
 
       {d && (
@@ -263,7 +291,9 @@ export function StagePage() {
           <h2>Übereinstimmung</h2>
           <p>
             Prozentuale Übereinstimmung: {a.percent.percent_agreement == null ? "–" : `${(a.percent.percent_agreement * 100).toFixed(1)} %`}
-            {" "}über {a.percent.n_items ?? 0} Records · Krippendorffs Alpha: {fmt(a.krippendorff.alpha)}
+            {" "}{ci(a.percent_ci, 100, 1, " %")} über {a.percent.n_items} Records
+            <br />
+            Krippendorffs Alpha: {fmt(a.krippendorff.alpha)} {ci(a.alpha_ci)}
           </p>
           {a.cohen_pairs.length > 0 && (
             <table>
@@ -277,7 +307,10 @@ export function StagePage() {
               </tbody>
             </table>
           )}
-          <p className="muted">Punktschätzer ohne Konfidenzintervalle.</p>
+          <p className="muted">
+            In Klammern: 95-%-Konfidenzintervall, Perzentil-Bootstrap über Records ({a.alpha_ci.n_boot} Ziehungen, Seed {a.alpha_ci.seed}).
+            Kappa allein kann bei seltenen Einschlüssen täuschen; deshalb stehen Prozent und PABAK daneben.
+          </p>
         </section>
       )}
 
@@ -291,9 +324,9 @@ export function StagePage() {
               {c.status === "needs_clarification" && <p className="badge">als nicht entscheidbar markiert</p>}
               <ul className="list">
                 {c.votes.map((v) => (
-                  <li key={v.username}>
+                  <li key={v.name}>
                     <span>
-                      {v.username}: <strong>{DECISION_LABEL[v.decision] ?? v.decision}</strong>
+                      {v.name}: <strong>{DECISION_LABEL[v.decision] ?? v.decision}</strong>
                       {v.reasons.length > 0 && <span className="muted"> · {v.reasons.join(", ")}</span>}
                       {v.note && <span className="muted"> · {v.note}</span>}
                     </span>
@@ -302,8 +335,8 @@ export function StagePage() {
               </ul>
               {canVote(role) && !stage.closed && (
                 <div className="decision-bar">
-                  <button className="include" onClick={() => run("consensus", { record_id: c.record.id, decision: "include" }, "Konsens gespeichert.")}>Konsens: Include</button>
-                  <button className="exclude" onClick={() => run("consensus", { record_id: c.record.id, decision: "exclude" }, "Konsens gespeichert.")}>Konsens: Exclude</button>
+                  <button className="include" onClick={() => run(() => api.consensus(reviewId, stageId, c.record.id, "include"), "Konsens gespeichert.")}>Konsens: Include</button>
+                  <button className="exclude" onClick={() => run(() => api.consensus(reviewId, stageId, c.record.id, "exclude"), "Konsens gespeichert.")}>Konsens: Exclude</button>
                 </div>
               )}
             </div>
