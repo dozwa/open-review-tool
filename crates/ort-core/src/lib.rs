@@ -8,7 +8,8 @@
 //! Schichten: [`event`] (Umschlag, Hash, Signatur) und [`catalog`] (Register der Ereignistypen) →
 //! [`store`] (einzige Schreibstelle) →
 //! [`projection`], [`workflow`] und [`agreement`] (aus dem Log berechnet) → [`service`] (Fachlogik,
-//! Rechte, Verblindung) → [`exchange`] (Dateien zwischen Personen).
+//! Rechte, Verblindung) → [`exchange`] (Dateien zwischen Personen). [`report`] rechnet aus alldem
+//! das Flussdiagramm und die Anhänge.
 
 pub mod agreement;
 pub mod canonical;
@@ -21,6 +22,7 @@ pub mod exchange;
 pub mod fulltext;
 pub mod import;
 pub mod projection;
+pub mod report;
 pub mod search;
 pub mod service;
 pub mod store;

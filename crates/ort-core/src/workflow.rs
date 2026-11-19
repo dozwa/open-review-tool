@@ -677,6 +677,7 @@ impl Workflow {
             let available = match station.kind.as_str() {
                 "screening" => true,
                 "setup" => station.tool.as_deref().is_some_and(|t| BUILT_TOOLS.contains(&t)),
+                "report" => true,
                 _ => false,
             };
             let defaults = (station.kind == "screening").then(|| {

@@ -4,6 +4,8 @@
 
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 
+import { mockReport } from "./mockReport";
+
 const me = { actor_id: "a1b2c3d4-0000-4000-8000-000000000001", name: "Dorian Zwanzig", public_key: "x" };
 const criterion = (code: string, kind: string, element: string, text: string, note = "") => ({ code, kind, element, text, note });
 const criteria = {
@@ -105,7 +107,7 @@ const jbiStations = [
   station("bundling", "setup", "Quellen bündeln", "Begleitpublikationen derselben Studie zu einer Quelle zusammenfassen.", { tool: "bundling" }),
   station("charting_pilot", "form", "Charting-Pilot", "Je Quellenart zwei bis drei Quellen unabhängig extrahieren und das Formular abstimmen."),
   station("charting", "form", "Charting", "Alle Quellen mit dem abgestimmten Formular extrahieren und abgleichen."),
-  station("report", "report", "Auswertung und Bericht", "Flussdiagramm, Tabellen und Methodentext."),
+  station("report", "report", "Auswertung und Bericht", "Flussdiagramm, Tabellen und Methodentext.", { available: true }),
 ];
 const terms = { record: "Eintrag", records: "Einträge", source: "Quelle", sources: "Quellen", extraction: "Charting" };
 const jbiWorkflow = {
@@ -398,6 +400,10 @@ export function installMock() {
           { name: "Clara Weiß", decision: "maybe", primary_reason: null, reasons: [], note: "Kein Abstract vorhanden, Volltext nötig." },
         ] },
       ];
+      case "report": return a.reviewId === "r2"
+        ? { ...mockReport, flow: { ...mockReport.flow, sources: [], identified: 0, exact_duplicates: 0, resolved_duplicates: 0, unique: 0, levels: [], included: null }, svg: "", methods: "# Methoden: Auswahl der Quellen\n\nDas Review lief ohne feste Vorlage.", search_appendix: "# Suchanhang\n\nEs ist keine Suche festgehalten.\n", n_excluded_rows: 0 }
+        : mockReport;
+      case "report_export": return null;
       case "fulltext_overview": return a.reviewId === "r2" ? { folder: null, folder_found: false, zotero: null, needed: 0, retrieved: 0, unavailable: 0, rows: [] } : fulltextView();
       case "fulltext_folder_set": fulltexts.folder = (a.path as string | null) ?? null; return null;
       case "fulltext_suggestions": return fulltexts.rows.filter((r) => !r.fulltext).slice(0, 2).map((r, i) => ({

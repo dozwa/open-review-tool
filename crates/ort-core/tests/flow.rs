@@ -188,6 +188,14 @@ fn blind_screening_conflict_consensus_close() {
     let votes = t.owner.store().stage_events(&fulltext.id).unwrap();
     assert_eq!(votes.iter().filter(|e| e.event_type == "VoteCast").count(), 1);
 
+    // Der Bericht nimmt beide Stufen als Ebenen und geht auf; die verblindete Stufe zählt als offen.
+    let report = t.owner.report().unwrap();
+    assert_eq!(report.problems, Vec::<String>::new());
+    let levels = &report.flow.levels;
+    assert_eq!((levels[0].assessed, levels[0].included, levels[1].input, levels[1].blinded), (4, 3, 3, 3));
+    assert_eq!(levels[1].input_from, Some(sid.to_string()));
+    assert!(levels[1].fulltext && !levels[0].fulltext);
+
     // Alle Ketten sind unversehrt, beim Owner und bei den anderen.
     send_package(&t.owner, &t.viewer);
     for review in [&t.owner, &t.r1, &t.viewer] {
@@ -349,6 +357,29 @@ fn hits_per_source_and_duplicates_add_up_from_the_log() {
         assert_eq!(v2.version.peer_reviews.len(), 1);
         assert_eq!(searches[0].versions[0].n_imports, 0, "der Import nennt die Version, mit der gesucht wurde");
         assert_eq!(searches[1].versions[0].version.origin, "register");
+
+        // Der Kopf des Flussdiagramms nimmt genau diese Zahlen, und der Suchanhang nennt jede Version.
+        let report = member.report().unwrap();
+        let flow = &report.flow;
+        assert_eq!(report.problems, Vec::<String>::new());
+        assert_eq!((flow.identified, flow.exact_duplicates, flow.resolved_duplicates, flow.unique), (12, 5, 2, 5));
+        assert!(flow.levels.is_empty() && flow.included.is_none());
+        for text in ["Embase: 3", "ClinicalTrials.gov: 3", "Test: 6", "Dubletten, einzeln entschieden: 2"] {
+            assert!(report.svg.contains(text), "{text} fehlt im Diagramm");
+        }
+        let appendix = &report.search_appendix;
+        for text in [
+            "## Embase (Ovid)",
+            "Treffer laut Quelle: 4",
+            "Importiert: 3 (davon 0 beim Import als Dublette erkannt)",
+            "Peer-Review am 20.11.2026: Bibliothekarin der Einrichtung, PRESS: ohne Befund",
+            "Geändert zu Version 2: Zeitraum erweitert",
+            "## ClinicalTrials.gov\n",
+            "- Herkunft: Register",
+            "- Test (Datenbank): 6 importiert, davon 2 beim Import als Dublette erkannt",
+        ] {
+            assert!(appendix.contains(text), "{text} fehlt in\n{appendix}");
+        }
     }
     assert!(t.owner.verify_chain().unwrap().ok);
 }

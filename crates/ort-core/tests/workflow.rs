@@ -11,6 +11,7 @@ use ort_core::event::sha256_hex;
 use ort_core::exchange::{export_return, merge};
 use ort_core::fulltext::Assign;
 use ort_core::projection::Verify;
+use ort_core::report::{Level, Retrieval};
 use ort_core::service::{OpenStage, PairDecision, RecordFilter, StageView};
 use ort_core::workflow::{builtin_template, StationView};
 use ort_core::Review;
@@ -85,7 +86,16 @@ fn review_carries_its_template_in_the_log() {
         detail.workflow.stations.iter().filter(|s| s.available).map(|s| s.key.as_str()).collect();
     assert_eq!(
         available,
-        ["protocol", "search", "import", "pilot_title_abstract", "title_abstract", "fulltext_retrieval", "fulltext"]
+        [
+            "protocol",
+            "search",
+            "import",
+            "pilot_title_abstract",
+            "title_abstract",
+            "fulltext_retrieval",
+            "fulltext",
+            "report"
+        ]
     );
     assert!(Review::create_in_memory_with(person("x"), "X", Some("gibtsnicht")).is_err());
 }
@@ -933,6 +943,158 @@ fn a_swapped_or_missing_file_is_caught_by_its_checksum() {
     assert!(!t.r1.events().unwrap().iter().any(|e| e.payload.to_string().contains("spiegel")));
 }
 
+/// Zahlen einer Ebene des Flussdiagramms: Eingang, geprüft, eingeschlossen, ausgeschlossen, offen.
+fn level_numbers(level: &Level) -> (i64, i64, i64, i64, i64) {
+    (level.input, level.assessed, level.included, level.excluded, level.open)
+}
+
+#[test]
+fn report_adds_up_at_every_step_and_keeps_blind_decisions_out() {
+    let t = team_before_fulltext();
+    // Vor dem Volltext: Die Ebene steht schon da und zeigt, was auf die Beschaffung wartet.
+    let report = t.owner.report().unwrap();
+    let flow = &report.flow;
+    assert_eq!(report.problems, Vec::<String>::new());
+    assert_eq!((flow.identified, flow.exact_duplicates, flow.resolved_duplicates, flow.unique), (6, 2, 0, 4));
+    assert_eq!(flow.levels.iter().map(|l| l.key.as_str()).collect::<Vec<_>>(), ["title_abstract", "fulltext"]);
+    assert_eq!(level_numbers(&flow.levels[0]), (4, 4, 4, 0, 0));
+    assert_eq!(level_numbers(&flow.levels[1]), (4, 0, 0, 0, 0));
+    assert_eq!(flow.levels[1].retrieval, Some(Retrieval { sought: 4, unavailable: 0, open: 4, waiting: 0 }));
+    assert_eq!((flow.included, flow.complete), (Some(0), false));
+    assert!(report.svg.contains("Volltext gesucht: 4") && report.svg.contains("Beschaffung offen: 4"));
+    assert!(report.svg.contains("vorläufig"));
+
+    // Drei Volltexte liegen vor, einer ist nicht beschaffbar.
+    let rows = t.owner.fulltext_overview().unwrap().rows;
+    t.owner.set_fulltext_unavailable(&rows[3].record_id, "Fernleihe erfolglos").unwrap();
+    retrieve_fulltexts(&t);
+    let waiting = t.owner.report().unwrap().flow.levels[1].retrieval.clone();
+    assert_eq!(waiting, Some(Retrieval { sought: 4, unavailable: 1, open: 0, waiting: 3 }));
+
+    // Volltext: einmal einig drin, einmal einig draußen mit verschiedenen Gründen, einmal uneins.
+    let stage = open(&t, "fulltext", |_| {});
+    let records = order_of(&t.owner, &stage.id);
+    let (a, b, c) = (records[0].as_str(), records[1].as_str(), records[2].as_str());
+    type Votes<'a> = [(&'a str, Option<&'a str>); 3];
+    let plan: [(&Review, Votes); 2] = [
+        (&t.r1, [("include", None), ("exclude", Some("E2")), ("include", None)]),
+        (&t.r2, [("include", None), ("exclude", Some("E1")), ("exclude", Some("E2"))]),
+    ];
+    for (reviewer, votes) in plan {
+        for (record, (decision, reason)) in [a, b, c].into_iter().zip(votes) {
+            reviewer.cast_vote(&stage.id, record, decision, reason, &[], "").unwrap();
+        }
+        send_return(reviewer, &t.owner);
+    }
+    // Solange die Stufe verblindet ist, zählt alles als offen, auch bei der Leitung.
+    for review in [&t.owner, &t.r1] {
+        let report = review.report().unwrap();
+        let level = &report.flow.levels[1];
+        assert_eq!(report.problems, Vec::<String>::new());
+        assert_eq!((level_numbers(level), level.blinded), ((4, 3, 0, 0, 3), 3));
+        assert!(level.reasons.is_empty());
+        assert!(report.methods.contains("noch verblindet"));
+        assert!(!report.methods.contains("Ausschlussgründe"));
+        assert_eq!(review.report_file("excluded").unwrap().content.lines().count(), 2, "nur der nicht beschaffte");
+        assert_eq!(review.report_file("included").unwrap().content, "");
+    }
+
+    // Nach dem Entblinden ist ein Eintrag im Konflikt; die Klärung schließt ihn mit Grund aus.
+    t.owner.unblind_stage(&stage.id).unwrap();
+    let open_conflict = t.owner.report().unwrap();
+    assert_eq!(level_numbers(&open_conflict.flow.levels[1]), (4, 3, 1, 1, 1));
+    assert_eq!(open_conflict.problems, Vec::<String>::new());
+    t.owner.record_consensus(&stage.id, c, "exclude", "", Some("E2"), &[], "").unwrap();
+    assert!(t.owner.close_stage(&stage.id).unwrap().gate.unwrap().passed);
+
+    send_package(&t.owner, &t.viewer);
+    for review in [&t.owner, &t.viewer] {
+        let report = review.report().unwrap();
+        let flow = &report.flow;
+        assert_eq!(report.problems, Vec::<String>::new());
+        let level = &flow.levels[1];
+        assert_eq!(level_numbers(level), (4, 3, 1, 2, 0));
+        assert_eq!(level.retrieval, Some(Retrieval { sought: 4, unavailable: 1, open: 0, waiting: 0 }));
+        // Verschiedene Gründe ohne Klärung: Es gilt der, der in den Kriterien zuerst steht.
+        let reasons: Vec<_> = level.reasons.iter().map(|r| (r.code.as_str(), r.text.as_str(), r.n)).collect();
+        assert_eq!(reasons, [("E1", "Falsche Population", 1), ("E2", "Keine Primärstudie", 1)]);
+        assert_eq!((flow.included, flow.complete), (Some(1), true));
+        for text in [
+            "Identifiziert: 6 Einträge",
+            "Test: 6",
+            "Vor der Auswahl entfernt: 2",
+            "Titel/Abstract: 4 geprüft",
+            "Volltext gesucht: 4",
+            "nicht beschaffbar: 1",
+            "Volltext-Screening: 3 geprüft",
+            "Ausgeschlossen: 2",
+            "E1 Falsche Population: 1",
+            "Eingeschlossen: 1 Quelle<",
+        ] {
+            assert!(report.svg.contains(text), "{text} fehlt im Diagramm");
+        }
+        assert!(!report.svg.contains("vorläufig"));
+        assert_eq!(report.n_excluded_rows, 3);
+    }
+
+    // Die Anhänge: Ausschlüsse mit Grund, Eingeschlossene als RIS, Suche, Methoden.
+    let file = |kind: &str| t.viewer.report_file(kind).unwrap();
+    let csv = file("excluded");
+    assert_eq!(csv.filename, "ausgeschlossene-volltexte.csv");
+    let lines: Vec<&str> = csv.content.lines().collect();
+    assert_eq!(lines.len(), 4);
+    let line_of = |id: &str| lines.iter().find(|l| l.starts_with(id)).unwrap().to_string();
+    assert!(line_of(b).ends_with("Volltext-Screening,excluded,E1,Falsche Population"));
+    assert!(line_of(c).ends_with("Volltext-Screening,excluded,E2,Keine Primärstudie"));
+    assert!(line_of(&rows[3].record_id.to_string()).ends_with("not_retrieved,,Fernleihe erfolglos"));
+    let included = ort_core::import::parse_ris(&file("included").content);
+    let title_of_a = rows.iter().find(|r| r.record_id.to_string() == a).unwrap().title.clone();
+    assert_eq!(included.iter().map(|i| i.title.clone()).collect::<Vec<_>>(), [title_of_a]);
+    let appendix = file("search").content;
+    assert!(appendix.contains("## MEDLINE (Ovid)") && appendix.contains("(headache OR migraine) AND adult"));
+    assert!(appendix.contains("Tag der Suche: 19.11.2026"));
+    assert!(appendix.contains("Importe ohne festgehaltene Suche"), "die Testimporte nennen keine Suche");
+    let methods = file("methods").content;
+    for text in [
+        "Vorlage „JBI Scoping Review“ (Version 1)",
+        "## Titel/Abstract",
+        "mindestens 2 Personen unabhängig bewertet",
+        "Übereinstimmung vor der Klärung: 100,0 % (4 von 4",
+        "## Volltext-Screening",
+        "Übereinstimmung vor der Klärung: 66,7 % (2 von 3",
+        "Über 1 Eintrag wurde in der Klärung entschieden",
+        "1 war nicht beschaffbar",
+        "- E1 Falsche Population: 1",
+        "„Pilot Titel/Abstract“ wurde von der Leitung ohne erfülltes Gate freigegeben: Pilot entfällt",
+        "1 Eintrag wurde eingeschlossen.",
+    ] {
+        assert!(methods.contains(text), "{text} fehlt in\n{methods}");
+    }
+    assert!(!methods.contains("vorläufig"));
+    assert!(file("diagram").content.starts_with("<svg"));
+    assert!(matches!(t.owner.report_file("alles"), Err(Error::Invalid(_))));
+}
+
+#[test]
+fn abbreviated_selection_is_named_as_a_limitation() {
+    let t = Team::new();
+    let stage = t.open_stage(|p| {
+        p.blind = false;
+        p.min_reviewers = 1;
+        p.decision_rule = Some("single_verified".into());
+        p.verify = Some(Verify { scope: "sample".into(), percent: Some(20), seed: Some(7) });
+    });
+    let report = t.owner.report().unwrap();
+    assert_eq!(report.problems, Vec::<String>::new());
+    assert_eq!(level_numbers(&report.flow.levels[0]), (4, 4, 0, 0, 4));
+    assert_eq!(report.flow.levels[0].key, stage.id.to_string(), "im freien Ablauf ist jede Stufe eine Ebene");
+    assert!(report.methods.contains("Das Review lief ohne feste Vorlage."));
+    assert!(report.methods.contains("## Abweichungen und Limitationen"));
+    assert!(report.methods.contains("eine Zufallsstichprobe von 20 % der Ausschlüsse"));
+    assert!(report.methods.contains("Einschlüsse wurden nicht doppelt bewertet"));
+    assert!(report.search_appendix.contains("Es ist keine Suche festgehalten."));
+}
+
 /// Derselbe Ablauf für jede Vorlage: Stationen der Reihe nach, bis alle abgeschlossen sind, die die
 /// App bearbeiten kann. Im Test steht kein Schlüssel einer Station.
 fn walk(template: &str) {
@@ -966,9 +1128,15 @@ fn walk(template: &str) {
                 assert!(closed.gate.is_none_or(|g| g.passed), "{template}: {}", now.label);
                 assert_eq!(station(&t.owner, &now.key).state, "done", "{template}: {}", now.label);
             }
+            "report" => {}
             other => panic!("{template}: Station der Art {other} gilt als verfügbar"),
         }
     }
+    // Am Ende geht das Flussdiagramm auf, und nichts ist mehr offen.
+    let report = t.owner.report().unwrap();
+    assert_eq!(report.problems, Vec::<String>::new(), "{template}");
+    assert!(report.flow.complete, "{template}: {:?}", report.flow.levels);
+    assert_eq!(report.flow.included, Some(4), "{template}");
     for member in [&t.r1, &t.r2, &t.viewer] {
         send_package(&t.owner, member);
         assert_eq!(states(member), states(&t.owner), "alle sehen denselben Stand");

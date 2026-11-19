@@ -29,13 +29,14 @@ import {
 import { CriteriaEditor, CriteriaView } from "./Criteria";
 import { Duplicates } from "./Duplicates";
 import { FullTextTab } from "./FullTexts";
+import { ReportTab } from "./Report";
 import { searchName, SearchTab } from "./Search";
 import { ROLE_LABEL, useRefreshSidebar } from "./shared";
 import { Avatar, Banner, Empty, Group, Icon, PageHeader, Pill, Row, Segmented, Stat } from "./ui";
 
 const IMPORT_STATUS: Record<string, string> = { running: "läuft", done: "fertig", failed: "fehlgeschlagen" };
 
-type Tab = "overview" | "exchange" | "members" | "search" | "imports" | "fulltext" | "criteria" | "proof";
+type Tab = "overview" | "exchange" | "members" | "search" | "imports" | "fulltext" | "criteria" | "report" | "proof";
 
 export function stageState(stage: Stage): string {
   if (stage.closed) return "Geschlossen";
@@ -93,6 +94,7 @@ export function ReviewPage() {
     { value: "imports", label: "Import", icon: "upload" },
     { value: "fulltext", label: "Volltexte", icon: "file" },
     { value: "criteria", label: "Kriterien", icon: "list" },
+    { value: "report", label: "Bericht", icon: "chart" },
     { value: "proof", label: "Nachweis", icon: "shield" },
   ];
 
@@ -122,6 +124,7 @@ export function ReviewPage() {
         {tab === "imports" && <ImportsTab review={review} run={run} />}
         {tab === "fulltext" && <FullTextTab review={review} run={run} />}
         {tab === "criteria" && <CriteriaTab review={review} run={run} />}
+        {tab === "report" && <ReportTab review={review} run={run} />}
         {tab === "proof" && <ProofTab review={review} />}
       </div>
     </>
@@ -265,6 +268,9 @@ function OverviewTab({ review, run, goTo }: { review: ReviewDetail; run: Run; go
                 {(TOOL_TABS[station.tool ?? ""] ?? []).map((t) => (
                   <button key={t.tab} onClick={() => goTo(t.tab)}>{t.label} öffnen</button>
                 ))}
+                {station.kind === "report" && station.available && (
+                  <button onClick={() => goTo("report")}>Bericht öffnen</button>
+                )}
                 {canOpen && creating?.key !== station.key && (
                   <button className={station.state === "open" ? "primary" : ""} onClick={() => setCreating(station)}>
                     <Icon name="plus" size={14} /> {station.free_rounds || station.rounds.length === 0 ? "Stufe öffnen" : "Neue Runde öffnen"}

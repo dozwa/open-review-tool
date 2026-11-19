@@ -7,15 +7,17 @@ Zusammenarbeit ohne Server über Austauschdateien.
 
 > Status (19.11.2026): Mac-App mit Rust und Tauri 2. Der vollständige Ablauf eines Scoping Reviews wird nach
 > `docs/umsetzungsplan.md` in Meilensteinen gebaut; fertig sind 0 (Fundament), 1 (Vorlage und Ablauf),
-> 2 (Kriterien und Screening-Ansicht), 3 (Suche, Import, Dubletten) und 4 (Volltext, ohne das Markieren).
+> 2 (Kriterien und Screening-Ansicht), 3 (Suche, Import, Dubletten), 4 (Volltext, ohne das Markieren) und
+> 5 (Bericht, Teil 1).
 > Enthalten: Identität mit Schlüssel im Schlüsselbund, Reviews mit Rollen, Review-Typ als Vorlage mit Stationen,
 > Gates und Runden, Kriterien mit Kürzeln und Erläuterungen, Suchen mit Versionen und Peer-Review-Vermerk, Import
 > von RIS, BibTeX und PubMed (nbib) mit Suchversion und Herkunft, exakte und unscharfe Dubletten, Stufen mit drei
 > Auswahlregeln, verblindetes Screening in drei Spalten mit Filtern, Volltexte aus einem Ordner oder aus Zotero
 > mit Prüfsumme und Vorschau in der App, Pflichtgrund im Volltext, Konflikte und Konsens (auch als
-> Dritt-Entscheid), Übereinstimmung, CSV-Export, Pakete und Rückmeldungen.
-> Noch nicht enthalten: Markieren im Volltext, Rückschreiben nach Zotero, Charting, Bericht, signierte und
-> notarisierte App.
+> Dritt-Entscheid), Übereinstimmung, CSV-Export, Pakete und Rückmeldungen, Bericht mit Flussdiagramm (SVG),
+> ausgeschlossenen Volltexten mit Grund, Eingeschlossenen als RIS, Suchanhang und Methodentext zur Auswahl.
+> Noch nicht enthalten: Markieren im Volltext, Rückschreiben nach Zotero, Zitationssuche, Charting, Checkliste
+> PRISMA-ScR, signierte und notarisierte App.
 
 ## So arbeitet ein Team
 
@@ -56,7 +58,7 @@ die Schlüsselbund-Sicherung von macOS.
 
 | Pfad | Inhalt |
 | --- | --- |
-| `crates/ort-core/` | Fachkern ohne Oberfläche: Event-Log (`event.rs`, `store.rs`), Register der Ereignistypen (`catalog.rs`), Projektionen, Vorlagen und Ablauf (`workflow.rs`), Kriterien (`criteria.rs`), Suchen (`search.rs`), Dubletten (`duplicates.rs`), Übereinstimmung, Import, Fachlogik (`service.rs`), Austausch (`exchange.rs`) |
+| `crates/ort-core/` | Fachkern ohne Oberfläche: Event-Log (`event.rs`, `store.rs`), Register der Ereignistypen (`catalog.rs`), Projektionen, Vorlagen und Ablauf (`workflow.rs`), Kriterien (`criteria.rs`), Suchen (`search.rs`), Dubletten (`duplicates.rs`), Volltexte (`fulltext.rs`), Bericht (`report.rs`), Übereinstimmung, Import, Fachlogik (`service.rs`), Austausch (`exchange.rs`) |
 | `crates/ort-core/templates/` | Mitgelieferte Vorlagen: „JBI Scoping Review“ und „Freier Ablauf“ |
 | `crates/ort-core/tests/` | Tests für Log, Projektionen, Referenzwerte, Import, Austausch, Vorlagen und Gates und den Ablauf mit vier Personen |
 | `app/src-tauri/` | Tauri-Hülle: Befehle für die Oberfläche, Identität und Schlüsselbund |
@@ -69,7 +71,7 @@ Tauri 2 mit der WebView von macOS, React 18.
 
 ## Wie es geprüft ist
 
-- **Kern:** 110 Tests, dazu 2 für das Lesen der Zotero-Antworten in der App. Darunter die Referenzwerte der früheren SQL-Tests (Cohen's Kappa gegen scikit-learn,
+- **Kern:** 117 Tests, dazu 2 für das Lesen der Zotero-Antworten in der App. Darunter die Referenzwerte der früheren SQL-Tests (Cohen's Kappa gegen scikit-learn,
   Fleiss' Kappa am Wikipedia-Beispiel, Krippendorffs Alpha am publizierten Beispiel mit 0,743, PABAK, Prozent,
   sechs `final_decision`-Szenarien, Maybe-Regel). Die Werte erzeugt `crates/ort-core/tests/fixtures/make_agreement_fixtures.py`.
 - **Austausch:** veränderte Datei, nachträglich neu gehashte Datei ohne Signatur, Außenstehende, Lücken in einer
@@ -89,9 +91,14 @@ Tauri 2 mit der WebView von macOS, React 18.
   gemeldet; nichts außerhalb des verknüpften Ordners lässt sich zuordnen, auch nicht über ein eingelesenes
   Ereignis mit `../` im Pfad. Jede Person verknüpft den Ordner an ihrem eigenen Ort; im Log steht kein
   lokaler Pfad. Status darf setzen, wer Schreibrecht hat; Zotero verknüpft nur die Leitung.
+- **Bericht:** Jede Ebene des Flussdiagramms wird nachgerechnet (Eingang gleich geprüft plus nicht zugeteilt
+  plus nicht beschafft; geprüft gleich eingeschlossen plus ausgeschlossen plus offen; Ausschlüsse gleich Summe
+  der Gründe), vor dem Volltext, während der verblindeten Stufe, im Konflikt und nach dem Abschluss, bei der
+  Leitung und bei der Person mit Leserecht. Entscheidungen einer verblindeten Stufe stehen in keiner Zahl und
+  in keiner Datei. Der RIS-Export wird vom eigenen Import wieder gelesen.
 - **Ablauf:** Owner, zwei Reviewer und eine Person mit Leserecht mit getrennten Dateien, nur über Pakete und
   Rückmeldungen: verblindetes Screening, Paket ohne fremde Stimmen, Entblinden, Konflikte, Konsens, Revision,
-  CSV, Abschluss mit Snapshot, abgewiesene Nachzügler, Folgestufe, Prüfung aller Ketten.
+  CSV, Abschluss mit Snapshot, abgewiesene Nachzügler, Folgestufe, Bericht, Prüfung aller Ketten.
 - **App:** Typprüfung, Clippy und unsignierter Build auf macOS in der CI.
 
 Nicht automatisch geprüft: die Oberfläche selbst (Tauri bietet auf macOS keinen WebDriver), große Importe
@@ -136,20 +143,26 @@ Nur für Entwicklung und Tests.
   berechnet und stehen nicht im Log. Die DOI in einer PDF findet die App nur, wenn die Metadaten
   unkomprimiert in der Datei stehen. Volltexte aus Zotero prüft „Dateien prüfen“ nicht mit; ihre Prüfsumme
   wird beim Öffnen geprüft. Das Markieren im Volltext (zweiter Schritt im Plan) ist noch nicht gebaut.
-- **Volltext-Stufe in Runden:** Später beschaffte Volltexte laufen als weitere Runde der Station. Eine Station,
-  die aus dem Volltext-Screening schöpft, nimmt bisher nur die letzte Runde; das Zusammenführen der Runden
-  gehört zum Bericht (Meilenstein 5).
+- **Volltext-Stufe in Runden:** Später beschaffte Volltexte laufen als weitere Runde der Station. Der Bericht
+  führt die Runden zusammen (für einen Eintrag gilt die letzte Runde, in der er zugeteilt war). Eine Stufe,
+  die aus dem Volltext-Screening schöpft, nimmt dagegen bisher nur die letzte Runde; das wird mit dem Charting
+  (Meilenstein 7) gebraucht und dort gelöst.
+- **Bericht:** Das Flussdiagramm hat eine Spalte; der Zweig „andere Quellen“ kommt mit der Zitationssuche
+  (Meilenstein 6). Eine Ebene ist eine Screening-Station mit allen Runden, im freien Ablauf jede Stufe für
+  sich. Stichproben wie der Pilot stehen im Methodentext, nicht im Diagramm. Einträge in einer verblindeten
+  Stufe zählen als offen. Der Bericht ist berechnet und steht nicht im Log; der Methodentext ist ein Entwurf
+  ohne Namen. Die PMID steht im RIS-Export im Feld `AN`.
 - **Rollenprüfung beim Einlesen:** nach dem Stand nach dem Zusammenführen, nicht zum Zeitpunkt jedes Ereignisses.
 - **Gates:** Das Ergebnis wird beim Schließen einer Stufe auf dem Rechner der Leitung berechnet und als
   `GateEvaluated` festgehalten. Schließen ist auch mit nicht erfülltem Gate möglich; gesperrt wird die nächste
-  Station. Stationen, die die App noch nicht bearbeiten kann (Zitationssuche, Charting, Bericht), stehen in der
+  Station. Stationen, die die App noch nicht bearbeiten kann (Zitationssuche, Bündeln, Charting), stehen in der
   Leiste als „folgt“ und sperren nichts.
 - **Eine Stimme mit Prüfung (`single_verified`):** Die Stufe ist nie verblindet, weil die zweite Person die
   Ausschlüsse sehen muss. Wer was schon bewertet hat, weiß eine Person erst nach dem nächsten Paket.
 - **Gründe:** Ausschlussgründe sind die Kürzel der Ausschlusskriterien. Beim Einlesen werden sie nur in Stufen
   mit Pflichtgrund geprüft, damit ältere Logs mit frei getippten Gründen einlesbar bleiben. Nennen zwei Personen
-  verschiedene Hauptgründe für denselben Ausschluss, gilt der Eintrag als ausgeschlossen; welcher Grund im
-  Bericht zählt, ist noch offen.
+  verschiedene Hauptgründe für denselben Ausschluss, gilt der Eintrag als ausgeschlossen. Im Bericht zählt dann
+  der Grund der Klärung, ohne Klärung der Grund, der in den Kriterien zuerst steht.
 - **Reihenfolge über Personen hinweg:** nach Zeitstempel; falsch gehende Uhren können die Reihenfolge von Konsens
   oder Rollenwechseln verschieben.
 

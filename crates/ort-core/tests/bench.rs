@@ -83,6 +83,9 @@ fn large_review() {
     let conflicts = timed("Konflikte (conflicts)", || owner.conflicts(&stage.id).unwrap());
     assert_eq!(conflicts.len(), N / 10);
     timed("CSV-Export", || owner.export_csv(&stage.id).unwrap().len());
+    let problems = timed("Bericht mit Diagramm und Methodentext (report)", || owner.report().unwrap().problems);
+    assert!(problems.is_empty(), "{problems:?}");
+    timed("Eingeschlossene als RIS", || owner.report_file("included").unwrap().content.len());
     let bytes = timed("Paket für eine Person, entblindet", || {
         export_package(&owner, &a.actor_id).unwrap().to_json().unwrap().len()
     });

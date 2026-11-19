@@ -79,6 +79,8 @@ fn main() {
             commands::stage_conflicts,
             commands::stage_summary,
             commands::stage_export_csv,
+            commands::report,
+            commands::report_export,
             commands::package_export,
             commands::return_export,
             commands::bundle_import,

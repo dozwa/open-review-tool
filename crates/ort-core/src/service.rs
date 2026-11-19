@@ -615,7 +615,7 @@ impl Review {
         Ok(Workflow::build(&self.store.events_of_types(&WORKFLOW_TYPES)?))
     }
 
-    fn stage_states(&self, state: &ReviewState) -> Result<Vec<StageState>> {
+    pub(crate) fn stage_states(&self, state: &ReviewState) -> Result<Vec<StageState>> {
         state.stage_ids.iter().map(|id| self.stage_state(id)).collect()
     }
 
@@ -1159,7 +1159,7 @@ impl Review {
     }
 
     /// Einträge insgesamt, exakte Dubletten aus dem Import und als Dublette entschiedene.
-    fn duplicate_counts(&self, resolutions: &Resolutions) -> Result<(i64, i64, i64)> {
+    pub(crate) fn duplicate_counts(&self, resolutions: &Resolutions) -> Result<(i64, i64, i64)> {
         let count = |sql: &str| -> Result<i64> { Ok(self.store.conn().query_row(sql, [], |r| r.get(0))?) };
         let mut resolved = 0;
         for id in resolutions.removed.keys() {
@@ -2007,7 +2007,7 @@ impl Review {
     }
 }
 
-fn csv_field(value: &str) -> String {
+pub(crate) fn csv_field(value: &str) -> String {
     if value.contains([',', '"', '\n', '\r']) {
         format!("\"{}\"", value.replace('"', "\"\""))
     } else {

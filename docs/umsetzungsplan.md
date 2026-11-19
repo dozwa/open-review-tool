@@ -294,6 +294,24 @@ verblindet ist.
 
 ### 5 Bericht, Teil 1 (M)
 
+Stand 19.11.2026: umgesetzt. Festlegungen beim Bau:
+
+- Der Bericht ist eine Projektion (`report.rs`) und schreibt nichts ins Log.
+- Eine Ebene des Diagramms ist eine Screening-Station mit allen Runden; für einen Eintrag gilt die letzte Runde,
+  in der er zugeteilt war. Im freien Ablauf ist jede Stufe eine Ebene. Stichproben (Pilot) sind keine Ebene.
+  Die Volltext-Ebene erscheint, sobald Titel/Abstract läuft, und zeigt dann, was auf die Beschaffung wartet.
+- Nachträglich als Dublette entfernte Einträge zählen in keiner Ebene, nur im Kasten der Dubletten.
+- Einträge in einer verblindeten Stufe zählen als offen, auch bei der Leitung.
+- `Flow::check` rechnet jede Ebene nach; geht etwas nicht auf, zeigt die App das über dem Diagramm.
+- Hauptgrund eines Ausschlusses: der Grund der Klärung, sonst der gemeinsame Grund der Stimmen, sonst der Grund,
+  der in den Kriterien zuerst steht. Der Methodentext sagt das.
+- Dateien: Diagramm (SVG), ausgeschlossene und nicht beschaffbare Volltexte (CSV), Eingeschlossene (RIS),
+  Suchanhang und Methodentext (Markdown). Der Methodentext nennt je Station Regel, Personenzahl, Runden,
+  Übereinstimmung mit Intervall und Klärung, dazu übersteuerte Gates und Limitationen (eine Stimme, eine Stimme
+  mit Prüfung, unverblindet).
+- Offen für Meilenstein 6: der Zweig „andere Quellen“ im Diagramm. Offen für Meilenstein 7: Eine Stufe, die aus
+  einer Station mit mehreren Runden schöpft, nimmt nur die letzte Runde.
+
 - `report.rs`: Zahlen des Flussdiagramms je Quelle und Station, Gründe je Stufe getrennt. Diagramm als SVG aus
   dem Kern, damit es testbar ist.
 - Exporte: ausgeschlossene Volltexte mit Grund, Eingeschlossene als RIS, Suchanhang, Methodentext zur Auswahl

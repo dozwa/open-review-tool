@@ -7,6 +7,7 @@ use ort_core::exchange::{self, Bundle, MergeReport};
 use ort_core::fulltext::{
     Assign, FileProblem, FullTextOverview, Location, Suggestion, ZoteroConfirm, ZoteroLink, ZoteroSuggestion,
 };
+use ort_core::report::Report;
 use ort_core::search::Search;
 use ort_core::service::{
     ChainReport, Conflict, DuplicateList, ImportSource, NextRecord, OpenStage, PairDecision, RecordDetail,
@@ -423,6 +424,20 @@ pub async fn stage_export_csv(
 ) -> Res<()> {
     let csv = open(&state, &review_id)?.export_csv(&uuid(&stage_id)?).map_err(err)?;
     std::fs::write(path, csv).map_err(err)
+}
+
+// ---------------------------------------------------------------- Bericht
+
+#[tauri::command]
+pub async fn report(state: State<'_, AppState>, review_id: String) -> Res<Report> {
+    open(&state, &review_id)?.report().map_err(err)
+}
+
+/// Schreibt eine Datei des Berichts: Diagramm, Ausschlüsse, Eingeschlossene, Suchanhang oder Methodentext.
+#[tauri::command]
+pub async fn report_export(state: State<'_, AppState>, review_id: String, kind: String, path: String) -> Res<()> {
+    let file = open(&state, &review_id)?.report_file(&kind).map_err(err)?;
+    std::fs::write(path, file.content).map_err(err)
 }
 
 // ---------------------------------------------------------------- Austausch

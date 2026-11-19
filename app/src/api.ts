@@ -566,6 +566,58 @@ export function gateText(gate: GateResult): string {
 export const canManage = (role: string) => role === "owner" || role === "admin";
 export const canVote = (role: string) => role === "owner" || role === "admin" || role === "reviewer";
 
+/** Grund eines Ausschlusses mit Zahl; ohne Kürzel heißt: kein Hauptgrund genannt. */
+export interface ReasonCount {
+  code: string;
+  text: string;
+  n: number;
+}
+
+/** Eine Ebene des Flussdiagramms: eine Screening-Station mit allen Runden. */
+export interface FlowLevel {
+  key: string;
+  label: string;
+  rounds: number;
+  input_from: string | null;
+  input: number;
+  retrieval: { sought: number; unavailable: number; open: number; waiting: number } | null;
+  not_assigned: number;
+  assessed: number;
+  included: number;
+  excluded: number;
+  open: number;
+  blinded: number;
+  reasons: ReasonCount[];
+  fulltext: boolean;
+}
+
+export interface Flow {
+  sources: { source: string; origin: string; n_records: number; n_duplicates: number }[];
+  identified: number;
+  exact_duplicates: number;
+  resolved_duplicates: number;
+  unique: number;
+  levels: FlowLevel[];
+  included: number | null;
+  complete: boolean;
+  record_term: string;
+  records_term: string;
+  source_term: string;
+  sources_term: string;
+}
+
+export interface Report {
+  flow: Flow;
+  /** Stellen, an denen das Diagramm nicht aufgeht; im Normalfall leer. */
+  problems: string[];
+  svg: string;
+  methods: string;
+  search_appendix: string;
+  n_excluded_rows: number;
+}
+
+export type ReportFileKind = "diagram" | "excluded" | "included" | "search" | "methods";
+
 export const api = {
   identity: () => call<Person | null>("identity_get"),
   createIdentity: (name: string) => call<Person>("identity_create", { name }),
@@ -591,6 +643,9 @@ export const api = {
   resolveDuplicates: (reviewId: string, pairs: PairDecision[]) =>
     call<number>("duplicates_resolve", { reviewId, pairs }),
   verifyChain: (reviewId: string) => call<ChainReport>("chain_verify", { reviewId }),
+  report: (reviewId: string) => call<Report>("report", { reviewId }),
+  exportReport: (reviewId: string, kind: ReportFileKind, path: string) =>
+    call<void>("report_export", { reviewId, kind, path }),
 
   fulltexts: (reviewId: string) => call<FullTextOverview>("fulltext_overview", { reviewId }),
   setFulltextFolder: (reviewId: string, path: string | null) => call<void>("fulltext_folder_set", { reviewId, path }),

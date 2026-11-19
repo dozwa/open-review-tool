@@ -695,3 +695,23 @@ button.small { height: 26px; padding: 0 10px; }
 .reading-switch .segmented { flex: none; margin: 0; }
 .pdf-bar { flex-wrap: wrap; row-gap: 6px; }
 .pdf-search { flex: 1 1 220px; }
+
+/* Bericht */
+.flow-diagram { padding: 16px; overflow-x: auto; color: var(--ink); }
+.flow-diagram svg { display: block; margin: 0 auto; max-width: 100%; height: auto; }
+.report-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.report-table th, .report-table td { padding: 9px 14px; text-align: right; white-space: nowrap; }
+.report-table th:first-child { text-align: left; white-space: normal; }
+.report-table thead th { font-size: 12px; font-weight: 500; color: var(--ink-2); }
+.report-table tbody tr { border-top: 0.5px solid var(--line); }
+.report-table tbody th { font-weight: 500; }
+.report-file { display: flex; gap: 14px; align-items: center; justify-content: space-between; padding: 10px 14px; }
+.report-file + .report-file { border-top: 0.5px solid var(--line); }
+.report-file > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.report-file .muted { font-size: 12px; }
+.report-file button { flex: none; }
+.report-actions { display: flex; gap: 6px; }
+.report-text {
+  margin: 0; padding: 14px 16px; max-height: 420px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere;
+  font: inherit; font-size: 13px; line-height: 1.55; -webkit-user-select: text; user-select: text;
+}
