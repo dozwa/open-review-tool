@@ -79,7 +79,7 @@ Tauri 2 mit der WebView von macOS, React 18.
 
 ## Wie es geprüft ist
 
-- **Kern:** 148 Tests, dazu 2 für das Lesen der Zotero-Antworten in der App. Darunter die Referenzwerte der früheren SQL-Tests (Cohen's Kappa gegen scikit-learn,
+- **Kern:** 152 Tests, dazu 2 für das Lesen der Zotero-Antworten in der App. Darunter die Referenzwerte der früheren SQL-Tests (Cohen's Kappa gegen scikit-learn,
   Fleiss' Kappa am Wikipedia-Beispiel, Krippendorffs Alpha am publizierten Beispiel mit 0,743, PABAK, Prozent,
   sechs `final_decision`-Szenarien, Maybe-Regel). Die Werte erzeugt `crates/ort-core/tests/fixtures/make_agreement_fixtures.py`.
 - **Austausch:** veränderte Datei, nachträglich neu gehashte Datei ohne Signatur, Außenstehende, Lücken in einer
@@ -203,7 +203,7 @@ Nur für Entwicklung und Tests.
   und Häufigkeiten gelten je Stufe, nicht über alle Runden einer Station. Reviews, die vor diesem Stand mit der
   JBI-Vorlage angelegt wurden, haben für die Charting-Stationen kein Gate im Log; das Charting geht dort trotzdem.
 - **Sprachen:** Die App spricht Deutsch und Englisch (britisch). Die Sprache ist eine Einstellung der Person
-  (Auswahl unten in der Seitenleiste, sonst die Sprache des Systems) und steht nie im Log. Übersetzt wird, was
+  (Auswahl in den Einstellungen, sonst die Sprache des Systems) und steht nie im Log. Übersetzt wird, was
   die App selbst sagt: Oberfläche, Fehlermeldungen, Texte der mitgelieferten Vorlagen, Leitlinien,
   Registrierungsformular, Bericht. Was Menschen schreiben (Kriterien, Suchstrings, Notizen, Formularfelder, Namen
   von Stufen), bleibt, wie es geschrieben wurde. Die mitgelieferten Vorlagen stehen immer in der deutschen Fassung
@@ -216,6 +216,15 @@ Nur für Entwicklung und Tests.
   Typprüfung. Nicht übersetzt sind Spaltenköpfe der CSV-Dateien (englische Schlüssel) und der Projekttext selbst
   (README, Doku, Kommentare bleiben deutsch). Eine Meldung zu einem fehlgeschlagenen Import steht in der Sprache
   in der Tabelle, die beim Import galt.
+- **Einstellungen:** Zwei Ebenen, beide nur auf dem eigenen Rechner und nie im Log oder in einem Paket. Das
+  Programm (Zahnrad unten in der Seitenleiste oder ⌘,) hält Sprache, Erscheinungsbild, Akzentfarbe,
+  Entscheidungsfarben (auch eine Palette für Farbfehlsichtigkeit), Schriftgröße, Dichte, den Aufbau der
+  Screening-Seite und die Ordner, in denen Dialoge für Exporte und Pakete beginnen; es liegt als `settings.json`
+  im Datenordner der App. Ein Review (Bereich „Einstellungen“) hat eine Kennfarbe und kann Ausgabesprache,
+  Ordner und Screening-Aufbau überschreiben; das liegt in der Review-Datei. Wo die Reviews liegen, wird gezeigt,
+  lässt sich aber nicht ändern.
+- **Fokusmodus:** Beim Screening und bei der Eingabe im Formular blendet „Fokus“ (Taste F) Seitenleiste, Liste
+  und Nebensächliches aus und schaltet das Fenster in den Vollbildmodus; Esc beendet ihn.
 - **Leitlinien:** Zu jeder Vorlage außer dem freien Ablauf liegt eine Zusammenfassung ihrer Leitlinie in der App
   (`crates/ort-core/guidance/<sprache>/`), in eigenen Worten, mit Quelle, Abrufdatum und Adresse je Abschnitt. Es ist keine
   wörtliche Kopie: Die Lizenzen der Originale erlauben das nicht durchgehend, und das JBI Manual ändert sich

@@ -26,7 +26,9 @@ import {
 import { PdfView } from "./PdfView";
 import { stageState } from "./ReviewPage";
 import { HelpButton } from "./Guidance";
+import { FocusButton, useFocusMode } from "./focus";
 import { t } from "./i18n";
+import { inFolder } from "./settings";
 import { Banner, Empty, Group, Icon, PageHeader, Pill, Row, Segmented, Stat } from "./ui";
 
 const MINE_LABEL: Record<MineStatus, string> = {
@@ -114,7 +116,7 @@ export function FormStagePage() {
 
   async function exportFile(kind: "table" | "frequencies") {
     const name = kind === "table" ? t("extraktion-tabelle.csv") : t("extraktion-haeufigkeiten.csv");
-    const path = await save({ defaultPath: name, filters: [{ name: "CSV", extensions: ["csv"] }] });
+    const path = await save({ defaultPath: await inFolder("export", name, reviewId), filters: [{ name: "CSV", extensions: ["csv"] }] });
     if (path) await run(() => api.exportForm(reviewId, stageId, kind, path), t("CSV gespeichert."));
   }
 
@@ -329,6 +331,7 @@ export function FormEntryPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [reading, setReading] = useState("abstract");
+  const [focus, setFocus] = useFocusMode();
   const started = useRef(Date.now());
 
   const load = useCallback(async () => {
@@ -410,9 +413,10 @@ export function FormEntryPage() {
           {compared && <Pill tone={STATUS_TONE[compared.status]}>{STATUS_LABEL[compared.status]}</Pill>}
         </div>
         <span className="screening-tools">
+          <FocusButton on={focus} onChange={setFocus} />
           <button className="ghost" disabled={!entry.previous} onClick={() => navigate(`${base}/${entry.previous}`)}>{t("Zurück")}</button>
           <button className="ghost" disabled={!entry.next} onClick={() => navigate(`${base}/${entry.next}`)}>{t("Weiter")}</button>
-          <HelpButton reviewId={reviewId} station={stage.station} context={stage.name} />
+          <span className="focus-hide"><HelpButton reviewId={reviewId} station={stage.station} context={stage.name} /></span>
         </span>
       </div>
       {error && <Banner kind="error" onClose={() => setError("")}>{error}</Banner>}

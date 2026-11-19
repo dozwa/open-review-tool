@@ -8,6 +8,7 @@ import { core } from "./core";
 import { formStage, mockForms } from "./mockForms";
 import { mockGuidance } from "./mockGuidance";
 import { mockReport } from "./mockReport";
+import { mockColor, mockSettings } from "./mockSettings";
 
 // Protokoll, Abweichungen und Checkliste des Berichts
 const mockProtocol: { registration: Record<string, unknown> | null; deviations: Record<string, string>[] } = {
@@ -394,20 +395,22 @@ export function installMock() {
     const a = (args ?? {}) as Record<string, unknown>;
     const form = mockForms(cmd, a, { members, sourceTypes, terms });
     if (form !== undefined) return form;
+    const own = mockSettings(cmd, a);
+    if (own !== undefined) return own;
     const guidance = mockGuidance(cmd, a, () => mockProtocol.registration);
     if (guidance !== undefined) return guidance;
     switch (cmd) {
       case "identity_get": return identity;
       case "templates_list": return templates;
-      case "review_create": return { id: "r2", title: String(a.title), role: "owner" };
+      case "review_create": return { id: "r2", title: String(a.title), role: "owner", color: "" };
       case "stage_gate": return a.stageId === "s2" ? { passed: false, checks: [
         { check: "all_decided", passed: false, numerator: 24, denominator: 38 },
         { check: "no_open_conflicts", passed: false, numerator: 9, denominator: 38 },
       ] } : null;
       case "identity_create": identity = { ...me, name: String(a.name) }; return identity;
       case "reviews_list": return [
-        { id: "r1", title: "Digitale Interventionen bei Migräne", role: "owner" },
-        { id: "r2", title: "KI-gestützte Triage in der Notaufnahme", role: "admin" },
+        { id: "r1", title: "Digitale Interventionen bei Migräne", role: "owner", color: mockColor("r1") },
+        { id: "r2", title: "KI-gestützte Triage in der Notaufnahme", role: "admin", color: mockColor("r2") },
       ];
       case "review_detail": return {
         id: a.reviewId, title: a.reviewId === "r2" ? "KI-gestützte Triage in der Notaufnahme" : "Digitale Interventionen bei Migräne",

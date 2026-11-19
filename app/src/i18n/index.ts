@@ -5,11 +5,12 @@
 // Eintrag in `LANGUAGES`. Der Typ von `t` lässt nur Texte zu, die im englischen Katalog stehen; ein
 // neuer Text ohne Übersetzung fällt damit bei `npm run typecheck` auf.
 //
-// Die Sprache ist eine Einstellung der Person (im Browser-Speicher der App), nie Teil eines Reviews.
+// Die Sprache ist eine Einstellung der Person (`settings.ts`), nie Teil eines Reviews.
 // Ein Wechsel lädt die Oberfläche neu; deshalb darf `t` auch in Konstanten auf Modulebene stehen.
 
 import React from "react";
 
+import { saveSettings, settings } from "../settings";
 import { en } from "./en";
 
 /** Eine Übersetzung: ein Text oder je Mehrzahlform einer (`one`, `other`, je nach Sprache auch `few`, `many`). */
@@ -24,7 +25,6 @@ export const LANGUAGES = [
 ] as const satisfies readonly { code: string; name: string; locale: string; catalog: Catalog | null }[];
 export type LanguageCode = (typeof LANGUAGES)[number]["code"];
 
-const STORAGE_KEY = "ort.language";
 const FALLBACK: Catalog = en;
 
 function known(code: string | null | undefined): LanguageCode | null {
@@ -32,16 +32,8 @@ function known(code: string | null | undefined): LanguageCode | null {
   return LANGUAGES.find((l) => l.code === base)?.code ?? null;
 }
 
-function initial(): LanguageCode {
-  let stored: string | null = null;
-  try {
-    stored = localStorage.getItem(STORAGE_KEY);
-  } catch {
-    stored = null;
-  }
-  // Ohne eigene Wahl gilt die Sprache des Systems, sonst Englisch.
-  return known(stored) ?? known(typeof navigator === "undefined" ? null : navigator.language) ?? "en";
-}
+// Ohne eigene Wahl gilt die Sprache des Systems, sonst Englisch.
+const initial = (): LanguageCode => known(settings().language) ?? known(typeof navigator === "undefined" ? null : navigator.language) ?? "en";
 
 /** Die Sprache der Oberfläche. Sie steht beim Laden fest. */
 export const language: LanguageCode = initial();
@@ -52,37 +44,18 @@ const plural = new Intl.PluralRules(locale);
 
 if (typeof document !== "undefined") document.documentElement.lang = language;
 
-/** Wählt eine Sprache und lädt die Oberfläche neu. */
-export function setLanguage(code: LanguageCode) {
-  try {
-    localStorage.setItem(STORAGE_KEY, code);
-  } catch {
-    // Ohne Speicher gilt die Wahl nur bis zum nächsten Start.
-  }
+/** Wählt eine Sprache und lädt die Oberfläche neu. Leer heißt: Sprache des Systems. */
+export async function setLanguage(code: LanguageCode | "") {
+  await saveSettings({ language: code });
   window.location.reload();
 }
 
-const OUTPUT_KEY = "ort.outputLanguage";
-
 /**
  * Sprache für Dateien, die das Review verlassen (Bericht, Vorbereitung der Registrierung). Sie darf von
- * der Sprache der Oberfläche abweichen: Ein Team arbeitet deutsch und berichtet englisch.
+ * der Sprache der Oberfläche abweichen: Ein Team arbeitet deutsch und berichtet englisch. `code` ist der
+ * Wert aus den Einstellungen; leer heißt „wie die Oberfläche“.
  */
-export function outputLanguage(): LanguageCode {
-  try {
-    return known(localStorage.getItem(OUTPUT_KEY)) ?? language;
-  } catch {
-    return language;
-  }
-}
-
-export function setOutputLanguage(code: LanguageCode) {
-  try {
-    localStorage.setItem(OUTPUT_KEY, code);
-  } catch {
-    // Ohne Speicher gilt die Wahl nur für diesen Aufruf.
-  }
-}
+export const outputLanguage = (code: string | null | undefined): LanguageCode => known(code) ?? language;
 
 type Params = Record<string, string | number>;
 

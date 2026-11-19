@@ -5,7 +5,8 @@ import React, { useEffect, useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 
 import { api, errorText, RegistrationDraft, RegistrationItem, ReviewDetail, safeFileName } from "./api";
-import { formatDate, outputLanguage, setOutputLanguage, t, tIn, tn, tx } from "./i18n";
+import { inFolder, saveProjectSettings, useProjectSettings } from "./settings";
+import { formatDate, outputLanguage, t, tIn, tn, tx } from "./i18n";
 import { Banner, Group, Icon, LanguageSelect, Pill, Row } from "./ui";
 
 type Run = (action: () => Promise<string | void>, done?: string) => Promise<void>;
@@ -111,8 +112,9 @@ export function RegistrationTab({ review, run }: { review: ReviewDetail; run: Ru
   const [draft, setDraft] = useState<RegistrationDraft | null>(null);
   const [step, setStep] = useState(0);
   // Feldnamen, Hinweise und Vorschläge erscheinen in der Sprache, in der registriert wird.
-  const [lang, setLang] = useState(outputLanguage);
   const [error, setError] = useState("");
+  const lang = outputLanguage(useProjectSettings(review.id)?.effective.output_language);
+  const setLang = (code: string) => void saveProjectSettings(review.id, { output_language: code }).catch((e) => setError(errorText(e)));
 
   useEffect(() => {
     api.registrationDraft(review.id, lang).then(setDraft).catch((e) => setError(errorText(e)));
@@ -136,7 +138,7 @@ export function RegistrationTab({ review, run }: { review: ReviewDetail; run: Ru
 
   async function exportFile() {
     const path = await save({
-      defaultPath: tIn(lang, "{title}-registrierung-osf.md", { title: safeFileName(review.title) }),
+      defaultPath: await inFolder("export", tIn(lang, "{title}-registrierung-osf.md", { title: safeFileName(review.title) }), review.id),
       filters: [{ name: "Markdown", extensions: ["md"] }],
     });
     if (!path) return;
@@ -152,7 +154,7 @@ export function RegistrationTab({ review, run }: { review: ReviewDetail; run: Ru
         title={t("Registrierung vorbereiten: {name}", { name: draft.name })}
         action={
           <span className="inline-actions">
-            <LanguageSelect value={lang} label={t("Sprache der Ausgabe")} onChange={(code) => { setOutputLanguage(code); setLang(code); }} />
+            <LanguageSelect value={lang} label={t("Sprache der Ausgabe")} onChange={setLang} />
             <button className="small" onClick={exportFile}><Icon name="download" size={13} /> {t("Als Markdown speichern")}</button>
           </span>
         }

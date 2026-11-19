@@ -17,13 +17,14 @@ use ort_core::service::{
     ChainReport, Conflict, DuplicateList, ImportSource, NextRecord, OpenStage, PairDecision, RecordDetail,
     RecordFilter, RecordList, ReviewDetail, ReviewListItem, SearchView, Snapshot, StageDetail, StageView, Summary,
 };
+use ort_core::settings::{self, Effective, ProjectSettings, Settings};
 use ort_core::sources::SourceList;
 use ort_core::store::BatchRow;
 use ort_core::workflow::{self, GateResult, TemplateInfo};
 use ort_core::{i18n, tr, Identity, PublicIdentity, Review};
 use serde::Serialize;
 use serde_json::Value;
-use tauri::State;
+use tauri::{AppHandle, Runtime, State};
 use uuid::Uuid;
 
 use crate::{zotero, AppState};
@@ -66,13 +67,96 @@ fn in_language<T>(lang: Option<&str>, run: impl FnOnce() -> T) -> Res<T> {
 
 // ---------------------------------------------------------------- Sprache
 
+/// Kennung des Menüeintrags „Einstellungen …“.
+pub const SETTINGS_MENU: &str = "settings";
+
 /// Setzt die Sprache der App: Fehlermeldungen, Texte der Vorlagen, Leitlinien und Bericht.
 #[tauri::command]
-pub async fn language_set(code: String) -> Res<()> {
-    match i18n::set_default(&code) {
-        true => Ok(()),
-        false => Err(tr!("Unbekannte Sprache: {}", code)),
+pub async fn language_set<R: Runtime>(app: AppHandle<R>, code: String) -> Res<()> {
+    if !i18n::set_default(&code) {
+        return Err(tr!("Unbekannte Sprache: {}", code));
     }
+    // Der Eintrag im Menü spricht dieselbe Sprache.
+    for item in app.menu().and_then(|menu| menu.items().ok()).unwrap_or_default() {
+        let entry = item.as_submenu().and_then(|submenu| submenu.get(SETTINGS_MENU));
+        if let Some(entry) = entry.as_ref().and_then(|entry| entry.as_menuitem()) {
+            entry.set_text(tr!("Einstellungen …")).map_err(err)?;
+        }
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------- Einstellungen
+
+/// Einstellungen des Programms und wo die Daten liegen. Die Speicherorte werden nur gezeigt.
+#[derive(Serialize)]
+pub struct SettingsView {
+    settings: Settings,
+    /// Ob schon eine Datei mit Einstellungen existiert; sonst übernimmt die Oberfläche einmal ihre alten Werte.
+    stored: bool,
+    data_dir: String,
+    reviews_dir: String,
+}
+
+#[tauri::command]
+pub async fn settings_get(state: State<'_, AppState>) -> Res<SettingsView> {
+    Ok(SettingsView {
+        settings: Settings::load(&state.data_dir),
+        stored: Settings::stored(&state.data_dir),
+        data_dir: state.data_dir.to_string_lossy().to_string(),
+        reviews_dir: state.data_dir.join("reviews").to_string_lossy().to_string(),
+    })
+}
+
+#[tauri::command]
+pub async fn settings_set(state: State<'_, AppState>, settings: Settings) -> Res<()> {
+    settings.save(&state.data_dir).map_err(err)
+}
+
+/// Einstellungen eines Reviews auf diesem Rechner, dazu was mit den Programmwerten zusammen gilt.
+#[derive(Serialize)]
+pub struct ProjectSettingsView {
+    project: ProjectSettings,
+    effective: Effective,
+    file: String,
+    fulltext_folder: Option<String>,
+}
+
+fn project_view(state: &AppState, review_id: &str, review: &Review) -> Res<ProjectSettingsView> {
+    let project = review.project_settings().map_err(err)?;
+    Ok(ProjectSettingsView {
+        effective: settings::resolve(&Settings::load(&state.data_dir), &project),
+        project,
+        file: review_path(state, &uuid(review_id)?).to_string_lossy().to_string(),
+        fulltext_folder: review.fulltext_folder().map_err(err)?.map(|p| p.to_string_lossy().to_string()),
+    })
+}
+
+#[tauri::command]
+pub async fn project_settings_get(state: State<'_, AppState>, review_id: String) -> Res<ProjectSettingsView> {
+    project_view(&state, &review_id, &open(&state, &review_id)?)
+}
+
+#[tauri::command]
+pub async fn project_settings_set(
+    state: State<'_, AppState>,
+    review_id: String,
+    project: ProjectSettings,
+) -> Res<ProjectSettingsView> {
+    let review = open(&state, &review_id)?;
+    review.set_project_settings(&project).map_err(err)?;
+    project_view(&state, &review_id, &review)
+}
+
+/// Zeigt im Finder, wo die Daten liegen: die Datei eines Reviews, sonst den Ordner der Reviews.
+#[tauri::command]
+pub async fn storage_reveal(state: State<'_, AppState>, review_id: Option<String>) -> Res<()> {
+    let path = match review_id {
+        Some(id) => review_path(&state, &uuid(&id)?),
+        None => state.data_dir.join("reviews"),
+    };
+    std::process::Command::new("open").arg("-R").arg(path).spawn().map_err(err)?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------- Identität

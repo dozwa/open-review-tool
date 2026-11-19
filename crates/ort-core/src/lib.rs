@@ -11,7 +11,8 @@
 //! Rechte, Verblindung) → [`exchange`] (Dateien zwischen Personen). [`report`] rechnet aus alldem
 //! das Flussdiagramm und die Anhänge, [`sources`] bündelt Einträge zu Quellen, [`forms`] hält Formulare,
 //! Werte und den Abgleich je Feld, [`protocol`] die Registrierung des Protokolls, die Abweichungen danach
-//! und die Checkliste des Berichts.
+//! und die Checkliste des Berichts. [`settings`] hält, was nur für diesen Rechner gilt: Einstellungen des
+//! Programms und je Review.
 
 pub mod agreement;
 pub mod canonical;
@@ -32,6 +33,7 @@ pub mod registration;
 pub mod report;
 pub mod search;
 pub mod service;
+pub mod settings;
 pub mod sources;
 pub mod store;
 pub mod workflow;

@@ -9,7 +9,9 @@ import { CriteriaView } from "./Criteria";
 import { PdfView } from "./PdfView";
 import { DECISION_LABEL, RecordView } from "./StagePages";
 import { HelpButton } from "./Guidance";
+import { FocusButton, useFocusMode } from "./focus";
 import { formatNumber, t, tn, tx } from "./i18n";
+import { useScreeningLayout } from "./settings";
 import { Banner, Empty, Icon, Kbd, Pill, Segmented } from "./ui";
 
 const PAGE = 200;
@@ -29,27 +31,6 @@ const VOTE_FILTERS: Record<string, { label: string; min?: number; max?: number }
   max1: { label: t("höchstens 1 Stimme"), max: 1 },
 };
 const STATUS_LABEL: Record<string, string> = { disagreement: t("Konflikt"), needs_clarification: t("Zur Klärung"), consensus: t("Konsens") };
-
-/** Merkt sich eine Einstellung der Ansicht auf diesem Rechner. Ohne Speicher gilt der Standard. */
-function useStored(key: string, fallback: boolean): [boolean, (value: boolean) => void] {
-  const [value, setValue] = useState(() => {
-    try {
-      const stored = localStorage.getItem(key);
-      return stored === null ? fallback : stored === "1";
-    } catch {
-      return fallback;
-    }
-  });
-  const set = (next: boolean) => {
-    setValue(next);
-    try {
-      localStorage.setItem(key, next ? "1" : "0");
-    } catch {
-      // Einstellung gilt dann nur bis zum Schließen
-    }
-  };
-  return [value, set];
-}
 
 /** Je Stufe eine eigene Instanz, damit Filter und Auswahl nicht von einer Stufe in die nächste wandern. */
 export function ScreeningPage() {
@@ -78,8 +59,13 @@ function Screening() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [last, setLast] = useState("");
-  const [showSource, setShowSource] = useStored("ort.screening.source", false);
-  const [showCriteria, setShowCriteria] = useStored("ort.screening.criteria", true);
+  const [focus, setFocus] = useFocusMode();
+  // Aufbau der Seite aus den Einstellungen (Projekt vor Programm); die Schalter hier ändern sie.
+  const [layout, setLayout] = useScreeningLayout(reviewId);
+  const showSource = layout.show_source;
+  const showCriteria = layout.show_criteria;
+  const setShowSource = (show_source: boolean) => setLayout({ show_source });
+  const setShowCriteria = (show_criteria: boolean) => setLayout({ show_criteria });
 
   const filter = useCallback((): RecordFilter => {
     const votes = VOTE_FILTERS[voteCount] ?? {};
@@ -238,7 +224,7 @@ function Screening() {
   const pct = progress ? Math.round((progress.done / Math.max(progress.total, 1)) * 100) : 0;
 
   return (
-    <div className={`screening${showCriteria ? "" : " no-criteria"}`}>
+    <div className={`screening${showCriteria ? "" : " no-criteria"}${layout.show_list ? "" : " no-list"}${layout.highlight ? "" : " no-highlight"}`}>
       <div className="screening-top">
         <Link to={`/reviews/${reviewId}`} className="back-link"><Icon name="back" size={14} /> {t("Review")}</Link>
         <div className="screening-title">
@@ -248,8 +234,10 @@ function Screening() {
         </div>
         <span className="screening-tools">
           <span className="screening-count">{progress ? `${progress.done} / ${progress.total}` : ""}</span>
-          <button className="ghost" aria-pressed={showCriteria} onClick={() => setShowCriteria(!showCriteria)} title={t("Kriterien ein- oder ausblenden")}><Icon name="list" size={14} /> {t("Kriterien")}</button>
-          <HelpButton reviewId={reviewId} station={stage.station} context={stage.name} />
+          <FocusButton on={focus} onChange={setFocus} />
+          <button className="ghost focus-hide" aria-pressed={layout.show_list} onClick={() => setLayout({ show_list: !layout.show_list })} title={t("Liste ein- oder ausblenden")}><Icon name="stack" size={14} /> {t("Liste")}</button>
+          <button className="ghost focus-hide" aria-pressed={showCriteria} onClick={() => setShowCriteria(!showCriteria)} title={t("Kriterien ein- oder ausblenden")}><Icon name="list" size={14} /> {t("Kriterien")}</button>
+          <span className="focus-hide"><HelpButton reviewId={reviewId} station={stage.station} context={stage.name} /></span>
         </span>
       </div>
       <div className="progress-line"><span style={{ width: `${pct}%` }} /></div>

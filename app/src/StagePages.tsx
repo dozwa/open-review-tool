@@ -6,6 +6,7 @@ import { api, canManage, canVote, Conflict, CONFLICT_LABEL, Criteria, errorText,
 import { stageState } from "./ReviewPage";
 import { HelpButton } from "./Guidance";
 import { formatNumber, formatPercent, t } from "./i18n";
+import { inFolder } from "./settings";
 import { Avatar, Banner, DECISION_PARTS, DecisionBar, Empty, Group, Icon, PageHeader, Pill, Row, Stat } from "./ui";
 
 export const DECISION_LABEL: Record<string, string> = { include: "Include", exclude: "Exclude", maybe: "Maybe" };
@@ -157,7 +158,7 @@ export function StagePage() {
   }
 
   async function exportCsv() {
-    const path = await save({ defaultPath: `${safeFileName(stage.name)}.csv`, filters: [{ name: "CSV", extensions: ["csv"] }] });
+    const path = await save({ defaultPath: await inFolder("export", `${safeFileName(stage.name)}.csv`, reviewId), filters: [{ name: "CSV", extensions: ["csv"] }] });
     if (path) await run(() => api.exportCsv(reviewId, stageId, path), t("CSV gespeichert."));
   }
 

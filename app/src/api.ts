@@ -23,6 +23,8 @@ export interface ReviewListItem {
   id: string;
   title: string;
   role: string | null;
+  /** Kennfarbe aus den Einstellungen des Reviews; leer heißt ohne. */
+  color: string;
 }
 
 /** Ein Kriterium. Das Kürzel eines Ausschlusskriteriums ist zugleich der Ausschlussgrund. */
@@ -967,6 +969,8 @@ export const api = {
     call<Protocol>("protocol_register", { reviewId, registeredOn, registry, identifier, note }),
   /** Sprache des Kerns: Fehlermeldungen, Vorlagentexte, Bericht, Leitlinien. */
   setLanguage: (code: string) => call<void>("language_set", { code }),
+  /** Zeigt im Finder die Datei eines Reviews, ohne Angabe den Ordner der Reviews. */
+  revealStorage: (reviewId?: string) => call<void>("storage_reveal", { reviewId: reviewId ?? null }),
   exportReport: (reviewId: string, kind: ReportFileKind, path: string, lang?: string) =>
     call<void>("report_export", { reviewId, kind, path, lang }),
   guidelines: () => call<Guideline[]>("guidance_list"),

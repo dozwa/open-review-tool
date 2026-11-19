@@ -5,7 +5,8 @@ import React, { useEffect, useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 
 import { api, canManage, Checklist, errorText, FlowLevel, Protocol, Report, ReportFileKind, ReviewDetail, term } from "./api";
-import { formatDate, formatNumber, Key, outputLanguage, setOutputLanguage, t, tIn, tn } from "./i18n";
+import { inFolder, saveProjectSettings, useProjectSettings } from "./settings";
+import { formatDate, formatNumber, Key, outputLanguage, t, tIn, tn } from "./i18n";
 import { today } from "./Search";
 import { Banner, Empty, Group, Icon, LanguageSelect, Pill, Row, Stat } from "./ui";
 
@@ -229,7 +230,9 @@ export function ReportTab({ review, run }: { review: ReviewDetail; run: Run }) {
   const [error, setError] = useState("");
 
   // Diagramm, Texte und Dateien erscheinen in der Sprache, in der berichtet wird.
-  const [lang, setLang] = useState(outputLanguage);
+  // Die Wahl gehört zum Review und steht in dessen Einstellungen.
+  const lang = outputLanguage(useProjectSettings(review.id)?.effective.output_language);
+  const setLang = (code: string) => void saveProjectSettings(review.id, { output_language: code }).catch((e) => setError(errorText(e)));
   const load = () => api.report(review.id, lang).then(setReport).catch((e) => setError(errorText(e)));
   useEffect(() => {
     setReport(null);
@@ -239,7 +242,7 @@ export function ReportTab({ review, run }: { review: ReviewDetail; run: Run }) {
 
   async function saveFile(kind: ReportFileKind) {
     const file = FILES[kind];
-    const path = await save({ defaultPath: tIn(lang, file.name), filters: [{ name: file.type, extensions: [file.extension] }] });
+    const path = await save({ defaultPath: await inFolder("export", tIn(lang, file.name), review.id), filters: [{ name: file.type, extensions: [file.extension] }] });
     if (path) await run(() => api.exportReport(review.id, kind, path, lang), t("Datei gespeichert."));
   }
 
@@ -301,7 +304,7 @@ export function ReportTab({ review, run }: { review: ReviewDetail; run: Run }) {
         title={t("Flussdiagramm")}
         action={
           <span className="inline-actions">
-            <LanguageSelect value={lang} label={t("Sprache der Ausgabe")} onChange={(code) => { setOutputLanguage(code); setLang(code); }} />
+            <LanguageSelect value={lang} label={t("Sprache der Ausgabe")} onChange={setLang} />
             <button className="small" onClick={() => saveFile("diagram")}><Icon name="download" size={13} /> {t("Als SVG speichern")}</button>
           </span>
         }

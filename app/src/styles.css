@@ -3,7 +3,8 @@
    Paletten-Validator geprüft (hell und dunkel, benachbarte Paare, Farbsehschwächen). */
 
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
+  --zoom: 1;
   --accent: #007aff;
   --accent-ink: #ffffff;
   --ink: #1d1d1f;
@@ -20,7 +21,7 @@
   --hover: rgba(0, 0, 0, 0.045);
   --selected: rgba(0, 0, 0, 0.075);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 6px 20px rgba(0, 0, 0, 0.06);
-  --ring: rgba(0, 122, 255, 0.28);
+  --ring: color-mix(in srgb, var(--accent) 30%, transparent);
 
   --c-inc: #1baf7a;
   --c-may: #eda100;
@@ -41,32 +42,51 @@
   :root { --accent: AccentColor; --accent-ink: AccentColorText; }
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --ink: #f5f5f7;
-    --ink-2: #a1a1a6;
-    --ink-3: #6e6e73;
-    --line: rgba(255, 255, 255, 0.08);
-    --line-strong: rgba(255, 255, 255, 0.16);
-    --window: #232326;
-    --sidebar: rgba(44, 44, 48, 0.82);
-    --content: #1c1c1e;
-    --surface: #242427;
-    --surface-2: #323236;
-    --field: #2c2c2f;
-    --hover: rgba(255, 255, 255, 0.06);
-    --selected: rgba(255, 255, 255, 0.1);
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
-    --ring: rgba(10, 132, 255, 0.4);
-    --c-inc: #199e70;
-    --c-may: #c98500;
-    --c-cla: #d55181;
-    --c-dis: #9085e9;
-    --c-exc: #e66767;
-    --c-pen: #48484c;
-    --c-blue: #3987e5;
-  }
+/* Hell oder Dunkel setzt `settings.ts` als `data-theme`, nach der Wahl in den Einstellungen oder dem System. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ink: #f5f5f7;
+  --ink-2: #a1a1a6;
+  --ink-3: #6e6e73;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.16);
+  --window: #232326;
+  --sidebar: rgba(44, 44, 48, 0.82);
+  --content: #1c1c1e;
+  --surface: #242427;
+  --surface-2: #323236;
+  --field: #2c2c2f;
+  --hover: rgba(255, 255, 255, 0.06);
+  --selected: rgba(255, 255, 255, 0.1);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
+  --ring: color-mix(in srgb, var(--accent) 42%, transparent);
+  --c-inc: #199e70;
+  --c-may: #c98500;
+  --c-cla: #d55181;
+  --c-dis: #9085e9;
+  --c-exc: #e66767;
+  --c-pen: #48484c;
+  --c-blue: #3987e5;
 }
+
+/* Akzentfarbe aus den Einstellungen; „system“ lässt die des Systems stehen. */
+:root[data-accent="blue"] { --accent: #007aff; --accent-ink: #ffffff; }
+:root[data-accent="purple"] { --accent: #9a47b0; --accent-ink: #ffffff; }
+:root[data-accent="pink"] { --accent: #dc3d87; --accent-ink: #ffffff; }
+:root[data-accent="red"] { --accent: #dc3a3f; --accent-ink: #ffffff; }
+:root[data-accent="orange"] { --accent: #cf6a1c; --accent-ink: #ffffff; }
+:root[data-accent="green"] { --accent: #2f9a48; --accent-ink: #ffffff; }
+:root[data-accent="graphite"] { --accent: #6e6e73; --accent-ink: #ffffff; }
+:root[data-theme="dark"][data-accent="graphite"] { --accent: #98989d; --accent-ink: #1d1d1f; }
+
+/* Entscheidungsfarben für Farbfehlsichtigkeit: die Palette von Okabe und Ito. */
+:root[data-palette="colorblind"] { --c-inc: #009e73; --c-may: #e69f00; --c-cla: #cc79a7; --c-dis: #0072b2; --c-exc: #d55e00; }
+:root[data-theme="dark"][data-palette="colorblind"] { --c-dis: #56b4e9; }
+
+/* Schriftgröße: Die ganze Oberfläche wird skaliert; Höhen in `vh` rechnen den Faktor heraus. */
+:root[data-size="small"] { --zoom: 0.92; }
+:root[data-size="large"] { --zoom: 1.12; }
+body { zoom: var(--zoom); }
 
 /* In der App scheint der Glaseffekt des Fensters durch die Seitenleiste. */
 html.native, html.native body { background: transparent; }
@@ -133,7 +153,7 @@ kbd {
 
 /* ---------------------------------------------------------------- Fenster */
 
-.shell { display: grid; grid-template-columns: 236px 1fr; height: 100vh; overflow: hidden; }
+.shell { display: grid; grid-template-columns: 236px 1fr; height: calc(100vh / var(--zoom)); overflow: hidden; }
 
 .sidebar {
   display: flex; flex-direction: column; min-height: 0; background: var(--sidebar);
@@ -170,6 +190,10 @@ kbd {
   justify-content: flex-start; text-align: left; border: 0; background: none; box-shadow: none; border-radius: 8px;
 }
 .me:hover { background: var(--hover); }
+a.me { color: var(--ink); text-decoration: none; }
+a.me.active { background: var(--selected); }
+.me > span:not(.avatar) { flex: 1; }
+.me > .icon { color: var(--ink-2); }
 .me span { display: flex; flex-direction: column; min-width: 0; }
 .me strong { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .me small { color: var(--ink-2); font-weight: 400; }
@@ -280,7 +304,7 @@ main { max-width: 900px; margin: 0 auto; padding: 44px 36px 64px; }
 /* ---------------------------------------------------------------- Erster Start, Übersicht */
 
 .setup {
-  display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 24px;
+  display: flex; align-items: center; justify-content: center; min-height: calc(100vh / var(--zoom)); padding: 24px;
   background: radial-gradient(1200px 600px at 50% -10%, color-mix(in srgb, var(--accent) 14%, var(--content)), var(--content));
 }
 .setup-card { width: 380px; display: flex; flex-direction: column; gap: 14px; text-align: center; }
@@ -515,7 +539,7 @@ mark.exc { background: color-mix(in srgb, var(--c-exc) 24%, transparent); }
 
 /* Drei Spalten: Liste, Eintrag, Kriterien. Die Seite nutzt die ganze Breite und scrollt je Spalte. */
 main:has(.screening) { max-width: none; padding: 40px 0 0; }
-.screening { display: flex; flex-direction: column; height: calc(100vh - 40px); }
+.screening { display: flex; flex-direction: column; height: calc(100vh / var(--zoom) - 40px); }
 .screening > .banner { margin: 8px 18px 0; }
 .screening-top { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; height: 30px; padding: 0 18px; }
 .screening-title { display: flex; align-items: center; gap: 8px; }
@@ -526,6 +550,10 @@ main:has(.screening) { max-width: none; padding: 40px 0 0; }
 .progress-line > span { display: block; height: 100%; background: var(--accent); border-radius: 999px; transition: width 0.25s ease; }
 .screening-columns { flex: 1; min-height: 0; display: grid; grid-template-columns: 272px minmax(0, 1fr) 286px; margin-top: 10px; border-top: 0.5px solid var(--line); }
 .screening.no-criteria .screening-columns { grid-template-columns: 272px minmax(0, 1fr); }
+.screening.no-list .screening-columns { grid-template-columns: minmax(0, 1fr) 286px; }
+.screening.no-list.no-criteria .screening-columns { grid-template-columns: minmax(0, 1fr); }
+.screening.no-list .screening-list { display: none; }
+.screening.no-highlight mark { background: none; color: inherit; font-weight: inherit; }
 .screening-list, .screening-main, .screening-criteria { min-height: 0; overflow-y: auto; }
 .screening-list { border-right: 0.5px solid var(--line); background: var(--surface); display: flex; flex-direction: column; }
 .screening-criteria { border-left: 0.5px solid var(--line); background: var(--surface); padding: 16px 16px 28px; }
@@ -629,18 +657,24 @@ main:has(.screening) { max-width: none; padding: 40px 0 0; }
 .dock-row { display: flex; gap: 8px; margin-bottom: 10px; }
 .dock-row .note { flex: 1; height: 30px; border-radius: 8px; padding: 0 10px; }
 .vote-buttons { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+/* Entscheidungsknöpfe: getönte Fläche in der Farbe der Entscheidung statt einer vollen. Ruhiger neben dem
+   Text, und die Farbe bleibt als Signal erhalten. `--v` ist die Farbe der Entscheidung. */
 .vote {
-  height: 46px; border-radius: 12px; border: 0; font-size: 15px; font-weight: 600; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
-  color: #fff;
+  height: 42px; border-radius: 10px; font-size: 14px; font-weight: 600; box-shadow: none;
+  color: color-mix(in srgb, var(--v) 72%, var(--ink));
+  background: color-mix(in srgb, var(--v) 13%, var(--content));
+  border: 1px solid color-mix(in srgb, var(--v) 38%, transparent);
+  transition: background 0.12s ease, border-color 0.12s ease;
 }
-.vote kbd { background: rgba(255, 255, 255, 0.24); }
-.vote-include { background: var(--c-inc); color: #fff; border-color: transparent; }
-.vote-exclude { background: var(--c-exc); color: #fff; border-color: transparent; }
-.vote-maybe { background: var(--c-may); color: #2b1d00; border-color: transparent; }
-.vote-maybe kbd { background: rgba(0, 0, 0, 0.12); }
-.vote-include:hover { background: color-mix(in srgb, var(--c-inc) 88%, black); }
-.vote-exclude:hover { background: color-mix(in srgb, var(--c-exc) 88%, black); }
-.vote-maybe:hover { background: color-mix(in srgb, var(--c-may) 90%, black); }
+.vote .icon { color: var(--v); }
+.vote kbd { background: color-mix(in srgb, var(--v) 18%, transparent); color: inherit; opacity: 1; }
+.vote:hover { background: color-mix(in srgb, var(--v) 24%, var(--content)); border-color: color-mix(in srgb, var(--v) 60%, transparent); }
+.vote:active { background: var(--v); border-color: transparent; color: #fff; transform: none; }
+.vote:active .icon { color: inherit; }
+.vote:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--v) 35%, transparent); }
+.vote-include { --v: var(--c-inc); }
+.vote-maybe { --v: var(--c-may); }
+.vote-exclude { --v: var(--c-exc); }
 button.small { height: 26px; padding: 0 10px; }
 .last-vote { margin-top: 8px; color: var(--ink-3); font-size: 12px; text-align: center; }
 
@@ -862,5 +896,61 @@ button.small { height: 26px; padding: 0 10px; }
 /* ---------------------------------------------------------------- Sprache */
 
 .language-select { width: auto; min-width: 0; padding: 3px 22px 3px 8px; font-size: 12px; }
-.language-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px 2px; color: var(--ink-3); }
-.language-row .language-select { flex: 1; border-color: transparent; background-color: transparent; box-shadow: none; color: var(--ink-2); }
+
+/* ---------------------------------------------------------------- Einstellungen */
+
+/* Farbfelder: Kennfarbe eines Reviews und Akzentfarbe. */
+.tag-blue { --tag: #2a78d6; }
+.tag-purple { --tag: #9a47b0; }
+.tag-pink { --tag: #dc3d87; }
+.tag-red { --tag: #dc3a3f; }
+.tag-orange { --tag: #e8801a; }
+.tag-yellow { --tag: #e0b000; }
+.tag-green { --tag: #2f9a48; }
+.tag-gray, .tag-graphite { --tag: #8e8e93; }
+.tag-system { --tag: conic-gradient(#007aff, #9a47b0, #dc3d87, #dc3a3f, #e8801a, #e0b000, #2f9a48, #007aff); }
+.tag-dot { display: inline-block; flex: none; width: 10px; height: 10px; margin: 0 3px; border-radius: 50%; background: var(--tag); }
+.nav-title .tag-dot { margin: 0 6px 0 0; }
+.swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+.swatch {
+  width: 22px; height: 22px; padding: 0; border-radius: 50%; border: 0; background: var(--tag);
+  box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.2);
+}
+.swatch:hover { background: var(--tag); filter: brightness(1.08); }
+.swatch[aria-checked="true"] { box-shadow: 0 0 0 2px var(--content), 0 0 0 4px var(--ink-2); }
+.swatch-none { background: linear-gradient(135deg, var(--field) 46%, var(--c-exc) 46%, var(--c-exc) 54%, var(--field) 54%); }
+.swatch-none:hover { background: linear-gradient(135deg, var(--field) 46%, var(--c-exc) 46%, var(--c-exc) 54%, var(--field) 54%); }
+
+.settings-hint { margin: 0 4px 16px; }
+.folder-row > label { flex: 1; min-width: 0; }
+.folder-path { display: flex; align-items: center; gap: 8px; margin-top: 3px; font-size: 12px; }
+.folder-path code { overflow-wrap: anywhere; }
+.decision-preview { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 3px; }
+.decision-preview span { display: inline-flex; align-items: center; gap: 4px; }
+.decision-preview i { width: 9px; height: 9px; border-radius: 50%; }
+.row .segmented { margin: 0; }
+.row > .inline-actions { flex: none; flex-wrap: nowrap; margin-top: 0; align-items: center; justify-content: flex-end; }
+.row > label { min-width: 0; }
+.row .segmented button { white-space: nowrap; }
+
+/* Dichte „kompakt“: weniger Luft in Listen, Tabellen und Leisten. */
+:root[data-density="compact"] .row { min-height: 34px; padding: 3px 14px; }
+:root[data-density="compact"] .nav-item { height: 24px; }
+:root[data-density="compact"] .table th { padding: 5px 14px; }
+:root[data-density="compact"] .table td { padding-top: 5px; padding-bottom: 5px; }
+:root[data-density="compact"] .group { margin-bottom: 14px; }
+:root[data-density="compact"] .stack-field { padding: 7px 14px; }
+:root[data-density="compact"] main { padding-top: 40px; padding-bottom: 40px; }
+:root[data-density="compact"] main:has(.screening) { padding: 40px 0 0; }
+
+/* ---------------------------------------------------------------- Fokusmodus */
+
+/* Nur der Text und die Entscheidung: keine Seitenleiste, keine Liste, kein Weg zurück in der Kopfzeile. */
+:root[data-focus="on"] .shell { grid-template-columns: 1fr; }
+:root[data-focus="on"] .sidebar, :root[data-focus="on"] .content-drag, :root[data-focus="on"] .focus-hide,
+:root[data-focus="on"] .screening-list { display: none; }
+:root[data-focus="on"] .screening .back-link { visibility: hidden; }
+:root[data-focus="on"] main:has(.screening) { padding-top: 12px; }
+:root[data-focus="on"] .screening { height: calc(100vh / var(--zoom) - 12px); }
+:root[data-focus="on"] .screening:not(.form-entry) .screening-columns { grid-template-columns: minmax(0, 1fr) 286px; }
+:root[data-focus="on"] .screening.no-criteria:not(.form-entry) .screening-columns { grid-template-columns: minmax(0, 1fr); }

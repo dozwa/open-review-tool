@@ -10,7 +10,9 @@ mod zotero;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use tauri::Manager;
+use ort_core::tr;
+use tauri::menu::{Menu, MenuItem};
+use tauri::{Emitter, Manager};
 
 pub struct AppState {
     pub data_dir: PathBuf,
@@ -22,6 +24,11 @@ pub struct AppState {
 fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
         commands::language_set,
+        commands::settings_get,
+        commands::settings_set,
+        commands::project_settings_get,
+        commands::project_settings_set,
+        commands::storage_reveal,
         commands::identity_get,
         commands::identity_create,
         commands::identity_export,
@@ -119,8 +126,23 @@ fn main() {
                 Some(dir) => PathBuf::from(dir),
                 None => app.path().app_data_dir()?,
             };
+            // Mit eigener Wahl der Sprache steht sie schon vor dem Fenster fest; sonst meldet die Oberfläche die des Systems.
+            ort_core::i18n::set_default(&ort_core::settings::Settings::load(&data_dir).language);
             app.manage(state(data_dir)?);
+
+            // „Einstellungen …“ steht wie in jeder Mac-App im Menü der App, mit ⌘,.
+            let menu = Menu::default(app.handle())?;
+            if let Some(first) = menu.items()?.first().and_then(|item| item.as_submenu()) {
+                let label = tr!("Einstellungen …");
+                first.insert(&MenuItem::with_id(app, commands::SETTINGS_MENU, label, true, Some("CmdOrCtrl+,"))?, 1)?;
+            }
+            app.set_menu(menu)?;
             Ok(())
+        })
+        .on_menu_event(|app, event| {
+            if event.id() == commands::SETTINGS_MENU {
+                let _ = app.emit("open-settings", ());
+            }
         })
         .invoke_handler(handler())
         .run(tauri::generate_context!())

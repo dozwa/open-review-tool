@@ -32,6 +32,8 @@ import { FormsTab } from "./Forms";
 import { FullTextTab } from "./FullTexts";
 import { GuidanceTab, HelpButton } from "./Guidance";
 import { capital, formatNumber, t, tn, tx } from "./i18n";
+import { folder, inFolder } from "./settings";
+import { ProjectSettingsTab } from "./SettingsPage";
 import { RegistrationTab } from "./Registration";
 import { ReportTab } from "./Report";
 import { SourcesTab } from "./Sources";
@@ -132,6 +134,7 @@ export function ReviewPage() {
         {tab === "forms" && <FormsTab review={review} run={run} />}
         {tab === "report" && <ReportTab review={review} run={run} />}
         {tab === "proof" && <ProofTab review={review} />}
+        {tab === "settings" && <ProjectSettingsTab review={review} />}
       </div>
     </>
   );
@@ -522,7 +525,7 @@ function ExchangeTab({ review, run }: { review: ReviewDetail; run: Run }) {
   const me = review.members.find((m) => m.is_me);
 
   async function importBundle() {
-    const path = await open({ multiple: false, directory: false, filters: BUNDLE_FILTER });
+    const path = await open({ multiple: false, directory: false, defaultPath: await folder("package", review.id), filters: BUNDLE_FILTER });
     if (typeof path !== "string") return;
     await run(async () => {
       const result = await api.importBundle(path);
@@ -534,7 +537,7 @@ function ExchangeTab({ review, run }: { review: ReviewDetail; run: Run }) {
 
   async function exportReturn() {
     const path = await save({
-      defaultPath: `${t("{review} – Rückmeldung {name}", { review: safeFileName(review.title), name: safeFileName(me?.name ?? "") })}.ortvotes`,
+      defaultPath: await inFolder("package", `${t("{review} – Rückmeldung {name}", { review: safeFileName(review.title), name: safeFileName(me?.name ?? "") })}.ortvotes`, review.id),
       filters: [{ name: t("Rückmeldung"), extensions: ["ortvotes"] }],
     });
     if (!path) return;
@@ -546,7 +549,7 @@ function ExchangeTab({ review, run }: { review: ReviewDetail; run: Run }) {
 
   async function exportPackage(member: Member) {
     const path = await save({
-      defaultPath: `${t("{review} – Paket für {name}", { review: safeFileName(review.title), name: safeFileName(member.name) })}.ortpkg`,
+      defaultPath: await inFolder("package", `${t("{review} – Paket für {name}", { review: safeFileName(review.title), name: safeFileName(member.name) })}.ortpkg`, review.id),
       filters: [{ name: t("Paket"), extensions: ["ortpkg"] }],
     });
     if (!path) return;

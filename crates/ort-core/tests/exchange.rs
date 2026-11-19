@@ -36,6 +36,35 @@ fn identity_file_roundtrip_and_rejects_other_files() {
     assert!(Bundle::from_json(&text).is_err(), "Identität ist kein Paket");
 }
 
+/// Einstellungen eines Reviews gehören der Person auf ihrem Rechner: kein Ereignis, nichts im Paket.
+#[test]
+fn project_settings_stay_on_this_computer() {
+    use ort_core::settings::{ProjectSettings, Screening};
+    let t = Team::new();
+    send_package(&t.owner, &t.r1);
+    let events = t.owner.events().unwrap().len();
+
+    let own = ProjectSettings {
+        color: "green".into(),
+        export_dir: Some("/tmp/berichte".into()),
+        screening: Some(Screening { show_list: false, ..Screening::default() }),
+        ..ProjectSettings::default()
+    };
+    t.owner.set_project_settings(&own).unwrap();
+    assert_eq!(t.owner.project_settings().unwrap(), own);
+    assert_eq!(t.owner.list_item().unwrap().color, "green");
+    assert_eq!(t.owner.events().unwrap().len(), events, "kein Ereignis im Log");
+    assert!(t.owner.set_project_settings(&ProjectSettings { color: "neon".into(), ..own.clone() }).is_err());
+
+    // Auch wer nur liest, hat eigene Einstellungen; beim Team kommt von denen der Leitung nichts an.
+    t.viewer.set_project_settings(&ProjectSettings { color: "red".into(), ..ProjectSettings::default() }).unwrap();
+    let package = wire(&export_package(&t.owner, &t.r1.me().actor_id).unwrap());
+    assert!(!package.to_json().unwrap().contains("/tmp/berichte"));
+    send_package(&t.owner, &t.r1);
+    assert_eq!(t.r1.project_settings().unwrap(), ProjectSettings::default());
+    assert_eq!(t.r1.list_item().unwrap().color, "");
+}
+
 #[test]
 fn return_twice_changes_nothing() {
     let (t, _) = screened();

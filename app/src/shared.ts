@@ -23,6 +23,7 @@ export const REVIEW_TABS = [
   { value: "members", label: t("Mitglieder"), icon: "people" },
   { value: "exchange", label: t("Austausch"), icon: "exchange" },
   { value: "proof", label: t("Nachweis"), icon: "shield" },
+  { value: "settings", label: t("Einstellungen"), icon: "gear" },
 ] as const;
 export type ReviewTab = (typeof REVIEW_TABS)[number]["value"];
 export const isReviewTab = (value: string | null): value is ReviewTab => REVIEW_TABS.some((tab) => tab.value === value);

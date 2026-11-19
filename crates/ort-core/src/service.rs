@@ -46,6 +46,8 @@ pub struct ReviewListItem {
     pub id: Uuid,
     pub title: String,
     pub role: Option<String>,
+    /// Kennfarbe aus den Einstellungen des Reviews auf diesem Rechner; leer heißt ohne.
+    pub color: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -829,6 +831,7 @@ impl Review {
             id: self.id()?,
             title: state.title.clone(),
             role: state.role_of(&self.me.actor_id).map(str::to_string),
+            color: self.project_settings()?.color,
         })
     }
 
