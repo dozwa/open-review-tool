@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { HashRouter, NavLink, Route, Routes, useNavigate } from "react-router-dom";
+import { HashRouter, Link, NavLink, Route, Routes, useLocation, useMatch, useNavigate } from "react-router-dom";
 import { open, save } from "@tauri-apps/plugin-dialog";
 
 import { api, BUNDLE_FILTER, errorText, importSummary, Person, ReviewListItem, safeFileName } from "./api";
@@ -8,7 +8,7 @@ import { NewReviewPage } from "./NewReview";
 import { ReviewPage } from "./ReviewPage";
 import { ScreeningPage } from "./Screening";
 import { StagePage } from "./StagePages";
-import { RefreshContext, ROLE_LABEL } from "./shared";
+import { isReviewTab, RefreshContext, REVIEW_TABS, ROLE_LABEL, TermsContext } from "./shared";
 import { Avatar, Banner, Icon } from "./ui";
 import "./styles.css";
 
@@ -75,35 +75,70 @@ function Setup({ onDone }: { onDone: (me: Person) => void }) {
   );
 }
 
-function Sidebar({ me, reviews, onImport, onIdentity, onNew }: {
+function Sidebar({ me, reviews, terms, onImport, onIdentity, onNew }: {
   me: Person;
   reviews: ReviewListItem[] | null;
+  terms: Record<string, string>;
   onImport: () => void;
   onIdentity: () => void;
   onNew: () => void;
 }) {
+  // In einem Review zeigt die Leiste dessen Bereiche; die Liste der Reviews liegt hinter „Alle Reviews“.
+  const reviewId = useMatch("/reviews/:reviewId/*")?.params.reviewId;
+  const onReviewPage = useMatch("/reviews/:reviewId") !== null;
+  const location = useLocation();
+  const [showList, setShowList] = useState(false);
+  useEffect(() => setShowList(false), [reviewId]);
+  const current = reviewId ? reviews?.find((r) => r.id === reviewId) : undefined;
+  const wanted = new URLSearchParams(location.search).get("tab");
+  // Auf den Seiten einer Stufe bleibt „Ablauf“ markiert, denn von dort kommt man.
+  const activeTab = onReviewPage && isReviewTab(wanted) ? wanted : "overview";
+
   return (
     <aside className="sidebar">
       <div className="sidebar-top" data-tauri-drag-region />
-      <nav className="sidebar-nav">
-        <NavLink to="/" end className="nav-item">
-          <Icon name="inbox" /> Übersicht
-        </NavLink>
-        <div className="nav-section">
-          <span>Reviews</span>
-          <button className="plain" onClick={onNew} title="Neues Review" aria-label="Neues Review">
-            <Icon name="plus" size={14} />
+      {reviewId && !showList ? (
+        <nav className="sidebar-nav" aria-label="Bereiche des Reviews">
+          <button className="nav-item nav-back" onClick={() => setShowList(true)}>
+            <Icon name="back" size={14} /> Alle Reviews
           </button>
-        </div>
-        {reviews?.length === 0 && <p className="nav-empty">Noch keine Reviews</p>}
-        {(reviews ?? []).map((r) => (
-          <NavLink key={r.id} to={`/reviews/${r.id}`} className="nav-item" title={r.title}>
-            <Icon name="file" />
-            <span className="nav-label">{r.title}</span>
-            {r.role && <span className="nav-meta">{ROLE_LABEL[r.role]?.[0]}</span>}
+          <div className="nav-title" title={current?.title}>
+            <strong>{current?.title ?? "Review"}</strong>
+            {current?.role && <small>{ROLE_LABEL[current.role] ?? current.role}</small>}
+          </div>
+          {REVIEW_TABS.map((t) => (
+            <Link
+              key={t.value}
+              to={t.value === "overview" ? `/reviews/${reviewId}` : `/reviews/${reviewId}?tab=${t.value}`}
+              className={`nav-item${activeTab === t.value ? " active" : ""}`}
+              aria-current={activeTab === t.value ? "page" : undefined}
+            >
+              <Icon name={t.icon} />
+              <span className="nav-label">{t.value === "sources" ? terms.sources || t.label : t.label}</span>
+            </Link>
+          ))}
+        </nav>
+      ) : (
+        <nav className="sidebar-nav">
+          <NavLink to="/" end className="nav-item">
+            <Icon name="inbox" /> Übersicht
           </NavLink>
-        ))}
-      </nav>
+          <div className="nav-section">
+            <span>Reviews</span>
+            <button className="plain" onClick={onNew} title="Neues Review" aria-label="Neues Review">
+              <Icon name="plus" size={14} />
+            </button>
+          </div>
+          {reviews?.length === 0 && <p className="nav-empty">Noch keine Reviews</p>}
+          {(reviews ?? []).map((r) => (
+            <NavLink key={r.id} to={`/reviews/${r.id}`} className="nav-item" title={r.title} onClick={() => setShowList(false)}>
+              <Icon name="file" />
+              <span className="nav-label">{r.title}</span>
+              {r.role && <span className="nav-meta">{ROLE_LABEL[r.role]?.[0]}</span>}
+            </NavLink>
+          ))}
+        </nav>
+      )}
       <div className="sidebar-bottom">
         <button className="nav-item" onClick={onImport}>
           <Icon name="download" /> Paket einlesen
@@ -173,6 +208,9 @@ function Shell({ me }: { me: Person }) {
   const [reviews, setReviews] = useState<ReviewListItem[] | null>(null);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [terms, setTerms] = useState<{ reviewId: string; terms: Record<string, string> }>({ reviewId: "", terms: {} });
+  const shareTerms = useCallback((reviewId: string, next: Record<string, string>) => setTerms({ reviewId, terms: next }), []);
+  const openReview = useMatch("/reviews/:reviewId/*")?.params.reviewId;
 
   const refresh = useCallback(() => {
     api.reviews().then(setReviews).catch((e) => setError(errorText(e)));
@@ -199,8 +237,9 @@ function Shell({ me }: { me: Person }) {
 
   return (
     <RefreshContext.Provider value={refresh}>
+      <TermsContext.Provider value={shareTerms}>
       <div className="shell">
-        <Sidebar me={me} reviews={reviews} onImport={actions.importBundle} onIdentity={actions.exportIdentity} onNew={newReview} />
+        <Sidebar me={me} reviews={reviews} terms={terms.reviewId === openReview ? terms.terms : {}} onImport={actions.importBundle} onIdentity={actions.exportIdentity} onNew={newReview} />
         <div className="content">
           <div className="content-drag" data-tauri-drag-region />
           <main>
@@ -217,6 +256,7 @@ function Shell({ me }: { me: Person }) {
           </main>
         </div>
       </div>
+      </TermsContext.Provider>
     </RefreshContext.Provider>
   );
 }

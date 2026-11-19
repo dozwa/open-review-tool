@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Link, useLocation, useParams } from "react-router-dom";
+import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { open, save } from "@tauri-apps/plugin-dialog";
 
 import {
@@ -32,12 +32,12 @@ import { FullTextTab } from "./FullTexts";
 import { ReportTab } from "./Report";
 import { SourcesTab } from "./Sources";
 import { searchName, SearchTab } from "./Search";
-import { ROLE_LABEL, useRefreshSidebar } from "./shared";
-import { Avatar, Banner, Empty, Group, Icon, PageHeader, Pill, Row, Segmented, Stat } from "./ui";
+import { isReviewTab, ReviewTab, ROLE_LABEL, useRefreshSidebar, useShareTerms } from "./shared";
+import { Avatar, Banner, Empty, Group, Icon, PageHeader, Pill, Row, Stat } from "./ui";
 
 const IMPORT_STATUS: Record<string, string> = { running: "läuft", done: "fertig", failed: "fehlgeschlagen" };
 
-type Tab = "overview" | "exchange" | "members" | "search" | "imports" | "fulltext" | "sources" | "criteria" | "report" | "proof";
+type Tab = ReviewTab;
 
 export function stageState(stage: Stage): string {
   if (stage.closed) return "Geschlossen";
@@ -50,20 +50,25 @@ export function ReviewPage() {
   const location = useLocation();
   const refreshSidebar = useRefreshSidebar();
   const [review, setReview] = useState<ReviewDetail | null>(null);
-  const [tab, setTab] = useState<Tab>("overview");
+  const shareTerms = useShareTerms();
+  const [params, setParams] = useSearchParams();
+  const wanted = params.get("tab");
+  const tab: Tab = isReviewTab(wanted) ? wanted : "overview";
+  const setTab = (next: Tab) => setParams(next === "overview" ? {} : { tab: next });
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
   async function load() {
     try {
-      setReview(await api.review(reviewId));
+      const loaded = await api.review(reviewId);
+      setReview(loaded);
+      shareTerms(reviewId, loaded.workflow.terms);
     } catch (e) {
       setError(errorText(e));
     }
   }
   useEffect(() => {
     setReview(null);
-    setTab("overview");
     // Der Assistent zum Anlegen reicht mit, was beim Import oder beim Team nicht geklappt hat.
     const problems = (location.state as { problems?: string[] } | null)?.problems;
     setError(problems?.length ? `Das Review ist angelegt, aber nicht alles hat geklappt: ${problems.join(" · ")}` : "");
@@ -87,19 +92,6 @@ export function ReviewPage() {
   if (!review) return error ? <Banner kind="error">{error}</Banner> : null;
   const unique = review.n_records - review.n_duplicates;
 
-  const tabs: { value: Tab; label: string; icon: string }[] = [
-    { value: "overview", label: "Ablauf", icon: "stack" },
-    { value: "exchange", label: "Austausch", icon: "exchange" },
-    { value: "members", label: "Mitglieder", icon: "people" },
-    { value: "search", label: "Suche", icon: "search" },
-    { value: "imports", label: "Import", icon: "upload" },
-    { value: "fulltext", label: "Volltexte", icon: "file" },
-    { value: "sources", label: term(review.workflow.terms, "sources", "Quellen"), icon: "stack" },
-    { value: "criteria", label: "Kriterien", icon: "list" },
-    { value: "report", label: "Bericht", icon: "chart" },
-    { value: "proof", label: "Nachweis", icon: "shield" },
-  ];
-
   return (
     <>
       <PageHeader
@@ -115,7 +107,6 @@ export function ReviewPage() {
           </>
         }
       />
-      <Segmented label="Bereiche" value={tab} options={tabs} onChange={setTab} />
       <div className="tab-body">
         {error && <Banner kind="error" onClose={() => setError("")}>{error}</Banner>}
         {notice && <Banner kind="notice" onClose={() => setNotice("")}>{notice}</Banner>}
@@ -149,8 +140,10 @@ const TOOL_TABS: Record<string, { tab: Tab; label: string }[]> = {
 
 /** Stationen der Vorlage als Leiste: Wo steht das Review? */
 function StationBar({ stations }: { stations: Station[] }) {
+  // Ab neun Stationen zwei Zeilen: Eine Zeile wäre zu eng für die Namen, seitliches Scrollen versteckt Stationen.
+  const columns = stations.length > 8 ? Math.ceil(stations.length / 2) : Math.max(stations.length, 1);
   return (
-    <ol className="station-bar" aria-label="Ablauf">
+    <ol className="station-bar" aria-label="Ablauf" style={{ "--columns": columns } as React.CSSProperties}>
       {stations.map((s, i) => (
         <li key={s.key} className={`station-step s-${s.state}${s.available ? "" : " s-later"}`} title={`${s.label}: ${s.available ? STATE_LABEL[s.state] : "folgt in einer späteren Version"}`}>
           <a href={`#station-${s.key}`} onClick={(e) => { e.preventDefault(); document.getElementById(`station-${s.key}`)?.scrollIntoView({ behavior: "smooth", block: "center" }); }}>

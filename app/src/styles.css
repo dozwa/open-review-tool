@@ -153,6 +153,14 @@ kbd {
 .nav-item .icon { color: var(--accent); }
 .nav-item:hover { background: var(--hover); }
 .nav-item.active { background: var(--selected); font-weight: 500; }
+.nav-back { color: var(--ink-2); font-size: 12px; }
+.nav-back .icon { color: inherit; }
+.nav-title { display: flex; flex-direction: column; gap: 1px; margin: 8px 0 10px; padding: 0 8px; }
+.nav-title strong {
+  font-size: 13px; font-weight: 600; line-height: 1.3; overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+}
+.nav-title small { color: var(--ink-3); font-size: 11px; }
 .nav-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
 .nav-meta { font-size: 10.5px; font-weight: 600; color: var(--ink-3); }
 .nav-empty { padding: 4px 8px; color: var(--ink-3); }
@@ -189,10 +197,10 @@ main { max-width: 900px; margin: 0 auto; padding: 44px 36px 64px; }
 
 .segmented {
   display: inline-flex; gap: 2px; padding: 2px; border-radius: 9px; background: var(--surface-2);
-  max-width: 100%; overflow-x: auto;
+  max-width: 100%; flex-wrap: wrap;
 }
 .segmented button {
-  height: 26px; padding: 0 12px; border: 0; background: none; box-shadow: none; color: var(--ink-2); border-radius: 7px;
+  flex: none; white-space: nowrap; height: 26px; padding: 0 12px; border: 0; background: none; box-shadow: none; color: var(--ink-2); border-radius: 7px;
 }
 .segmented button:hover { background: none; color: var(--ink); }
 .segmented button.active { background: var(--content); color: var(--ink); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12); }
@@ -310,8 +318,14 @@ main { max-width: 900px; margin: 0 auto; padding: 44px 36px 64px; }
 
 /* ---------------------------------------------------------------- Ablauf: Stationen der Vorlage */
 
-.station-bar { list-style: none; margin: 0 0 18px; padding: 0 0 4px; display: flex; overflow-x: auto; }
-.station-step { flex: 1 0 74px; position: relative; text-align: center; }
+/* Alle Stationen bleiben sichtbar: Sie teilen sich die Breite, lange Abläufe stehen in zwei gleich langen Zeilen
+   (Spaltenzahl kommt aus `StationBar`). Die Verbindungslinie der ersten Station einer Zeile läuft zum Rand hinaus
+   und wird dort abgeschnitten. */
+.station-bar {
+  list-style: none; margin: 0 0 18px; padding: 3px 0 4px; display: grid; row-gap: 14px; overflow: hidden;
+  grid-template-columns: repeat(var(--columns, 6), minmax(0, 1fr));
+}
+.station-step { position: relative; min-width: 0; text-align: center; }
 .station-step a { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; color: inherit; text-decoration: none; }
 .station-step::before {
   content: ""; position: absolute; top: 11px; left: -50%; width: 100%; height: 2px; background: var(--surface-2);
@@ -327,7 +341,7 @@ main { max-width: 900px; margin: 0 auto; padding: 44px 36px 64px; }
 .s-running .station-dot { background: var(--c-may); color: #2b1d00; }
 .s-open .station-dot { background: var(--c-blue); color: #fff; }
 .s-later .station-dot { background: var(--surface-2); color: var(--ink-3); }
-.station-name { font-size: 11px; line-height: 1.25; color: var(--ink-2); padding: 0 3px; }
+.station-name { max-width: 100%; font-size: 11px; line-height: 1.25; color: var(--ink-2); padding: 0 2px; overflow-wrap: break-word; }
 .s-open .station-name, .s-running .station-name { color: var(--ink); font-weight: 600; }
 .s-later .station-name { color: var(--ink-3); }
 
