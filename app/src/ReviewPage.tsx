@@ -61,6 +61,8 @@ export function ReviewPage() {
   const setTab = (next: Tab) => setParams(next === "overview" ? {} : { tab: next });
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  // Meldungen gehören zum Bereich, in dem sie entstanden.
+  useEffect(() => setNotice(""), [tab]);
 
   async function load() {
     try {
@@ -260,11 +262,11 @@ function OverviewTab({ review, run, goTo }: { review: ReviewDetail; run: Run; go
                           {formatNumber(stage.n_records)} {stage.form_id ? term(workflow.terms, "sources", t("Quellen")) : records} ·{" "}
                           {stage.form_id ? FORM_RULE_LABEL[stage.decision_rule] ?? stage.decision_rule : RULE_LABEL[stage.decision_rule] ?? stage.decision_rule}
                           {stage.decision_rule === "unanimous" && ` · ${stage.form_id ? tn("mind. {n} Person", "mind. {n} Personen", stage.min_reviewers) : tn("mind. {n} Stimme", "mind. {n} Stimmen", stage.min_reviewers)}`}
-                          {stage.maybe_as && ` · ${stage.maybe_as === "include" ? t("Maybe zählt als Include") : t("Maybe zählt als Exclude")}`}
+                          {stage.maybe_as && !stage.form_id && ` · ${stage.maybe_as === "include" ? t("Maybe zählt als Include") : t("Maybe zählt als Exclude")}`}
                         </p>
                         {round.gate && (
                           <p className={round.gate.passed ? "gate-line ok" : "gate-line bad"}>
-                            <Icon name={round.gate.passed ? "check" : "x"} size={12} /> {round.gate.passed ? t("Gate erfüllt: {result}", { result: gateText(round.gate) }) : t("Gate nicht erfüllt: {result}", { result: gateText(round.gate) })}
+                            <Icon name={round.gate.passed ? "check" : "x"} size={12} /> {round.gate.passed ? t("Gate beim Schließen erfüllt: {result}", { result: gateText(round.gate) }) : t("Gate beim Schließen nicht erfüllt: {result}", { result: gateText(round.gate) })}
                           </p>
                         )}
                         <div className="stage-card-actions">
@@ -538,7 +540,7 @@ function ExchangeTab({ review, run }: { review: ReviewDetail; run: Run }) {
     if (!path) return;
     await run(async () => {
       const n = await api.exportReturn(review.id, path);
-      return tn("Rückmeldung mit {n} eigenem Eintrag gespeichert. Schick sie an die Leitung.", "Rückmeldung mit {n} eigenen Einträgen gespeichert. Schick sie an die Leitung.", n);
+      return tn("Rückmeldung mit {n} eigenen Ereignis gespeichert. Schick sie an die Leitung.", "Rückmeldung mit {n} eigenen Ereignissen gespeichert. Schick sie an die Leitung.", n);
     });
   }
 

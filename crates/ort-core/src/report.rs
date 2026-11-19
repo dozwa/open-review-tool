@@ -890,22 +890,22 @@ impl Review {
             }
         }
         let listed = names.join(", ");
+        let identified = count(flow.identified, &flow.record_term, records);
         out.push_str(&match names.len() {
-            1 => tr!("Aus 1 Quelle wurden {} {} übernommen ({}). ", flow.identified, records, listed),
-            n => tr!("Aus {} Quellen wurden {} {} übernommen ({}). ", n, flow.identified, records, listed),
+            1 => tr!("Übernommen aus 1 Quelle: {} ({}). ", identified, listed),
+            n => tr!("Übernommen aus {} Quellen: {} ({}). ", n, identified, listed),
         });
         if flow.other_identified > 0 {
-            out.push_str(&tr!(
-                "Davon stammen {} aus der Zitationssuche oder von anderen Wegen außerhalb von Datenbanken und Registern; sie durchliefen dieselben Schritte als weitere Runde. ",
-                flow.other_identified
-            ));
+            out.push_str(&match flow.other_identified {
+                1 => tr!("1 davon stammt aus der Zitationssuche oder von anderen Wegen außerhalb von Datenbanken und Registern und durchlief dieselben Schritte als weitere Runde. "),
+                n => tr!("Davon stammen {} aus der Zitationssuche oder von anderen Wegen außerhalb von Datenbanken und Registern; sie durchliefen dieselben Schritte als weitere Runde. ", n),
+            });
         }
         out.push_str(&tr!(
-            "Beim Import wurden {} als exakte Dubletten erkannt (gleiche DOI, sonst gleicher Titel und gleiches Jahr). Mögliche weitere Dubletten wurden paarweise geprüft; {} wurden entfernt. Es blieben {} {}. Suchstrings, Datum und Grenzen je Quelle stehen im Suchanhang.\n",
+            "Beim Import als exakte Dubletten erkannt (gleiche DOI, sonst gleicher Titel und gleiches Jahr): {}. Mögliche weitere Dubletten wurden paarweise geprüft; davon entfernt: {}. Verbleibend: {}. Suchstrings, Datum und Grenzen je Quelle stehen im Suchanhang.\n",
             flow.exact_duplicates,
             flow.resolved_duplicates,
-            flow.unique,
-            records
+            count(flow.unique, &flow.record_term, records)
         ));
         for search in self.searches()? {
             let (Some(first), Some(last)) = (search.versions.first(), search.versions.last()) else { continue };
@@ -1107,7 +1107,7 @@ impl Review {
         // Zahlen je Runde
         for stage in stages {
             let c = &stage.config;
-            out.push_str(&round_head(stages.len(), c.round, c.n_records, records));
+            out.push_str(&round_head(stages.len(), c.round, &count(c.n_records, &data.flow.record_term, records)));
             if stage.blind_active() {
                 out.push_str(&tr!("; die Stufe ist noch verblindet, Zahlen folgen nach dem Entblinden.\n"));
                 continue;
@@ -1272,7 +1272,7 @@ fn charting_text(data: &Data, chart: &ChartStation, limitations: &mut Vec<String
         }
     }
     for (stage, s) in &chart.stages {
-        out.push_str(&round_head(chart.stages.len(), stage.config.round, s.n_sources, sources));
+        out.push_str(&round_head(chart.stages.len(), stage.config.round, &count(s.n_sources, source, sources)));
         let (Some(counts), Some(people)) = (&s.counts, s.n_people) else {
             out.push_str(&tr!("; die Stufe ist noch verblindet, Zahlen folgen nach dem Entblinden.\n"));
             continue;
@@ -1406,10 +1406,10 @@ fn people_text(n: i64) -> String {
 }
 
 /// Beginn der Zeile zu einer Runde: Zahl und Begriff, bei mehreren Runden mit deren Nummer.
-fn round_head(rounds: usize, round: i64, n: i64, term: &str) -> String {
+fn round_head(rounds: usize, round: i64, counted: &str) -> String {
     match rounds {
-        1 => format!("\n{n} {term}"),
-        _ => tr!("\nRunde {}: {} {}", round, n, term),
+        1 => format!("\n{counted}"),
+        _ => tr!("\nRunde {}: {}", round, counted),
     }
 }
 

@@ -211,7 +211,11 @@ function Home({ me, onImport, onIdentity }: { me: Person; onImport: () => void; 
 function Shell({ me }: { me: Person }) {
   const navigate = useNavigate();
   const [reviews, setReviews] = useState<ReviewListItem[] | null>(null);
-  const [notice, setNotice] = useState("");
+  // Eine Meldung gilt für die Seite, auf der sie entstand; beim Wechsel der Seite oder des Bereichs verschwindet sie.
+  const location = useLocation();
+  const here = location.pathname + location.search;
+  const [notice, setNoticeAt] = useState({ text: "", at: "" });
+  const setNotice = (text: string, at = here) => setNoticeAt({ text, at });
   const [error, setError] = useState("");
   const [terms, setTerms] = useState<{ reviewId: string; terms: Record<string, string> }>({ reviewId: "", terms: {} });
   const shareTerms = useCallback((reviewId: string, next: Record<string, string>) => setTerms({ reviewId, terms: next }), []);
@@ -226,7 +230,7 @@ function Shell({ me }: { me: Person }) {
     me,
     (message, reviewId) => {
       setError("");
-      setNotice(message);
+      setNotice(message, reviewId ? `/reviews/${reviewId}` : here);
       refresh();
       if (reviewId) navigate(`/reviews/${reviewId}`);
     },
@@ -249,7 +253,7 @@ function Shell({ me }: { me: Person }) {
           <div className="content-drag" data-tauri-drag-region />
           <main>
             {error && <Banner kind="error" onClose={() => setError("")}>{error}</Banner>}
-            {notice && <Banner kind="notice" onClose={() => setNotice("")}>{notice}</Banner>}
+            {notice.text && notice.at === here && <Banner kind="notice" onClose={() => setNotice("")}>{notice.text}</Banner>}
             <Routes>
               <Route path="/" element={<Home me={me} onImport={actions.importBundle} onIdentity={actions.exportIdentity} />} />
               <Route path="/neu" element={<NewReviewPage />} />
@@ -289,9 +293,12 @@ function App() {
 async function start() {
   const native = "__TAURI_INTERNALS__" in window;
   document.documentElement.classList.toggle("native", native);
-  // Vorschau im Browser (nur Entwicklung): Rust-Befehle durch Beispieldaten ersetzen.
+  // Vorschau im Browser (nur Entwicklung): Rust-Befehle durch Beispieldaten ersetzen, mit `?bridge=<port>`
+  // durch die Entwicklungsbrücke zum echten Kern.
   if (import.meta.env.DEV && !native) {
-    await import("./dev/mock").then((m) => m.installMock());
+    const bridge = new URLSearchParams(location.search).get("bridge");
+    if (bridge) await import("./dev/bridge").then((m) => m.installBridge(bridge));
+    else await import("./dev/mock").then((m) => m.installMock());
   }
   // Der Kern spricht dieselbe Sprache wie die Oberfläche: Fehlermeldungen, Vorlagentexte, Leitlinien.
   await api.setLanguage(language).catch(() => undefined);

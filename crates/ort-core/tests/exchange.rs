@@ -183,6 +183,10 @@ fn invalid_payload_is_rejected_one_by_one() {
     assert!(report.rejected[0].contains("unzulässigen Wert"), "{:?}", report.rejected);
     // Die Kette endet am abgewiesenen Ereignis; das Votum danach kommt nicht an.
     assert_eq!(t.owner.events().unwrap().iter().filter(|e| e.event_type.starts_with("Vote")).count(), 2);
+    // Der Bericht zählt es mit und nennt den Ereignistyp lesbar.
+    assert_eq!(report.skipped, 1);
+    assert!(report.rejected[0].contains("Stimme Nr. 3"), "{:?}", report.rejected);
+    assert!(report.rejected[0].contains("1 weiteres Ereignis dieser Kette"), "{:?}", report.rejected);
 }
 
 #[test]

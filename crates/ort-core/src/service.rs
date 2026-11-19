@@ -304,6 +304,9 @@ pub struct ListRow {
     pub title: String,
     pub year: Option<i64>,
     pub my_decision: Option<String>,
+    /// Ob die Stufe von mir noch eine Stimme zu diesem Eintrag braucht (nach ihrer Auswahlregel,
+    /// z. B. bei `single_verified` nur zu Ausschlüssen, die noch niemand geprüft hat).
+    pub wants_my_vote: bool,
     /// Stimmenzahl, Status und Entscheidung gibt es erst nach dem Entblinden.
     pub n_votes: Option<usize>,
     pub status: Option<String>,
@@ -1897,7 +1900,7 @@ impl Review {
             } else if person != me {
                 Some(tr!("Die Stufe ist verblindet. Stimmen anderer Personen sind erst nach dem Entblinden sichtbar."))
             } else if filter.votes_min.is_some() || filter.votes_max.is_some() {
-                Some(tr!("Die Stufe ist verblindet. Die Zahl der Stimmen sind erst nach dem Entblinden sichtbar."))
+                Some(tr!("Die Stufe ist verblindet. Die Zahl der Stimmen ist erst nach dem Entblinden sichtbar."))
             } else {
                 None
             };
@@ -1951,6 +1954,7 @@ impl Review {
                 items.push(ListRow {
                     id: r.id,
                     my_decision: vote_of(me).map(str::to_string),
+                    wants_my_vote: stage.wants_vote_from(&id, &me),
                     n_votes: (!blind).then_some(votes),
                     status: if blind { None } else { Some(status.unwrap_or("pending").to_string()) },
                     decision: finals.get(&id).and_then(|f| f.decision.clone()),

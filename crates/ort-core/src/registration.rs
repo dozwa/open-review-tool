@@ -252,9 +252,19 @@ impl Review {
             draft.url
         ));
         for section in &draft.sections {
-            out.push_str(&format!("\n## {} ({})\n", section.label, section.original));
+            // Heißt die Seite im Register so wie hier (englische Ausgabe), steht der Name nur einmal.
+            match section.label == section.original {
+                true => out.push_str(&format!("\n## {}\n", section.label)),
+                false => out.push_str(&format!("\n## {} ({})\n", section.label, section.original)),
+            }
             for item in draft.items.iter().filter(|i| i.item.section == section.key) {
-                out.push_str(&format!("\n### {} {} · {}\n\n", item.item.number, item.item.original, item.item.label));
+                match item.item.label == item.item.original {
+                    true => out.push_str(&format!("\n### {} {}\n\n", item.item.number, item.item.label)),
+                    false => out.push_str(&format!(
+                        "\n### {} {} · {}\n\n",
+                        item.item.number, item.item.original, item.item.label
+                    )),
+                }
                 match item.status {
                     "answered" => out.push_str(&format!("{}\n", item.text())),
                     "suggested" => {

@@ -117,26 +117,6 @@ export function SourcesTab({ review, run }: { review: ReviewDetail; run: Run }) 
         <Banner kind="notice">{t("Die Auswahl läuft noch. Es können weitere {sources} dazukommen; was hier gebündelt wird, bleibt bestehen.", { sources: sourcesTerm })}</Banner>
       )}
 
-      {manage && chosen.length > 0 && (
-        <Group title={t("{n} gewählt", { n: chosen.length })}>
-          <div className="source-actions">
-            {chosen.length > 1 && (
-              <>
-                <input aria-label={t("Bezeichnung des Bündels")} value={label} maxLength={200} onChange={(e) => setLabel(e.target.value)} placeholder={t("Bezeichnung, z. B. Name der Studie (optional)")} />
-                <button className="primary" onClick={bundle}><Icon name="stack" size={14} /> {t("Zu einer {source} bündeln", { source: sourceTerm })}</button>
-              </>
-            )}
-            {list.source_types.length > 0 && (
-              <select aria-label={t("Quellenart für die Auswahl")} value="" onChange={(e) => e.target.value && setType(chosen, e.target.value)}>
-                <option value="">{t("Quellenart für die Auswahl …")}</option>
-                {list.source_types.map((st) => <option key={st.key} value={st.key}>{st.label}</option>)}
-              </select>
-            )}
-            <button className="small" onClick={() => setSelected([])}>{t("Auswahl aufheben")}</button>
-          </div>
-        </Group>
-      )}
-
       <Group
         title={capital(sourcesTerm)}
         footer={t("Mehrere Veröffentlichungen derselben Studie zählen als eine {source}. Der Haupteintrag steht für das Bündel; seine Quellenart gilt für alle. Sortiert nach Erstautor, damit Begleitpublikationen nebeneinander stehen.", { source: sourceTerm })}
@@ -176,6 +156,28 @@ export function SourcesTab({ review, run }: { review: ReviewDetail; run: Run }) 
           </div>
         ))}
       </Group>
+
+      {/* Unter der Liste und am unteren Rand angeheftet, damit die Liste beim Ankreuzen nicht springt. */}
+      {manage && chosen.length > 0 && (
+        <div className="selection-bar" role="region" aria-label={t("{n} gewählt", { n: chosen.length })}>
+          <strong>{t("{n} gewählt", { n: chosen.length })}</strong>
+          <div className="source-actions">
+            {chosen.length > 1 && (
+              <>
+                <input aria-label={t("Bezeichnung des Bündels")} value={label} maxLength={200} onChange={(e) => setLabel(e.target.value)} placeholder={t("Bezeichnung, z. B. Name der Studie (optional)")} />
+                <button className="primary" onClick={bundle}><Icon name="stack" size={14} /> {t("Zu einer {source} bündeln", { source: sourceTerm })}</button>
+              </>
+            )}
+            {list.source_types.length > 0 && (
+              <select aria-label={t("Quellenart für die Auswahl")} value="" onChange={(e) => e.target.value && setType(chosen, e.target.value)}>
+                <option value="">{t("Quellenart für die Auswahl …")}</option>
+                {list.source_types.map((st) => <option key={st.key} value={st.key}>{st.label}</option>)}
+              </select>
+            )}
+            <button className="small" onClick={() => setSelected([])}>{t("Auswahl aufheben")}</button>
+          </div>
+        </div>
+      )}
     </>
   );
 }

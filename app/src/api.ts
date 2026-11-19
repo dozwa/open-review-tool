@@ -408,6 +408,8 @@ export interface ListRow {
   title: string;
   year: number | null;
   my_decision: string | null;
+  /** Ob die Stufe von mir noch eine Stimme braucht (Auswahlregel der Stufe). */
+  wants_my_vote: boolean;
   n_votes: number | null;
   status: string | null;
   decision: string | null;
@@ -578,6 +580,8 @@ export interface MergeReport {
   accepted: number;
   already_known: number;
   rejected: string[];
+  /** Ereignisse hinter einer Abweisung in derselben Kette; nicht geprüft und nicht übernommen. */
+  skipped: number;
   records_added: number;
 }
 
@@ -627,12 +631,18 @@ export function gateText(gate: GateResult): string {
     .map((c) => {
       if (c.check === "agreement_min") {
         const threshold = formatPercent(c.threshold_percent ?? 0);
-        if (c.percent_x100 == null) return t("Übereinstimmung keine doppelt bewerteten Einträge, verlangt sind {threshold}", { threshold });
+        if (c.percent_x100 == null) return t("Übereinstimmung nicht bestimmbar, noch kein Eintrag doppelt bewertet; verlangt sind {threshold}", { threshold });
         const percent = formatPercent(c.percent_x100 / 100, c.percent_x100 % 100 === 0 ? 0 : 1);
         return t("Übereinstimmung {percent}, verlangt sind {threshold}", { percent, threshold });
       }
       if (c.check === "all_decided") return t("{n} von {total} entschieden", { n: c.numerator, total: c.denominator });
-      return tn("{n} offener Konflikt", "{n} offene Konflikte", c.numerator);
+      if (c.check === "no_open_conflicts") return tn("{n} offener Konflikt", "{n} offene Konflikte", c.numerator);
+      // Gates der Formular-Stationen
+      if (c.check === "form_confirmed") return c.passed ? t("Formular bestätigt") : t("Formular noch nicht bestätigt");
+      if (c.check === "all_extracted") return t("{n} von {total} extrahiert", { n: c.numerator, total: c.denominator });
+      if (c.check === "no_open_differences") return tn("{n} Quelle mit offener Abweichung", "{n} Quellen mit offener Abweichung", c.numerator);
+      if (c.check === "all_sources_assigned") return tn("{n} Quelle ohne Runde", "{n} Quellen ohne Runde", c.numerator);
+      return c.passed ? t("{check} erfüllt", { check: c.check }) : t("{check} nicht erfüllt", { check: c.check });
     })
     .join("; ");
 }
@@ -1047,10 +1057,12 @@ export function safeFileName(text: string): string {
 
 export function importSummary(result: BundleImported): string {
   const r = result.report;
-  const parts = [tn("{n} neuer Eintrag", "{n} neue Einträge", r.accepted)];
+  // „Ereignisse“ sind Einträge im Log, „Einträge“ die Literatur des Reviews.
+  const parts = [tn("{n} neues Ereignis", "{n} neue Ereignisse", r.accepted)];
   if (r.already_known) parts.push(t("{n} schon vorhanden", { n: r.already_known }));
-  if (r.records_added) parts.push(tn("{n} Record", "{n} Records", r.records_added));
+  if (r.records_added) parts.push(tn("{n} neuer Eintrag", "{n} neue Einträge", r.records_added));
   if (r.rejected.length) parts.push(t("{n} abgewiesen", { n: r.rejected.length }));
+  if (r.skipped) parts.push(t("{n} nicht übernommen", { n: r.skipped }));
   const details = parts.join(", ");
   return result.created
     ? t("Review angelegt: {title} ({details}).", { title: result.title, details })

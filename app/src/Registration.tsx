@@ -5,7 +5,7 @@ import React, { useEffect, useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 
 import { api, errorText, RegistrationDraft, RegistrationItem, ReviewDetail, safeFileName } from "./api";
-import { formatDate, outputLanguage, setOutputLanguage, t, tn, tx } from "./i18n";
+import { formatDate, outputLanguage, setOutputLanguage, t, tIn, tn, tx } from "./i18n";
 import { Banner, Group, Icon, LanguageSelect, Pill, Row } from "./ui";
 
 type Run = (action: () => Promise<string | void>, done?: string) => Promise<void>;
@@ -36,7 +36,7 @@ function ItemField({ item, canEdit, onSave }: { item: RegistrationItem; canEdit:
       <legend>
         <span className="reg-number">{item.number}</span>
         {item.label}
-        <small>{item.original}</small>
+        {item.original !== item.label && <small>{item.original}</small>}
         <Pill tone={STATUS_TONE[item.status]}>{STATUS_LABEL[item.status]}</Pill>
       </legend>
       <p className="muted">{item.hint}</p>
@@ -136,7 +136,7 @@ export function RegistrationTab({ review, run }: { review: ReviewDetail; run: Ru
 
   async function exportFile() {
     const path = await save({
-      defaultPath: t("{title}-registrierung-osf.md", { title: safeFileName(review.title) }),
+      defaultPath: tIn(lang, "{title}-registrierung-osf.md", { title: safeFileName(review.title) }),
       filters: [{ name: "Markdown", extensions: ["md"] }],
     });
     if (!path) return;
@@ -204,7 +204,7 @@ export function RegistrationTab({ review, run }: { review: ReviewDetail; run: Ru
 
       {section && (
         <section className="reg-section" aria-label={section.label}>
-          <h2>{section.label} <small>{t("Seite „{page}“ im Register", { page: section.original })}</small></h2>
+          <h2>{section.label} {section.original !== section.label && <small>{t("Seite „{page}“ im Register", { page: section.original })}</small>}</h2>
           {items.map((item) => (
             <ItemField key={item.key} item={item} canEdit={draft.can_edit} onSave={(text) => answer(item.key, text)} />
           ))}

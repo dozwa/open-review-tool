@@ -15,6 +15,12 @@ function fileName(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
 }
 
+/** Vorschlag für die Quelle aus dem Dateinamen („pubmed_2026-11-02.ris“ → „pubmed“), damit kein Import ohne Quelle bleibt. */
+function sourceGuess(path: string): string {
+  const stem = (path.split(/[\\/]/).pop() ?? "").replace(/\.[^.]+$/, "");
+  return stem.split(/[_\s]+\d/)[0].trim() || stem;
+}
+
 export function NewReviewPage() {
   const navigate = useNavigate();
   const refresh = useRefreshSidebar();
@@ -37,9 +43,9 @@ export function NewReviewPage() {
   }, []);
 
   async function addFiles() {
-    const picked = await open({ multiple: true, directory: false, filters: [{ name: t("RIS oder BibTeX"), extensions: ["ris", "bib", "bibtex", "txt", "nbib"] }] });
+    const picked = await open({ multiple: true, directory: false, filters: [{ name: t("RIS, BibTeX oder PubMed"), extensions: ["ris", "bib", "bibtex", "txt", "nbib"] }] });
     const paths = Array.isArray(picked) ? picked : typeof picked === "string" ? [picked] : [];
-    setFiles((current) => [...current, ...paths.filter((p) => !current.some((f) => f.path === p)).map((path) => ({ path, source: "" }))]);
+    setFiles((current) => [...current, ...paths.filter((p) => !current.some((f) => f.path === p)).map((path) => ({ path, source: sourceGuess(path) }))]);
   }
 
   async function addPeople() {
@@ -125,7 +131,7 @@ export function NewReviewPage() {
       )}
 
       {step === 1 && (
-        <Group title={t("Treffer importieren")} footer={t("Exportiere die Treffer deiner Suche als RIS oder BibTeX. Dubletten werden erkannt. Du kannst das auch später im Review nachholen.")}>
+        <Group title={t("Treffer importieren")} footer={t("Exportiere die Treffer deiner Suche als RIS, BibTeX oder im PubMed-Format. Dubletten werden erkannt. Du kannst das auch später im Review nachholen; dort lässt sich jeder Import einer festgehaltenen Suche zuordnen.")}>
           {files.length === 0 && <Row><span className="muted">{t("Noch keine Datei gewählt.")}</span></Row>}
           {files.map((f, i) => (
             <Row key={f.path}>
@@ -140,7 +146,7 @@ export function NewReviewPage() {
             </Row>
           ))}
           <Row>
-            <span className="muted">{t("RIS oder BibTeX")}</span>
+            <span className="muted">{t("RIS, BibTeX oder PubMed (nbib)")}</span>
             <button type="button" onClick={addFiles}><Icon name="upload" size={14} /> {t("Dateien wählen …")}</button>
           </Row>
         </Group>

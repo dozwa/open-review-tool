@@ -54,6 +54,8 @@ type Check = std::result::Result<(), String>;
 
 pub struct Spec {
     pub name: &'static str,
+    /// Name für Menschen, deutsch; übersetzt über den Sprachkatalog ([`label`]).
+    pub label: &'static str,
     /// Höchste Schema-Version, die diese App schreibt und versteht.
     pub version: i64,
     pub chain: Chain,
@@ -65,6 +67,7 @@ pub struct Spec {
 pub static CATALOG: [Spec; 30] = [
     Spec {
         name: "ReviewCreated",
+        label: "Review angelegt",
         version: 1,
         chain: Chain::Main,
         writer: Writer::Creator,
@@ -73,6 +76,7 @@ pub static CATALOG: [Spec; 30] = [
     },
     Spec {
         name: "MemberRoleSet",
+        label: "Rolle festgelegt",
         version: 1,
         chain: Chain::Main,
         writer: Writer::Manage,
@@ -81,6 +85,7 @@ pub static CATALOG: [Spec; 30] = [
     },
     Spec {
         name: "CriteriaVersionPublished",
+        label: "Kriterien veröffentlicht",
         version: 2,
         chain: Chain::Main,
         writer: Writer::Manage,
@@ -89,6 +94,7 @@ pub static CATALOG: [Spec; 30] = [
     },
     Spec {
         name: "RecordsImported",
+        label: "Einträge importiert",
         version: 2,
         chain: Chain::Main,
         writer: Writer::Manage,
@@ -97,6 +103,7 @@ pub static CATALOG: [Spec; 30] = [
     },
     Spec {
         name: "StageInstanceOpened",
+        label: "Stufe geöffnet",
         version: 2,
         chain: Chain::Main,
         writer: Writer::Manage,
@@ -105,6 +112,7 @@ pub static CATALOG: [Spec; 30] = [
     },
     Spec {
         name: "StageUnblinded",
+        label: "Stufe entblindet",
         version: 1,
         chain: Chain::Main,
         writer: Writer::Manage,
@@ -113,6 +121,7 @@ pub static CATALOG: [Spec; 30] = [
     },
     Spec {
         name: "StageInstanceClosed",
+        label: "Stufe geschlossen",
         version: 1,
         chain: Chain::Main,
         writer: Writer::Manage,
@@ -121,6 +130,7 @@ pub static CATALOG: [Spec; 30] = [
     },
     Spec {
         name: "SnapshotTaken",
+        label: "Snapshot",
         version: 1,
         chain: Chain::Main,
         writer: Writer::Manage,
@@ -129,6 +139,7 @@ pub static CATALOG: [Spec; 30] = [
     },
     Spec {
         name: "VoteCast",
+        label: "Stimme",
         version: 1,
         chain: Chain::Stage,
         writer: Writer::Write,
@@ -137,6 +148,7 @@ pub static CATALOG: [Spec; 30] = [
     },
     Spec {
         name: "VoteRevised",
+        label: "Geänderte Stimme",
         version: 1,
         chain: Chain::Stage,
         writer: Writer::Write,
@@ -145,6 +157,7 @@ pub static CATALOG: [Spec; 30] = [
     },
     Spec {
         name: "RecordFlaggedUndecidable",
+        label: "Markierung „Zur Klärung“",
         version: 1,
         chain: Chain::Stage,
         writer: Writer::Write,
@@ -153,6 +166,7 @@ pub static CATALOG: [Spec; 30] = [
     },
     Spec {
         name: "ConsensusRecorded",
+        label: "Konsens",
         version: 1,
         chain: Chain::Main,
         writer: Writer::Write,
@@ -161,6 +175,7 @@ pub static CATALOG: [Spec; 30] = [
     },
     Spec {
         name: "WorkflowVersionPublished",
+        label: "Ablauf veröffentlicht",
         version: 1,
         chain: Chain::Main,
         writer: Writer::Manage,
@@ -169,6 +184,7 @@ pub static CATALOG: [Spec; 30] = [
     },
     Spec {
         name: "GateEvaluated",
+        label: "Gate ausgewertet",
         version: 1,
         chain: Chain::Main,
         writer: Writer::Manage,
@@ -177,6 +193,7 @@ pub static CATALOG: [Spec; 30] = [
     },
     Spec {
         name: "GateOverridden",
+        label: "Gate übersteuert",
         version: 1,
         chain: Chain::Main,
         writer: Writer::Manage,
@@ -185,6 +202,7 @@ pub static CATALOG: [Spec; 30] = [
     },
     Spec {
         name: "SearchVersionPublished",
+        label: "Suchversion",
         version: 1,
         chain: Chain::Main,
         writer: Writer::Manage,
@@ -193,6 +211,7 @@ pub static CATALOG: [Spec; 30] = [
     },
     Spec {
         name: "SearchPeerReviewed",
+        label: "Peer-Review der Suche",
         version: 1,
         chain: Chain::Main,
         writer: Writer::Manage,
@@ -201,6 +220,7 @@ pub static CATALOG: [Spec; 30] = [
     },
     Spec {
         name: "DuplicatesResolved",
+        label: "Dubletten entschieden",
         version: 1,
         chain: Chain::Main,
         writer: Writer::Manage,
@@ -209,6 +229,7 @@ pub static CATALOG: [Spec; 30] = [
     },
     Spec {
         name: "FullTextStatusSet",
+        label: "Stand des Volltexts",
         version: 1,
         chain: Chain::Main,
         writer: Writer::Write,
@@ -217,6 +238,7 @@ pub static CATALOG: [Spec; 30] = [
     },
     Spec {
         name: "ZoteroLibraryLinked",
+        label: "Zotero-Bibliothek verknüpft",
         version: 1,
         chain: Chain::Main,
         writer: Writer::Manage,
@@ -225,6 +247,7 @@ pub static CATALOG: [Spec; 30] = [
     },
     Spec {
         name: "ZoteroItemMapped",
+        label: "Zotero-Eintrag zugeordnet",
         version: 1,
         chain: Chain::Main,
         writer: Writer::Manage,
@@ -233,6 +256,7 @@ pub static CATALOG: [Spec; 30] = [
     },
     Spec {
         name: "RecordsLinkedToStudy",
+        label: "Bündel",
         version: 1,
         chain: Chain::Main,
         writer: Writer::Manage,
@@ -241,6 +265,7 @@ pub static CATALOG: [Spec; 30] = [
     },
     Spec {
         name: "SourceTypeSet",
+        label: "Quellenart",
         version: 1,
         chain: Chain::Main,
         writer: Writer::Manage,
@@ -249,6 +274,7 @@ pub static CATALOG: [Spec; 30] = [
     },
     Spec {
         name: "ProtocolRegistered",
+        label: "Registrierung",
         version: 1,
         chain: Chain::Main,
         writer: Writer::Manage,
@@ -257,6 +283,7 @@ pub static CATALOG: [Spec; 30] = [
     },
     Spec {
         name: "ProtocolDrafted",
+        label: "Text für die Registrierung",
         version: 1,
         chain: Chain::Main,
         writer: Writer::Manage,
@@ -265,6 +292,7 @@ pub static CATALOG: [Spec; 30] = [
     },
     Spec {
         name: "FormVersionPublished",
+        label: "Formularversion",
         version: 1,
         chain: Chain::Main,
         writer: Writer::Manage,
@@ -273,6 +301,7 @@ pub static CATALOG: [Spec; 30] = [
     },
     Spec {
         name: "FormConfirmed",
+        label: "Formular bestätigt",
         version: 1,
         chain: Chain::Main,
         writer: Writer::Manage,
@@ -281,6 +310,7 @@ pub static CATALOG: [Spec; 30] = [
     },
     Spec {
         name: "FormValueRecorded",
+        label: "Formularwert",
         version: 1,
         chain: Chain::Stage,
         writer: Writer::Write,
@@ -289,6 +319,7 @@ pub static CATALOG: [Spec; 30] = [
     },
     Spec {
         name: "FormEntryCompleted",
+        label: "Formular fertig gemeldet",
         version: 1,
         chain: Chain::Stage,
         writer: Writer::Write,
@@ -297,6 +328,7 @@ pub static CATALOG: [Spec; 30] = [
     },
     Spec {
         name: "FormConsensusRecorded",
+        label: "Abgleich eines Formularwerts",
         version: 1,
         chain: Chain::Main,
         writer: Writer::Write,
@@ -319,6 +351,12 @@ pub const MAX_MAPPINGS: usize = 500;
 
 pub fn spec(event_type: &str) -> Option<&'static Spec> {
     CATALOG.iter().find(|s| s.name == event_type)
+}
+
+/// Name eines Ereignistyps für Menschen, in der geltenden Sprache (Katalog „Ereignis: …“).
+/// Unbekannte Typen erscheinen unter ihrem technischen Namen.
+pub fn label(event_type: &str) -> String {
+    spec(event_type).map_or_else(|| event_type.to_string(), |s| crate::i18n::text_in("Ereignis", s.label))
 }
 
 /// Ereignisse in der Kette einer Stufe. Ein Paket lässt sie weg, solange die Stufe verblindet ist.
@@ -956,6 +994,14 @@ mod tests {
             assert_eq!(s.writer, Writer::Write, "{}", s.name);
         }
         assert!(is_blindable("VoteCast"));
+        assert_eq!(label("VoteCast"), "Stimme");
+        assert_eq!(crate::i18n::with("en", || label("VoteCast")), "vote");
+        for spec in &CATALOG {
+            for language in &crate::i18n::LANGUAGES[1..] {
+                let key = format!("Ereignis: {}", spec.label);
+                assert!(crate::i18n::catalog(language.code).unwrap().contains_key(&key), "{}: {key}", language.code);
+            }
+        }
         assert!(!is_blindable("ConsensusRecorded"));
         assert!(!is_blindable("Erfunden"));
     }

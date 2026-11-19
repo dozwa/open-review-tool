@@ -4,7 +4,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
-import { api, canVote, errorText, FullText, MyVote, Progress, reasonsOf, RecordFilter, RecordItem, RecordList, StageDetail, term } from "./api";
+import { api, canManage, canVote, errorText, FullText, MyVote, Progress, reasonsOf, RecordFilter, RecordItem, RecordList, StageDetail, term } from "./api";
 import { CriteriaView } from "./Criteria";
 import { PdfView } from "./PdfView";
 import { DECISION_LABEL, RecordView } from "./StagePages";
@@ -151,17 +151,18 @@ function Screening() {
     };
   }, [reviewId, stageId, show]);
 
-  /** Nach einer Entscheidung: nächster offener Eintrag der Liste hinter dem aktuellen, sonst der nächste der Stufe. */
+  /** Nach einer Entscheidung: nächster Eintrag der Liste hinter dem aktuellen, der meine Stimme noch braucht,
+   *  sonst der nächste der Stufe. Was die Stufe braucht, entscheidet der Kern nach ihrer Auswahlregel. */
   const advance = useCallback(async (votedId: string) => {
-    const rows = list?.items ?? [];
-    const at = rows.findIndex((r) => r.id === votedId);
-    const following = at >= 0 ? rows.slice(at + 1).find((r) => !r.my_decision) : undefined;
     const [loaded, next] = await Promise.all([api.records(reviewId, stageId, filter()), api.next(reviewId, stageId)]);
+    const rows = loaded.items;
+    const at = rows.findIndex((r) => r.id === votedId);
+    const following = at >= 0 ? rows.slice(at + 1).find((r) => r.wants_my_vote) : undefined;
     setList(loaded);
     setProgress(next.progress);
     if (following) await select(following.id);
     else show(next.record, null);
-  }, [list, reviewId, stageId, filter, select, show]);
+  }, [reviewId, stageId, filter, select, show]);
 
   const send = useCallback(async (action: (recordId: string) => Promise<void>, label: string) => {
     if (!record || busy) return;
@@ -309,8 +310,16 @@ function Screening() {
         <section className="screening-main">
           {!record && (
             <Empty icon="check" title={stage.closed ? t("Diese Stufe ist geschlossen") : t("Alles bewertet")}>
-              {stage.closed ? t("Einträge lassen sich über die Liste weiter ansehen.") : t("Speichere im Review unter „Austausch“ eine Rückmeldung und schick sie an die Leitung.")}
-              <div><Link className="button primary" to={`/reviews/${reviewId}`}>{t("Zum Review")}</Link></div>
+              {stage.closed
+                ? t("Einträge lassen sich über die Liste weiter ansehen.")
+                : canManage(detail.role)
+                  ? t("Liegen die Rückmeldungen des Teams vor, liest du sie unter „Austausch“ ein und klärst die Abweichungen in der Auswertung der Stufe.")
+                  : t("Speichere im Review unter „Austausch“ eine Rückmeldung und schick sie an die Leitung.")}
+              <div>
+                <Link className="button primary" to={canManage(detail.role) ? `/reviews/${reviewId}/stages/${stageId}` : `/reviews/${reviewId}?tab=exchange`}>
+                  {canManage(detail.role) ? t("Zur Auswertung") : t("Zum Austausch")}
+                </Link>
+              </div>
             </Empty>
           )}
           {record && (

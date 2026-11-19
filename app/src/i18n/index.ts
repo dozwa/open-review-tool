@@ -131,6 +131,14 @@ export function tx(key: Key, parts: Record<string, React.ReactNode>): React.Reac
  */
 export const capital = (text: string): string => text.charAt(0).toLocaleUpperCase(locale) + text.slice(1);
 
+/** Text in einer bestimmten Sprache statt der der Oberfläche, etwa ein Dateiname in der Sprache eines Berichts. */
+export function tIn(code: LanguageCode, key: Key, params?: Params): string {
+  const own = LANGUAGES.find((l) => l.code === code)?.catalog;
+  const entry: Entry | undefined = own ? (own as Record<string, Entry>)[key] ?? (FALLBACK as Record<string, Entry>)[key] : undefined;
+  const text = entry === undefined ? key : typeof entry === "string" ? entry : entry.other ?? key;
+  return fill(text, params);
+}
+
 /** Übersetzt einen Text, der nicht im Quelltext steht (z. B. aus der Vorschau). Ohne Eintrag bleibt er. */
 export const tAny = (text: string, params?: Params): string => fill(pattern(text), params);
 

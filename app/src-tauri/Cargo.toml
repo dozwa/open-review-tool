@@ -19,3 +19,8 @@ tauri = { version = "2.12.7", features = ["macos-private-api"] }
 tauri-plugin-dialog = "2.8.4"
 ureq = { version = "2.12.1", default-features = false }
 uuid = { version = "1.10.0", features = ["serde"] }
+
+[features]
+# Entwicklungsbrücke: dieselben Befehle über HTTP auf 127.0.0.1, damit sich die Oberfläche im Browser
+# gegen den echten Kern bedienen und testen lässt. Nie im Release-Build.
+bridge = ["tauri/test"]

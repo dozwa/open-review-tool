@@ -4,23 +4,24 @@
 import React, { useEffect, useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 
-import { api, canManage, Checklist, errorText, FlowLevel, Protocol, Report, ReportFileKind, ReviewDetail } from "./api";
-import { formatDate, formatNumber, outputLanguage, setOutputLanguage, t, tn } from "./i18n";
+import { api, canManage, Checklist, errorText, FlowLevel, Protocol, Report, ReportFileKind, ReviewDetail, term } from "./api";
+import { formatDate, formatNumber, Key, outputLanguage, setOutputLanguage, t, tIn, tn } from "./i18n";
 import { today } from "./Search";
 import { Banner, Empty, Group, Icon, LanguageSelect, Pill, Row, Stat } from "./ui";
 
 type Run = (action: () => Promise<string | void>, done?: string) => Promise<void>;
 
-const FILES: Record<ReportFileKind, { name: string; type: string; extension: string }> = {
-  diagram: { name: t("flussdiagramm.svg"), type: "SVG", extension: "svg" },
-  excluded: { name: t("ausgeschlossene-volltexte.csv"), type: "CSV", extension: "csv" },
-  included: { name: t("eingeschlossen.ris"), type: "RIS", extension: "ris" },
-  sources: { name: t("eingeschlossene-quellen.csv"), type: "CSV", extension: "csv" },
-  search: { name: t("suchanhang.md"), type: "Markdown", extension: "md" },
-  methods: { name: t("methoden-auswahl.md"), type: "Markdown", extension: "md" },
-  table: { name: t("tabelle-quellen.csv"), type: "CSV", extension: "csv" },
-  deviations: { name: t("protokoll-abweichungen.md"), type: "Markdown", extension: "md" },
-  checklist: { name: t("checkliste.md"), type: "Markdown", extension: "md" },
+// Dateinamen sind Schlüssel des Katalogs; gespeichert wird unter dem Namen in der Sprache des Berichts.
+const FILES: Record<ReportFileKind, { name: Key; type: string; extension: string }> = {
+  diagram: { name: "flussdiagramm.svg", type: "SVG", extension: "svg" },
+  excluded: { name: "ausgeschlossene-volltexte.csv", type: "CSV", extension: "csv" },
+  included: { name: "eingeschlossen.ris", type: "RIS", extension: "ris" },
+  sources: { name: "eingeschlossene-quellen.csv", type: "CSV", extension: "csv" },
+  search: { name: "suchanhang.md", type: "Markdown", extension: "md" },
+  methods: { name: "methoden-auswahl.md", type: "Markdown", extension: "md" },
+  table: { name: "tabelle-quellen.csv", type: "CSV", extension: "csv" },
+  deviations: { name: "protokoll-abweichungen.md", type: "Markdown", extension: "md" },
+  checklist: { name: "checkliste.md", type: "Markdown", extension: "md" },
 };
 
 const DEVIATION_LABEL: Record<string, string> = {
@@ -238,20 +239,27 @@ export function ReportTab({ review, run }: { review: ReviewDetail; run: Run }) {
 
   async function saveFile(kind: ReportFileKind) {
     const file = FILES[kind];
-    const path = await save({ defaultPath: file.name, filters: [{ name: file.type, extensions: [file.extension] }] });
+    const path = await save({ defaultPath: tIn(lang, file.name), filters: [{ name: file.type, extensions: [file.extension] }] });
     if (path) await run(() => api.exportReport(review.id, kind, path, lang), t("Datei gespeichert."));
   }
 
   if (error) return <Banner kind="error">{error}</Banner>;
   if (!report) return null;
   const flow = report.flow;
+  // Sätze der Oberfläche brauchen die Begriffe in ihrer Sprache; der Bericht liefert sie in der Sprache der Ausgabe.
+  const terms = {
+    record_term: term(review.workflow.terms, "record", t("Eintrag")),
+    records_term: term(review.workflow.terms, "records", t("Einträge")),
+    source_term: term(review.workflow.terms, "source", t("Quelle")),
+    sources_term: term(review.workflow.terms, "sources", t("Quellen")),
+  };
   const hasLevels = flow.levels.length > 0;
   // Zweig „andere Quellen“: Treffer aus Zitationssuche und anderen Wegen
   const branch = flow.other_identified > 0;
   const sources = flow.included_sources ?? flow.included;
   const bundled = flow.included !== null && sources !== null && sources !== flow.included;
   const nIncluded = flow.included ?? 0;
-  const includedTerm = flow.included === 1 ? flow.record_term : flow.records_term;
+  const includedTerm = flow.included === 1 ? terms.record_term : terms.records_term;
 
   return (
     <>
@@ -268,7 +276,7 @@ export function ReportTab({ review, run }: { review: ReviewDetail; run: Run }) {
         <Stat
           label={t("Dubletten entfernt")}
           value={formatNumber(flow.exact_duplicates + flow.resolved_duplicates)}
-          detail={t("{count} {records} bleiben", { count: formatNumber(flow.unique), records: flow.records_term })}
+          detail={t("{count} {records} bleiben", { count: formatNumber(flow.unique), records: terms.records_term })}
         />
         <Stat
           label={t("Eingeschlossen")}
@@ -277,7 +285,7 @@ export function ReportTab({ review, run }: { review: ReviewDetail; run: Run }) {
           detail={[
             sources === null ? t("noch keine Auswahl") : flow.complete ? t("Auswahl abgeschlossen") : t("vorläufig, die Auswahl läuft noch"),
             bundled
-              ? tn("{sources}, gebündelt aus {n} Eintrag", "{sources}, gebündelt aus {n} {records}n", nIncluded, { sources: flow.sources_term, records: flow.records_term })
+              ? tn("{sources}, gebündelt aus {n} Eintrag", "{sources}, gebündelt aus {n} {records}n", nIncluded, { sources: terms.sources_term, records: terms.records_term })
               : "",
           ].filter(Boolean).join(" · ")}
         />
@@ -337,7 +345,7 @@ export function ReportTab({ review, run }: { review: ReviewDetail; run: Run }) {
         </div>
         <div className="report-file">
           <div>
-            <strong>{t("Eingeschlossene {sources}", { sources: flow.sources_term })}</strong>
+            <strong>{t("Eingeschlossene {sources}", { sources: terms.sources_term })}</strong>
             <span className="muted">
               {flow.complete
                 ? t("RIS, {count} {records}; lässt sich in Zotero importieren", { count: nIncluded, records: includedTerm })
@@ -348,13 +356,13 @@ export function ReportTab({ review, run }: { review: ReviewDetail; run: Run }) {
         </div>
         <div className="report-file">
           <div>
-            <strong>{t("{sources} mit Bündeln und Quellenart", { sources: flow.sources_term })}</strong>
+            <strong>{t("{sources} mit Bündeln und Quellenart", { sources: terms.sources_term })}</strong>
             <span className="muted">
               {t("CSV, {count} {sources}; je {record} eine Zeile, {records} desselben Bündels tragen dieselbe Nummer", {
                 count: sources ?? 0,
-                sources: sources === 1 ? flow.source_term : flow.sources_term,
-                record: flow.record_term,
-                records: flow.records_term,
+                sources: sources === 1 ? terms.source_term : terms.sources_term,
+                record: terms.record_term,
+                records: terms.records_term,
               })}
               {flow.source_types.length > 0 && ` · ${flow.source_types.map((type) => `${type.label}: ${type.n}`).join(", ")}`}
             </span>
@@ -363,9 +371,9 @@ export function ReportTab({ review, run }: { review: ReviewDetail; run: Run }) {
         </div>
         <div className="report-file">
           <div>
-            <strong>{t("Tabelle der eingeschlossenen {sources}", { sources: flow.sources_term })}</strong>
+            <strong>{t("Tabelle der eingeschlossenen {sources}", { sources: terms.sources_term })}</strong>
             <span className="muted">
-              {t("CSV, je {source} eine Zeile mit den gültigen Werten aus dem Formular", { source: flow.source_term })}
+              {t("CSV, je {source} eine Zeile mit den gültigen Werten aus dem Formular", { source: terms.source_term })}
               {" · "}
               {report.table.n_fields > 0
                 ? tn("{charted} von {total} extrahiert und abgeglichen, {n} Feld", "{charted} von {total} extrahiert und abgeglichen, {n} Felder", report.table.n_fields, {

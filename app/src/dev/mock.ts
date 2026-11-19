@@ -474,7 +474,7 @@ export function installMock() {
         return {
           items: hits.map((r) => {
             const st = listState[r.id];
-            return { id: r.id, title: r.title, year: r.year, my_decision: st.mine, n_votes: blind ? null : st.n, status: blind ? null : st.status, decision: null };
+            return { id: r.id, title: r.title, year: r.year, my_decision: st.mine, wants_my_vote: !st.mine, n_votes: blind ? null : st.n, status: blind ? null : st.status, decision: null };
           }),
           total: hits.length,
           keywords: [...criteria.include_keywords.map(count("include")), ...criteria.exclude_keywords.map(count("exclude"))],
@@ -590,7 +590,17 @@ export function installMock() {
       }
       case "chain_verify": return { n_events: 214, n_bad: 0, problems: [], ok: true };
       case "plugin:dialog|open": case "plugin:dialog|save": return null;
-      case "plugin:dialog|ask": case "plugin:dialog|message": return true;
+      case "plugin:dialog|ask": return true;
+      // `ask` und `confirm` schicken eine Meldung mit Knöpfen und vergleichen den gedrückten Knopf.
+      case "plugin:dialog|message": {
+        const buttons = a.buttons as string | Record<string, string | string[]> | undefined;
+        if (buttons === "YesNo" || buttons === "YesNoCancel") return "Yes";
+        if (buttons && typeof buttons === "object") {
+          const custom = Object.values(buttons)[0];
+          return Array.isArray(custom) ? custom[0] : custom;
+        }
+        return "Ok";
+      }
       default: return null;
     }
   });

@@ -205,6 +205,8 @@ pub struct MergeReport {
     pub accepted: usize,
     pub already_known: usize,
     pub rejected: Vec<String>,
+    /// Ereignisse, die hinter einer Abweisung in derselben Kette lagen und deshalb nicht geprüft wurden.
+    pub skipped: usize,
     pub records_added: usize,
 }
 
@@ -381,8 +383,10 @@ pub fn merge(review: &Review, bundle: &Bundle) -> Result<MergeReport> {
         });
         let mut head: Option<Head> = store.head(&actor, &stream)?;
         let mut stopped = false;
+        let mut skipped = 0;
         for e in chain {
             if stopped {
+                skipped += 1;
                 continue;
             }
             if let Some(existing) = store.event_by_id(&e.event_id)? {
@@ -396,7 +400,7 @@ pub fn merge(review: &Review, bundle: &Bundle) -> Result<MergeReport> {
                 continue;
             }
             let reject = |reason: String, report: &mut MergeReport| {
-                report.rejected.push(tr!("{}, {} Nr. {}: {}", who, e.event_type, e.seq, reason));
+                report.rejected.push(tr!("{}, {} Nr. {}: {}", who, catalog::label(&e.event_type), e.seq, reason));
             };
             if store.event_at(&actor, &stream, e.seq)?.is_some() {
                 reject(tr!("An dieser Stelle der Kette steht hier schon ein anderes Ereignis. Die Kette wurde auf zwei Rechnern getrennt fortgeschrieben."), &mut report);
@@ -423,6 +427,17 @@ pub fn merge(review: &Review, bundle: &Bundle) -> Result<MergeReport> {
             store.insert(e)?;
             head = Some(Head { seq: e.seq, hash: e.hash.clone() });
             report.accepted += 1;
+        }
+        if skipped > 0 {
+            report.skipped += skipped;
+            if let Some(last) = report.rejected.last_mut() {
+                let note = match skipped {
+                    1 => tr!("1 weiteres Ereignis dieser Kette wurde deshalb nicht übernommen."),
+                    n => tr!("{} weitere Ereignisse dieser Kette wurden deshalb nicht übernommen.", n),
+                };
+                last.push(' ');
+                last.push_str(&note);
+            }
         }
     }
 

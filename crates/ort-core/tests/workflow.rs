@@ -313,6 +313,16 @@ fn single_verified_rule_matches_hand_calculation() {
     send_package(&t.owner, &t.r2);
     let next = t.r2.next_record(&stage.id).unwrap();
     assert_eq!((next.record.unwrap().id.to_string(), next.progress.total), (b.clone(), 2));
+    // Die Liste sagt dasselbe, damit die Screening-Seite nach einer Stimme nicht zu Einschlüssen springt.
+    let wanted: Vec<String> =
+        t.r2.stage_records(&stage.id, &RecordFilter::default())
+            .unwrap()
+            .items
+            .into_iter()
+            .filter(|row| row.wants_my_vote)
+            .map(|row| row.id.to_string())
+            .collect();
+    assert_eq!(wanted, vec![b.clone(), c.clone()]);
     vote(&t.r2, &stage.id, &b, "exclude");
     vote(&t.r2, &stage.id, &c, "include");
     assert!(t.r2.next_record(&stage.id).unwrap().record.is_none());
@@ -557,7 +567,7 @@ fn exclusion_without_primary_reason_is_rejected_on_merge() {
         .append(t.r1.me(), "ConsensusRecorded", Some(stage.id), json!({"record_id": record, "decision": "exclude"}))
         .unwrap();
     let report = merge(&t.owner, &wire(&export_return(&t.r1).unwrap())).unwrap();
-    assert!(report.rejected.iter().any(|r| r.contains("ConsensusRecorded") && r.contains("Hauptgrund")), "{report:?}");
+    assert!(report.rejected.iter().any(|r| r.contains("Konsens Nr.") && r.contains("Hauptgrund")), "{report:?}");
     // Mit Hauptgrund kommt eine Stimme durch die Rückmeldung.
     let other = order(&t, &stage.id)[1].clone();
     send_package(&t.owner, &t.viewer);
@@ -1601,7 +1611,7 @@ fn update_runs_as_further_rounds_and_the_report_names_protocol_and_deviations() 
         "Erhoben wurden 4 Angaben:",
         "- Design (Kohorte, RCT)",
         "Runde 1: 4 Quellen, 2 Personen beteiligt. Abgeglichen: 4.",
-        "Runde 2: 1 Quellen, 2 Personen beteiligt. Abgeglichen: 1.",
+        "Runde 2: 1 Quelle, 2 Personen beteiligt. Abgeglichen: 1.",
         "Kriterien geändert (Version 2): E2 genauer gefasst",
         "„Charting-Pilot“ wurde von der Leitung ohne erfülltes Gate freigegeben",
     ] {
@@ -1755,7 +1765,12 @@ fn form_events_are_checked_when_a_file_is_read() {
         from.store().append(from.me(), event_type, stage, payload).unwrap();
         let report = merge(&t.owner, &wire(&export_return(from).unwrap())).unwrap();
         // Eine abgewiesene Kette bleibt stehen und wird bei jedem Einlesen wieder gemeldet.
-        report.rejected.iter().find(|r| r.contains(event_type)).expect("das Ereignis wird abgewiesen").clone()
+        report
+            .rejected
+            .iter()
+            .find(|r| r.contains(&ort_core::catalog::label(event_type)))
+            .expect("das Ereignis wird abgewiesen")
+            .clone()
     };
     // richtige Rolle, passender Wert
     t.r1.record_form_value(&pilot.id, &record, "country", &json!("Polen")).unwrap();
