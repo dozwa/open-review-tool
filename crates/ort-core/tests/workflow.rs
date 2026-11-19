@@ -2023,3 +2023,93 @@ fn language_changes_what_the_app_says_and_never_the_log() {
     assert_ne!(name("en"), name("de"));
     assert_eq!(name("de"), "Titel/Abstract");
 }
+
+#[test]
+fn ai_suggestions_are_noted_stay_blind_and_never_count_as_votes() {
+    let t = Team::new();
+    t.owner.publish_criteria(&criteria("")).unwrap();
+    t.owner.draft_registration("primary_questions", "Welche Formen von Kopfschmerz sind beschrieben?").unwrap();
+    let stage = t.open_stage(|_| {}).id;
+    for member in [&t.r1, &t.r2] {
+        send_package(&t.owner, member);
+    }
+    let records = order_of(&t.r1, &stage);
+    let record = &records[0];
+    let title = t.r1.stage_record(&stage, record).unwrap().record.title;
+    let ai_events =
+        |review: &Review| review.events().unwrap().iter().filter(|e| e.event_type.starts_with("AiSuggestion")).count();
+
+    // Der Prompt entsteht aus den Daten des Reviews: Titel, Fragestellung, Kriterien der Stufe, Eintrag.
+    let options = ort_core::ai::Options::default();
+    let request = t.r1.ai_request(&stage, record, &options).unwrap();
+    let prompt = request.prompt();
+    for part in ["Testreview", "Welche Formen von Kopfschmerz", "- E1 Falsche Population", "E1, E2", title.as_str()] {
+        assert!(prompt.contains(part), "{part} fehlt in:\n{prompt}");
+    }
+    assert_eq!(request.prompt_sha256, sha256_hex(prompt.as_bytes()));
+    let with_publication = ort_core::ai::Options { publication: true, ..options.clone() };
+    assert_ne!(t.r1.ai_request(&stage, record, &with_publication).unwrap().prompt_sha256, request.prompt_sha256);
+    let own = ort_core::ai::Options { template: "Kurz: {{record}}\n{{format}}".into(), publication: false };
+    let short = t.r1.ai_request(&stage, record, &own).unwrap().prompt();
+    assert!(short.starts_with("Kurz: ") && !short.contains("Falsche Population"), "{short}");
+    assert_eq!(ai_events(&t.r1), 0, "die Anfrage allein schreibt nichts");
+
+    // Eine unlesbare Antwort wird nicht vermerkt.
+    let unreadable = t.r1.record_ai_suggestion(&stage, record, "llama3", &request.prompt_sha256, "Schwer zu sagen.");
+    assert!(matches!(unreadable, Err(Error::Invalid(_))));
+    assert_eq!(ai_events(&t.r1), 0);
+
+    // Der Vorschlag steht im Log und ist keine Stimme.
+    let progress = t.r1.next_record(&stage).unwrap().progress;
+    let answer = r#"{"decision": "exclude", "reason": "E1", "rationale": "Es geht um Kinder."}"#;
+    let suggestion = t.r1.record_ai_suggestion(&stage, record, "llama3", &request.prompt_sha256, answer).unwrap();
+    assert_eq!((suggestion.suggested.as_str(), suggestion.reason.as_deref()), ("exclude", Some("E1")));
+    assert_eq!(t.r1.next_record(&stage).unwrap().progress, progress);
+    let detail = t.r1.stage_record(&stage, record).unwrap();
+    assert_eq!(detail.my_vote, None);
+    assert_eq!(detail.my_suggestion, Some(suggestion.clone()));
+    assert!(t.r1.my_stage_votes(&stage).unwrap().is_empty());
+
+    // Übernehmen ist ein Vermerk; die Stimme gibt die Person selbst ab.
+    let other = Uuid::new_v4();
+    assert!(matches!(t.r1.resolve_ai_suggestion(&stage, record, &other, "accepted"), Err(Error::NotFound(_))));
+    assert!(matches!(t.r1.resolve_ai_suggestion(&stage, record, &suggestion.id, "vielleicht"), Err(Error::Invalid(_))));
+    t.r1.resolve_ai_suggestion(&stage, record, &suggestion.id, "accepted").unwrap();
+    assert!(matches!(t.r1.resolve_ai_suggestion(&stage, record, &suggestion.id, "declined"), Err(Error::Conflict(_))));
+    t.r1.cast_vote(&stage, record, "exclude", None, &["E1".to_string()], "").unwrap();
+    let detail = t.r1.stage_record(&stage, record).unwrap();
+    assert_eq!(detail.my_suggestion.unwrap().outcome.as_deref(), Some("accepted"));
+    assert_eq!(detail.my_vote.unwrap().decision, "exclude");
+
+    // Ein zweiter Vorschlag zum selben Eintrag ersetzt den ersten in der Ansicht; abgelehnt bleibt er ohne Stimme.
+    let second = t.r1.record_ai_suggestion(&stage, &records[1], "llama3", "ab", r#"{"decision": "include"}"#).unwrap();
+    t.r1.resolve_ai_suggestion(&stage, &records[1], &second.id, "declined").unwrap();
+    assert_eq!(t.r1.stage_record(&stage, &records[1]).unwrap().my_vote, None);
+    assert_eq!(ai_events(&t.r1), 4);
+
+    // Wer nur liest, bekommt keinen Vorschlag; ein Eintrag außerhalb der Stufe auch nicht.
+    assert!(matches!(t.viewer.ai_request(&stage, record, &options), Err(Error::Forbidden(_))));
+    let outside = Uuid::new_v4().to_string();
+    assert!(matches!(t.r1.ai_request(&stage, &outside, &options), Err(Error::NotFound(_))));
+
+    // Verblindet: Die Leitung bekommt die Vorschläge mit der Rückmeldung, die zweite Person nicht.
+    assert!(send_return(&t.r1, &t.owner).rejected.is_empty());
+    assert_eq!(ai_events(&t.owner), 4);
+    vote(&t.r2, &stage, record, "include");
+    send_return(&t.r2, &t.owner);
+    send_package(&t.owner, &t.r2);
+    assert_eq!(ai_events(&t.r2), 0);
+
+    // Entblindet: Alle sehen, dass der Stimme ein Vorschlag vorausging.
+    t.owner.unblind_stage(&stage).unwrap();
+    send_package(&t.owner, &t.r2);
+    assert_eq!(ai_events(&t.r2), 4);
+    let conflicts = t.r2.conflicts(&stage).unwrap();
+    let votes = &conflicts.iter().find(|c| c.record.id.to_string() == *record).unwrap().votes;
+    let ai: Vec<(&str, Option<&str>)> = votes.iter().map(|v| (v.name.as_str(), v.ai.as_deref())).collect();
+    assert_eq!(ai, [("r1", Some("exclude")), ("r2", None)]);
+
+    // In einer geschlossenen Stufe gibt es keine Vorschläge mehr.
+    t.owner.close_stage(&stage).unwrap();
+    assert!(matches!(t.owner.ai_request(&stage, record, &options), Err(Error::Conflict(_))));
+}

@@ -451,6 +451,21 @@ Stand 19.11.2026: umgesetzt für Deutsch und Englisch. Festlegungen beim Bau:
 - Offen: Mehrzahlformen im Kern für Sprachen mit mehr als zwei Formen (der Kern bildet ganze Sätze je Fall für
   Einzahl und Mehrzahl); Übersetzung von README und Doku.
 
+## KI-Vorschlag im Screening (nach Meilenstein 9)
+
+Stand 19.11.2026: umgesetzt für das Screening. Festlegungen beim Bau:
+
+- Die KI schlägt vor, ein Mensch entscheidet. Ein Vorschlag ist nie eine Stimme und zählt in keiner Auswertung.
+- Die App spricht mit einer selbst eingetragenen API nach dem Muster von OpenAI. Adresse, Modell und Prompt
+  sind Einstellungen dieses Rechners (der Prompt lässt sich je Review überschreiben); der API-Schlüssel liegt
+  im Schlüsselbund. Der Kern baut den Prompt und liest die Antwort, gesendet wird in der App.
+- Im Log stehen zwei Ereignisse in der Kette der Stufe: `AiSuggestionReceived` (Modell, Prüfsumme des Prompts,
+  vorgeschlagene Entscheidung, Grund, Begründung) beim Eintreffen der Antwort und `AiSuggestionResolved`
+  (übernommen oder abgelehnt). Während der Verblindung gehen sie an niemanden sonst.
+- Der Prompt selbst steht nicht im Log, nur seine Prüfsumme.
+- Offen: Vorschläge zum Volltext und zur Extraktion, Vorschläge für viele Einträge auf einmal, Nennung der
+  KI-Nutzung im Methodentext, ein vom Team geteilter Prompt, Abschalten durch die Leitung.
+
 ## Erweiterung um weitere Review-Typen
 
 ### 9 Vorlagen ohne neue Bausteine (S)

@@ -23,7 +23,7 @@ use crate::event::{now_timestamp, parse_public_key, sha256_hex, Event, Identity,
 use crate::forms::PILOT_PER_TYPE;
 use crate::fulltext::FullText;
 use crate::import;
-use crate::projection::{FinalDecision, MaybeMode, ReviewState, StageState, Verify};
+use crate::projection::{FinalDecision, MaybeMode, ReviewState, StageState, SuggestionInfo, Verify};
 use crate::search::{Search, SearchVersion, Searches, SEARCH_TYPES};
 use crate::sources;
 use crate::store::{AssignmentRow, BatchRow, RecordRow, Store};
@@ -347,6 +347,8 @@ pub struct RecordDetail {
     pub my_vote: Option<MyVote>,
     /// Stand des Volltexts, falls einer beschafft oder als nicht beschaffbar vermerkt ist.
     pub fulltext: Option<FullText>,
+    /// Der letzte eigene KI-Vorschlag zu diesem Eintrag.
+    pub my_suggestion: Option<SuggestionInfo>,
 }
 
 pub const LIST_LIMIT: usize = 200;
@@ -364,6 +366,8 @@ pub struct ConflictVote {
     pub primary_reason: Option<String>,
     pub reasons: Vec<String>,
     pub note: String,
+    /// Was die KI dieser Person vorgeschlagen hatte, falls sie einen Vorschlag eingeholt hat.
+    pub ai: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -616,7 +620,7 @@ impl Review {
         self.store.append(&self.me, event_type, stage_id, payload)
     }
 
-    fn stage_state(&self, stage_id: &Uuid) -> Result<StageState> {
+    pub(crate) fn stage_state(&self, stage_id: &Uuid) -> Result<StageState> {
         StageState::build(stage_id, &self.store.stage_events(stage_id)?)
             .ok_or_else(|| not_found(tr!("Stufe nicht gefunden.")))
     }
@@ -1689,7 +1693,7 @@ impl Review {
 
     // ------------------------------------------------------------ Abstimmen
 
-    fn require_assigned(&self, stage_id: &Uuid, record_id: &str) -> Result<Uuid> {
+    pub(crate) fn require_assigned(&self, stage_id: &Uuid, record_id: &str) -> Result<Uuid> {
         let id = parse_record_id(record_id)?;
         if !self.store.is_assigned(stage_id, &id)? {
             return Err(not_found(tr!("Der Record gehört nicht zu dieser Stufe.")));
@@ -1828,7 +1832,7 @@ impl Review {
         Ok(())
     }
 
-    fn record_item(&self, id: &str) -> Result<RecordItem> {
+    pub(crate) fn record_item(&self, id: &str) -> Result<RecordItem> {
         let id = parse_record_id(id)?;
         self.store.record(&id)?.map(RecordItem::from).ok_or_else(|| not_found(tr!("Record nicht gefunden.")))
     }
@@ -1983,7 +1987,8 @@ impl Review {
             note: v.note.clone(),
         });
         let fulltext = Uuid::parse_str(&record).ok().and_then(|id| self.fulltexts().ok()?.status.remove(&id));
-        Ok(RecordDetail { record: self.record_item(&record)?, my_vote, fulltext })
+        let my_suggestion = stage.suggestions.get(&(record.clone(), self.me.actor_id)).cloned();
+        Ok(RecordDetail { record: self.record_item(&record)?, my_vote, fulltext, my_suggestion })
     }
 
     // ------------------------------------------------------------ Auswertung
@@ -2010,6 +2015,7 @@ impl Review {
                         primary_reason: v.primary_reason.clone(),
                         reasons: v.reasons.clone(),
                         note: v.note.clone(),
+                        ai: stage.suggestions.get(&(r.clone(), *actor)).map(|s| s.suggested.clone()),
                     });
                 }
             }

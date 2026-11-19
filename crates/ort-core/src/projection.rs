@@ -194,6 +194,21 @@ pub struct StageState {
     pub consensus: BTreeMap<String, ConsensusInfo>,
     /// record_id → Zahl der Markierungen
     pub flags: BTreeMap<String, usize>,
+    /// (record_id, actor_id) → letzter KI-Vorschlag. Zählt nirgends als Stimme.
+    pub suggestions: BTreeMap<(String, Uuid), SuggestionInfo>,
+}
+
+/// Ein KI-Vorschlag, wie ihn eine Person zu einem Eintrag eingeholt hat.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct SuggestionInfo {
+    pub id: Uuid,
+    pub model: String,
+    pub suggested: String,
+    pub reason: Option<String>,
+    pub rationale: String,
+    /// `accepted`, `declined` oder `None`, solange nichts vermerkt ist.
+    pub outcome: Option<String>,
+    pub at: String,
 }
 
 impl StageState {
@@ -238,6 +253,7 @@ impl StageState {
             votes: BTreeMap::new(),
             consensus: BTreeMap::new(),
             flags: BTreeMap::new(),
+            suggestions: BTreeMap::new(),
         };
         for e in events {
             let record = e.payload_str("record_id").map(str::to_string);
@@ -269,6 +285,25 @@ impl StageState {
                     );
                 }
                 ("RecordFlaggedUndecidable", Some(record)) => *state.flags.entry(record).or_default() += 1,
+                // Innerhalb einer Kette in der Reihenfolge von `seq`: Der spätere Vorschlag ersetzt den früheren.
+                ("AiSuggestionReceived", Some(record)) => {
+                    let info = SuggestionInfo {
+                        id: e.event_id,
+                        model: e.payload_str("model").unwrap_or_default().to_string(),
+                        suggested: e.payload_str("suggested").unwrap_or_default().to_string(),
+                        reason: e.payload_str("reason").map(str::to_string),
+                        rationale: e.payload_str("rationale").unwrap_or_default().to_string(),
+                        outcome: None,
+                        at: e.occurred_at.clone(),
+                    };
+                    state.suggestions.insert((record, e.actor_id), info);
+                }
+                ("AiSuggestionResolved", Some(record)) => {
+                    let id = e.payload_str("suggestion").and_then(|id| Uuid::parse_str(id).ok());
+                    if let Some(s) = state.suggestions.get_mut(&(record, e.actor_id)).filter(|s| Some(s.id) == id) {
+                        s.outcome = e.payload_str("outcome").map(str::to_string);
+                    }
+                }
                 _ => {}
             }
         }

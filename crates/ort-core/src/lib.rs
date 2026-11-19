@@ -12,9 +12,11 @@
 //! das Flussdiagramm und die Anhänge, [`sources`] bündelt Einträge zu Quellen, [`forms`] hält Formulare,
 //! Werte und den Abgleich je Feld, [`protocol`] die Registrierung des Protokolls, die Abweichungen danach
 //! und die Checkliste des Berichts. [`settings`] hält, was nur für diesen Rechner gilt: Einstellungen des
-//! Programms und je Review.
+//! Programms und je Review. [`ai`] baut den Prompt für einen KI-Vorschlag im Screening und liest die
+//! Antwort; gesendet wird in der App.
 
 pub mod agreement;
+pub mod ai;
 pub mod canonical;
 pub mod catalog;
 pub mod criteria;

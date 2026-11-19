@@ -1,6 +1,6 @@
 // Bausteine der Oberfläche: Icons, Kopfzeilen, Gruppen, Statuspillen, Kennzahlen.
 
-import React from "react";
+import React, { useEffect, useRef } from "react";
 
 import { formatPercent, LanguageCode, LANGUAGES, t } from "./i18n";
 
@@ -29,6 +29,7 @@ const ICONS: Record<string, React.ReactNode> = {
   globe: <><circle cx="12" cy="12" r="9" /><path d="M3 12h18" /><path d="M12 3c2.6 2.8 3.9 5.8 3.9 9s-1.300 6.2-3.9 9c-2.6-2.8-3.9-5.800-3.9-9S9.400 5.800 12 3Z" /></>,
   book: <><path d="M5 4.5h10.5a3 3 0 0 1 3 3V20H8a3 3 0 0 1-3-3V4.5Z" /><path d="M5 17a3 3 0 0 1 3-3h10.5" /></>,
   pen: <><path d="m4 20 1-4.5L16.5 4a2.1 2.1 0 0 1 3 3L8 18.5 4 20Z" /><path d="m14.5 6 3 3" /></>,
+  spark: <><path d="M11 4.5 12.8 9.2 17.5 11l-4.7 1.8L11 17.5l-1.8-4.7L4.5 11l4.7-1.8L11 4.5Z" /><path d="M18.5 15.5v4M16.5 17.5h4" /></>,
   gear: <><circle cx="12" cy="12" r="3" /><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8" /></>,
   csv: <><path d="M14 3H6v18h12V7l-4-4Z" /><path d="M9 13h6" /><path d="M9 17h6" /></>,
 };
@@ -121,6 +122,47 @@ export function Banner({ kind, children, onClose }: { kind: "error" | "notice"; 
           <Icon name="x" size={14} />
         </button>
       )}
+    </div>
+  );
+}
+
+/**
+ * Dialog über der Seite. Solange er offen ist, gehören ihm die Tasten: Esc schließt, die Eingabetaste löst
+ * `onEnter` aus, und die Kürzel der Seite darunter ruhen.
+ */
+export function Modal({ title, onClose, onEnter, children, footer }: {
+  title: string;
+  onClose: () => void;
+  onEnter?: () => void;
+  children: React.ReactNode;
+  footer?: React.ReactNode;
+}) {
+  const actions = useRef({ onClose, onEnter });
+  actions.current = { onClose, onEnter };
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      event.stopPropagation();
+      if (event.key === "Escape") {
+        event.preventDefault();
+        actions.current.onClose();
+      } else if (event.key === "Enter" && actions.current.onEnter && !(event.target instanceof HTMLTextAreaElement)) {
+        event.preventDefault();
+        actions.current.onEnter();
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
+  return (
+    <div className="modal-layer" onClick={onClose}>
+      <div className="modal" role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()}>
+        <header>
+          <strong>{title}</strong>
+          <button className="plain" onClick={onClose} aria-label={t("Schließen")}><Icon name="x" size={14} /></button>
+        </header>
+        <div className="modal-body">{children}</div>
+        {footer && <footer>{footer}</footer>}
+      </div>
     </div>
   );
 }

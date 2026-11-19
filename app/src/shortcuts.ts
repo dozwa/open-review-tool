@@ -6,7 +6,7 @@
 import type { Shortcuts } from "./settings";
 
 export type ShortcutAction = keyof Shortcuts;
-export const SHORTCUT_ACTIONS: ShortcutAction[] = ["include", "maybe", "exclude", "next", "previous", "focus"];
+export const SHORTCUT_ACTIONS: ShortcutAction[] = ["include", "maybe", "exclude", "next", "previous", "focus", "ai"];
 
 const MODIFIER_KEYS = ["Control", "Alt", "Shift", "Meta", "AltGraph", "CapsLock", "Fn", "Unidentified"];
 /** Fest belegt oder zum Verlassen eines Feldes nötig; mit Strg, Wahl- oder Befehlstaste sind sie frei. */

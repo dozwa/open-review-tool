@@ -63,6 +63,8 @@ pub struct Shortcuts {
     pub previous: String,
     /// Fokusmodus ein und aus.
     pub focus: String,
+    /// KI-Vorschlag zum offenen Eintrag einholen.
+    pub ai: String,
 }
 
 impl Default for Shortcuts {
@@ -74,6 +76,7 @@ impl Default for Shortcuts {
             next: "J".into(),
             previous: "K".into(),
             focus: "F".into(),
+            ai: "A".into(),
         }
     }
 }
@@ -84,8 +87,8 @@ pub const MODIFIERS: [&str; 4] = ["Ctrl", "Alt", "Shift", "Meta"];
 const RESERVED_KEYS: [&str; 6] = ["Escape", "Tab", "Enter", "Space", "Backspace", "Delete"];
 
 impl Shortcuts {
-    fn all(&self) -> [&String; 6] {
-        [&self.include, &self.maybe, &self.exclude, &self.next, &self.previous, &self.focus]
+    fn all(&self) -> [&String; 7] {
+        [&self.include, &self.maybe, &self.exclude, &self.next, &self.previous, &self.focus, &self.ai]
     }
 
     pub fn check(&self) -> Result<()> {
@@ -115,6 +118,109 @@ impl Shortcuts {
     }
 }
 
+/// Zugang zu einer KI für Vorschläge im Screening: eine API nach dem Muster von OpenAI (`chat/completions`),
+/// etwa ein lokales Ollama. Der API-Schlüssel steht nicht hier, sondern im Schlüsselbund.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Ai {
+    pub enabled: bool,
+    /// Adresse der API bis vor den Pfad, z. B. `http://localhost:11434/v1`.
+    pub url: String,
+    pub model: String,
+    /// Eigene Vorlage für den Prompt; leer heißt Standardvorlage.
+    pub prompt: String,
+    /// Autoren, Jahr, Zeitschrift und DOI mitsenden.
+    pub publication: bool,
+    /// Pfad des Endpunkts hinter der Adresse.
+    pub path: String,
+    /// JSON-Objekt, dessen Felder in die Anfrage kommen und gleichnamige ersetzen, z. B. `{"temperature": 0}`.
+    pub extra_body: String,
+    /// JSON-Zeiger auf den Antworttext in der Antwort der API.
+    pub answer_path: String,
+    /// Wie lange auf die Antwort gewartet wird, in Sekunden.
+    pub timeout_s: u32,
+}
+
+pub const AI_PATH: &str = "/chat/completions";
+pub const AI_ANSWER_PATH: &str = "/choices/0/message/content";
+pub const AI_TIMEOUT: u32 = 120;
+const AI_TIMEOUTS: std::ops::RangeInclusive<u32> = 5..=900;
+
+impl Default for Ai {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            url: String::new(),
+            model: String::new(),
+            prompt: String::new(),
+            publication: false,
+            path: AI_PATH.into(),
+            extra_body: String::new(),
+            answer_path: AI_ANSWER_PATH.into(),
+            timeout_s: AI_TIMEOUT,
+        }
+    }
+}
+
+fn check_url(url: &str) -> Result<()> {
+    let rest = url.strip_prefix("http://").or_else(|| url.strip_prefix("https://"));
+    match url.is_empty() || rest.is_some_and(|r| !r.is_empty() && !r.contains(char::is_whitespace)) {
+        true => Ok(()),
+        false => Err(invalid(tr!("Die Adresse der KI beginnt mit http:// oder https://: {}", url))),
+    }
+}
+
+fn check_extra_body(text: &str) -> Result<()> {
+    match text.trim().is_empty() || serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(text).is_ok() {
+        true => Ok(()),
+        false => Err(invalid(tr!("Die zusätzlichen Felder der Anfrage sind kein JSON-Objekt."))),
+    }
+}
+
+fn check_slash(value: &str, what: String) -> Result<()> {
+    match value.starts_with('/') && !value.contains(char::is_whitespace) {
+        true => Ok(()),
+        false => Err(invalid(tr!("{} beginnt mit „/“: {}", what, value))),
+    }
+}
+
+impl Ai {
+    pub fn check(&self) -> Result<()> {
+        check_url(&self.url)?;
+        check_slash(&self.path, tr!("Der Pfad des Endpunkts"))?;
+        check_extra_body(&self.extra_body)?;
+        check_slash(&self.answer_path, tr!("Der Pfad zur Antwort"))?;
+        match AI_TIMEOUTS.contains(&self.timeout_s) {
+            true => Ok(()),
+            false => Err(invalid(tr!(
+                "Das Zeitlimit liegt zwischen {} und {} Sekunden.",
+                AI_TIMEOUTS.start(),
+                AI_TIMEOUTS.end()
+            ))),
+        }
+    }
+
+    /// Setzt einzelne Werte, die diese Version nicht annimmt, auf den Standard zurück.
+    fn repair(&mut self) {
+        let standard = Self::default();
+        if check_url(&self.url).is_err() {
+            self.url.clear();
+        }
+        if check_slash(&self.path, String::new()).is_err() {
+            self.path = standard.path;
+        }
+        if check_extra_body(&self.extra_body).is_err() {
+            self.extra_body.clear();
+        }
+        if check_slash(&self.answer_path, String::new()).is_err() {
+            self.answer_path = standard.answer_path;
+        }
+        if !AI_TIMEOUTS.contains(&self.timeout_s) {
+            self.timeout_s = standard.timeout_s;
+        }
+    }
+}
+
 /// Einstellungen des Programms. Leere Texte heißen „keine eigene Wahl“: Sprache des Systems, Ausgabe in
 /// der Sprache der Oberfläche, Dialoge im zuletzt benutzten Ordner.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -130,6 +236,7 @@ pub struct Settings {
     pub density: String,
     pub screening: Screening,
     pub shortcuts: Shortcuts,
+    pub ai: Ai,
     /// Ordner, in dem Dialoge für Berichte, Tabellen und andere Exporte beginnen.
     pub export_dir: String,
     /// Ordner, in dem Dialoge für Pakete und Rückmeldungen beginnen.
@@ -149,6 +256,7 @@ impl Default for Settings {
             density: "normal".into(),
             screening: Screening::default(),
             shortcuts: Shortcuts::default(),
+            ai: Ai::default(),
             export_dir: String::new(),
             package_dir: String::new(),
         }
@@ -163,6 +271,9 @@ pub struct ProjectSettings {
     pub export_dir: Option<String>,
     pub package_dir: Option<String>,
     pub screening: Option<Screening>,
+    /// Eigene Vorlage für den KI-Prompt in diesem Review.
+    pub ai_prompt: Option<String>,
+    pub ai_publication: Option<bool>,
     /// Kennfarbe in der Liste der Reviews; leer heißt ohne.
     pub color: String,
 }
@@ -174,6 +285,8 @@ pub struct Effective {
     pub export_dir: String,
     pub package_dir: String,
     pub screening: Screening,
+    pub ai_prompt: String,
+    pub ai_publication: bool,
 }
 
 /// Führt Programm und Projekt zusammen.
@@ -183,6 +296,8 @@ pub fn resolve(program: &Settings, project: &ProjectSettings) -> Effective {
         export_dir: project.export_dir.clone().unwrap_or_else(|| program.export_dir.clone()),
         package_dir: project.package_dir.clone().unwrap_or_else(|| program.package_dir.clone()),
         screening: project.screening.clone().unwrap_or_else(|| program.screening.clone()),
+        ai_prompt: project.ai_prompt.clone().unwrap_or_else(|| program.ai.prompt.clone()),
+        ai_publication: project.ai_publication.unwrap_or(program.ai.publication),
     }
 }
 
@@ -219,6 +334,7 @@ impl Settings {
         one_of(&self.font_size, &FONT_SIZES, tr!("Schriftgröße"))?;
         one_of(&self.density, &DENSITIES, tr!("Dichte"))?;
         self.shortcuts.check()?;
+        self.ai.check()?;
         check_dir(&self.export_dir)?;
         check_dir(&self.package_dir)
     }
@@ -253,8 +369,13 @@ impl Settings {
             }
         }
         if settings.shortcuts.check().is_err() {
+            // Ein Kürzel, das mit dieser Version dazukam, darf ein selbst gewähltes nicht verdrängen.
+            settings.shortcuts.ai.clear();
+        }
+        if settings.shortcuts.check().is_err() {
             settings.shortcuts = standard.shortcuts;
         }
+        settings.ai.repair();
         settings.version = VERSION;
         settings
     }
@@ -388,9 +509,58 @@ mod tests {
         std::fs::write(dir.path().join(FILE), r#"{"shortcuts": {"include": "Alt+", "maybe": "Alt+M"}}"#).unwrap();
         assert_eq!(Settings::load(dir.path()).shortcuts, Shortcuts::default());
 
+        // Das Kürzel für den KI-Vorschlag kam später dazu: Belegt jemand „A“ schon selbst, bleibt die eigene Wahl.
+        std::fs::write(dir.path().join(FILE), r#"{"shortcuts": {"focus": "A"}}"#).unwrap();
+        let loaded = Settings::load(dir.path()).shortcuts;
+        assert_eq!((loaded.focus.as_str(), loaded.ai.as_str()), ("A", ""));
+
+        // Werte der KI fallen einzeln zurück; Adresse, Modell und Prompt bleiben.
+        let text = r#"{"ai": {"enabled": true, "url": "http://localhost:11434/v1", "model": "llama3", "prompt": "P",
+            "path": "chat", "extra_body": "[1]", "answer_path": "", "timeout_s": 0}}"#;
+        std::fs::write(dir.path().join(FILE), text).unwrap();
+        let ai = Settings::load(dir.path()).ai;
+        let kept = Ai {
+            enabled: true,
+            url: "http://localhost:11434/v1".into(),
+            model: "llama3".into(),
+            prompt: "P".into(),
+            ..Ai::default()
+        };
+        assert_eq!(ai, kept);
+
         // Eine kaputte Datei sperrt niemanden aus.
         std::fs::write(dir.path().join(FILE), "{kaputt").unwrap();
         assert_eq!(Settings::load(dir.path()), Settings::default());
+    }
+
+    #[test]
+    fn ai_access_is_checked_and_overridden_per_review() {
+        let with = |change: fn(&mut Ai)| {
+            let mut ai = Ai::default();
+            change(&mut ai);
+            ai.check()
+        };
+        assert!(with(|_| {}).is_ok());
+        assert!(with(|ai| ai.url = "https://api.example.org/v1".into()).is_ok());
+        assert!(with(|ai| ai.extra_body = r#"{"temperature": 0, "response_format": {"type": "json_object"}}"#.into())
+            .is_ok());
+        assert!(with(|ai| ai.url = "localhost:11434".into()).is_err());
+        assert!(with(|ai| ai.url = "http://".into()).is_err());
+        assert!(with(|ai| ai.path = "chat/completions".into()).is_err());
+        assert!(with(|ai| ai.extra_body = "temperature=0".into()).is_err());
+        assert!(with(|ai| ai.answer_path = "choices.0".into()).is_err());
+        assert!(with(|ai| ai.timeout_s = 1).is_err());
+
+        let program = Settings { ai: Ai { prompt: "Programm".into(), ..Ai::default() }, ..Settings::default() };
+        let plain = resolve(&program, &ProjectSettings::default());
+        assert_eq!((plain.ai_prompt.as_str(), plain.ai_publication), ("Programm", false));
+        let project = ProjectSettings {
+            ai_prompt: Some("Projekt".into()),
+            ai_publication: Some(true),
+            ..ProjectSettings::default()
+        };
+        let both = resolve(&program, &project);
+        assert_eq!((both.ai_prompt.as_str(), both.ai_publication), ("Projekt", true));
     }
 
     #[test]

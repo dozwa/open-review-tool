@@ -262,6 +262,7 @@ export function StagePage() {
                     <Avatar name={v.name} size={22} />
                     <span>
                       <strong>{v.name}</strong> <span className={`decision-text d-${v.decision}`}>{DECISION_LABEL[v.decision] ?? v.decision}</span>
+                      {v.ai && <span className="ai-mark" title={t("Diese Person hatte zu dem Eintrag einen KI-Vorschlag eingeholt.")}><Icon name="spark" size={11} /> {t("KI-Vorschlag: {decision}", { decision: DECISION_LABEL[v.ai] ?? v.ai })}</span>}
                       {(v.primary_reason || v.reasons.length > 0 || v.note) && (
                         <small>{[v.primary_reason && t("Hauptgrund {reason}", { reason: v.primary_reason }), v.reasons.join(", "), v.note].filter(Boolean).join(" · ")}</small>
                       )}

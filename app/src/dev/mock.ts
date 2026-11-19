@@ -8,7 +8,7 @@ import { core } from "./core";
 import { formStage, mockForms } from "./mockForms";
 import { mockGuidance } from "./mockGuidance";
 import { mockReport } from "./mockReport";
-import { mockColor, mockSettings } from "./mockSettings";
+import { mockColor, mockSettings, readMockSettings } from "./mockSettings";
 
 // Protokoll, Abweichungen und Checkliste des Berichts
 const mockProtocol: { registration: Record<string, unknown> | null; deviations: Record<string, string>[] } = {
@@ -385,6 +385,17 @@ const fulltextView = () => {
 const ftRowOf = (id: unknown) => fulltexts.rows.find((r) => r.record_id === id);
 
 const stageOf = (id: unknown) => [...stages, fulltextStage].find((x) => x.id === id) ?? stages[1];
+// KI-Vorschläge der Vorschau: je Eintrag der letzte. Das Modell „fehler“ zeigt, wie eine Absage aussieht.
+const suggestions = new Map<string, Record<string, unknown>>();
+let aiKey = false;
+const AI_ANSWERS: [string, string | null, string][] = [
+  ["include", null, "Die Studie untersucht Erwachsene mit Migräne und eine digitale Intervention. Sie berichtet Kopfschmerztage als Endpunkt und ist eine Primärstudie. Damit sind alle Einschlusskriterien erfüllt."],
+  ["exclude", "E1", "Untersucht werden Jugendliche. Die Kriterien verlangen Erwachsene ab 18 Jahren, deshalb passt die Population nicht."],
+  ["exclude", "E3", "Der Beitrag ist ein Editorial ohne eigene Daten. Verlangt sind Primärstudien."],
+  ["maybe", null, "Der Abstract nennt weder das Alter der Teilnehmenden noch das Studiendesign. Ohne Volltext lässt sich das nicht entscheiden."],
+];
+const wait = <T,>(value: T, ms: number) => new Promise<T>((resolve) => setTimeout(() => resolve(value), ms));
+
 const nextOpen = () => records.find((r) => !listState[r.id].mine) ?? null;
 const doneCount = () => records.filter((r) => listState[r.id].mine).length;
 
@@ -490,6 +501,7 @@ export function installMock() {
           record: records.find((r) => r.id === a.recordId),
           my_vote: st?.mine ? { decision: st.mine, primary_reason: st.primary, reasons: [], note: "" } : null,
           fulltext: a.stageId === "s3" ? fulltextOf("Okafor - 2023 - Smartphone-based behavioural therapy.pdf") : null,
+          my_suggestion: suggestions.get(String(a.recordId)) ?? null,
         };
       }
       case "vote_cast": {
@@ -499,6 +511,29 @@ export function installMock() {
         st.primary = (a.primaryReason as string | null) ?? null;
         return null;
       }
+      case "ai_suggest": {
+        const id = String(a.recordId);
+        const model = readMockSettings().settings.ai.model || "llama3.1";
+        if (model === "fehler") return wait(null, 800).then(() => Promise.reject("Die KI antwortet nicht unter http://localhost:11434/v1/chat/completions: Connection refused"));
+        const [suggested, reason, rationale] = AI_ANSWERS[Math.max(records.findIndex((r) => r.id === id), 0) % AI_ANSWERS.length];
+        const suggestion = { id: `ai-${id}-${suggestions.size}`, model, suggested, reason, rationale, outcome: null, at: new Date().toISOString() };
+        const item = records.find((r) => r.id === id);
+        const prompt = `Du unterstützt das Screening für ein Review. …\n\n## Review\nTitel: Digitale Interventionen bei Migräne\n\n## Eintrag\nTitel: ${item?.title ?? ""}\nAbstract: ${item?.abstract ?? ""}\n\n## Antwort\nAntworte nur mit einem JSON-Objekt …`;
+        return wait(null, 1200).then(() => {
+          suggestions.set(id, suggestion);
+          return { suggestion, prompt };
+        });
+      }
+      case "ai_resolve": {
+        const found = suggestions.get(String(a.recordId));
+        if (found) suggestions.set(String(a.recordId), { ...found, outcome: a.outcome });
+        return null;
+      }
+      case "ai_test": return wait("OK", 700);
+      case "ai_default_prompt": return "Du unterstützt das Screening für ein Review. Beurteile, ob der folgende Eintrag nach den Kriterien eingeschlossen oder ausgeschlossen werden soll.\n\n## Review\n{{review}}\n\n## Fragestellung\n{{questions}}\n\n## Kriterien\n{{criteria}}\n\n## Eintrag\n{{record}}\n\n## Antwort\n{{format}}";
+      case "ai_key_status": return aiKey;
+      case "ai_key_set": aiKey = true; return null;
+      case "ai_key_clear": aiKey = false; return null;
       case "record_flag": listState[String(a.recordId)].mine = "maybe"; return null;
       case "stage_summary": {
         const s = stageOf(a.stageId);
@@ -523,7 +558,7 @@ export function installMock() {
       case "stage_conflicts": return [
         { record: records[1], status: "disagreement", votes: [
           { name: "Anna Berger", decision: "include", primary_reason: null, reasons: [], note: "" },
-          { name: "Ben Krüger", decision: "exclude", primary_reason: "E1", reasons: [], note: "Nur Jugendliche?" },
+          { name: "Ben Krüger", decision: "exclude", primary_reason: "E1", reasons: [], note: "Nur Jugendliche?", ai: "exclude" },
         ] },
         { record: { ...records[2], abstract: "" }, status: "needs_clarification", votes: [
           { name: "Clara Weiß", decision: "maybe", primary_reason: null, reasons: [], note: "Kein Abstract vorhanden, Volltext nötig." },

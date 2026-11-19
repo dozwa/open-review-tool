@@ -7,7 +7,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { api, errorText, Person, ReviewDetail } from "./api";
 import { LANGUAGES, setLanguage, t } from "./i18n";
 import {
-  ACCENTS, DEFAULTS, forgetProjectSettings, PROJECT_COLORS, saveProjectSettings, saveSettings, ScreeningLayout, Settings, Shortcuts, storageInfo,
+  ACCENTS, Ai, DEFAULTS, forgetProjectSettings, PROJECT_COLORS, saveProjectSettings, saveSettings, ScreeningLayout, Settings, Shortcuts, storageInfo,
   useProjectSettings, useSettings,
 } from "./settings";
 import { allowed, SHORTCUT_ACTIONS, ShortcutAction, shortcutLabel, shortcutOf } from "./shortcuts";
@@ -124,7 +124,7 @@ function Location({ label, hint, path, onReveal }: { label: string; hint: string
 
 const SHORTCUT_LABEL: Record<ShortcutAction, string> = {
   include: "Include", maybe: "Maybe", exclude: "Exclude",
-  next: t("Nächster Eintrag"), previous: t("Voriger Eintrag"), focus: t("Fokusmodus ein und aus"),
+  next: t("Nächster Eintrag"), previous: t("Voriger Eintrag"), focus: t("Fokusmodus ein und aus"), ai: t("KI-Vorschlag einholen"),
 };
 
 /** Ein Tastenkürzel: Klick, dann die neue Taste oder Kombination drücken. Esc bricht ab. */
@@ -179,6 +179,160 @@ function ShortcutRows({ value, onChange, onError }: { value: Shortcuts; onChange
           <ShortcutInput label={SHORTCUT_LABEL[action]} value={value[action]} onChange={(shortcut) => set(action, shortcut)} />
         </Setting>
       ))}
+    </>
+  );
+}
+
+/** Textfeld, das beim Verlassen speichert, damit nicht jeder Tastendruck in die Datei geht. */
+function TextSetting({ label, hint, value, placeholder, mono, onSave }: {
+  label: string;
+  hint?: React.ReactNode;
+  value: string;
+  placeholder?: string;
+  mono?: boolean;
+  onSave: (text: string) => void;
+}) {
+  const [text, setText] = useState(value);
+  useEffect(() => setText(value), [value]);
+  return (
+    <Setting label={label} hint={hint}>
+      <input
+        className={mono ? "mono" : undefined}
+        value={text}
+        placeholder={placeholder}
+        aria-label={label}
+        spellCheck={false}
+        autoCapitalize="off"
+        autoCorrect="off"
+        onChange={(e) => setText(e.target.value)}
+        onBlur={() => text.trim() !== value && onSave(text.trim())}
+        onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+      />
+    </Setting>
+  );
+}
+
+/** Mehrzeiliger Text über die ganze Breite; speichert beim Verlassen. */
+function LongText({ label, hint, value, placeholder, rows, mono, onSave, children }: {
+  label: string;
+  hint?: React.ReactNode;
+  value: string;
+  placeholder?: string;
+  rows: number;
+  mono?: boolean;
+  onSave: (text: string) => void;
+  children?: React.ReactNode;
+}) {
+  const [text, setText] = useState(value);
+  useEffect(() => setText(value), [value]);
+  return (
+    <Row className="stacked">
+      <label>
+        {label}
+        {hint && <small>{hint}</small>}
+      </label>
+      <textarea
+        className={mono ? "mono" : undefined}
+        rows={rows}
+        value={text}
+        placeholder={placeholder}
+        aria-label={label}
+        spellCheck={false}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={() => text.trim() !== value && onSave(text.trim())}
+      />
+      {children && <span className="inline-actions">{children}</span>}
+    </Row>
+  );
+}
+
+const PLACEHOLDER_HINT = t("Platzhalter: {{review}} (Titel, Art, Stufe), {{questions}} (Fragestellung), {{criteria}} (Kriterien der Stufe), {{record}} (Eintrag), {{format}} (verlangtes Antwortformat). Fehlen {{record}} oder {{format}}, kommen sie ans Ende.");
+
+/** Die Vorlage des Prompts. Leer gilt die Standardvorlage; sie lässt sich als Ausgangspunkt laden. */
+function PromptSetting({ label, value, onSave, onError }: { label: string; value: string; onSave: (text: string) => void; onError: (text: string) => void }) {
+  return (
+    <LongText label={label} hint={PLACEHOLDER_HINT} rows={value ? 14 : 3} value={value} placeholder={t("Leer: Es gilt die Standardvorlage.")} onSave={onSave}>
+      {value
+        ? <button className="small" onClick={() => onSave("")}>{t("Standardvorlage wiederherstellen")}</button>
+        : <button className="small" onClick={() => api.aiDefaultPrompt().then(onSave).catch((e) => onError(errorText(e)))}>{t("Standardvorlage zum Bearbeiten laden")}</button>}
+    </LongText>
+  );
+}
+
+/** Der API-Schlüssel liegt im Schlüsselbund. Die Oberfläche erfährt nur, ob einer hinterlegt ist. */
+function ApiKeySetting({ onError }: { onError: (text: string) => void }) {
+  const [stored, setStored] = useState<boolean | null>(null);
+  const [key, setKey] = useState("");
+  useEffect(() => {
+    api.aiKeyStatus().then(setStored).catch((e) => onError(errorText(e)));
+  }, [onError]);
+  const run = (action: Promise<void>, now: boolean) =>
+    action.then(() => {
+      setStored(now);
+      setKey("");
+    }).catch((e) => onError(errorText(e)));
+  return (
+    <Setting label={t("API-Schlüssel")} hint={t("Liegt im Schlüsselbund dieses Rechners, nicht in den Einstellungen. Ein lokales Modell braucht meist keinen.")}>
+      {stored ? (
+        <>
+          <Pill tone="green">{t("hinterlegt")}</Pill>
+          <button className="small" onClick={() => run(api.aiKeyClear(), false)}>{t("Entfernen")}</button>
+        </>
+      ) : (
+        <>
+          <input
+            type="password"
+            value={key}
+            placeholder={t("Schlüssel einfügen")}
+            aria-label={t("API-Schlüssel")}
+            autoComplete="off"
+            onChange={(e) => setKey(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && key.trim() && run(api.aiKeySet(key), true)}
+          />
+          <button className="small" disabled={!key.trim()} onClick={() => run(api.aiKeySet(key), true)}>{t("Speichern")}</button>
+        </>
+      )}
+    </Setting>
+  );
+}
+
+/** Zugang zur KI: Adresse, Modell, Schlüssel und Prompt, darunter die Abweichungen vom Muster der API. */
+function AiRows({ value, onChange, onError }: { value: Ai; onChange: (next: Ai) => void; onError: (text: string) => void }) {
+  const [advanced, setAdvanced] = useState(false);
+  const [test, setTest] = useState<{ ok: boolean; text: string } | "running" | null>(null);
+  const set = (patch: Partial<Ai>) => onChange({ ...value, ...patch });
+  const runTest = () => {
+    setTest("running");
+    api.aiTest().then((answer) => setTest({ ok: true, text: t("Die KI antwortet: {answer}", { answer }) })).catch((e) => setTest({ ok: false, text: errorText(e) }));
+  };
+  return (
+    <>
+      <Switch label={t("KI-Vorschlag im Screening")} hint={t("Zeigt auf der Screening-Seite den Knopf „KI-Vorschlag“.")} checked={value.enabled} onChange={(enabled) => set({ enabled })} />
+      <TextSetting label={t("Adresse")} hint={t("Bis vor den Pfad, etwa http://localhost:11434/v1 für Ollama.")} value={value.url} placeholder="http://localhost:11434/v1" mono onSave={(url) => set({ url })} />
+      <TextSetting label={t("Modell")} hint={t("Name, wie ihn die API erwartet.")} value={value.model} placeholder="llama3.1" mono onSave={(model) => set({ model })} />
+      <ApiKeySetting onError={onError} />
+      <Switch label={t("Publikationsangaben mitsenden")} hint={t("Autoren, Jahr, Zeitschrift und DOI. Ausgeschaltet urteilt die KI nur nach Titel, Abstract und Schlagwörtern.")} checked={value.publication} onChange={(publication) => set({ publication })} />
+      <PromptSetting label={t("Prompt")} value={value.prompt} onSave={(prompt) => set({ prompt })} onError={onError} />
+      <Setting label={t("Verbindung")} hint={test && test !== "running" ? <span className={test.ok ? "test-ok" : "test-failed"}>{test.text}</span> : t("Schickt eine kurze Probe mit den Werten oben.")}>
+        <button className="small" disabled={test === "running" || !value.enabled} onClick={runTest}>{test === "running" ? t("Probe läuft …") : t("Verbindung testen")}</button>
+      </Setting>
+      <Switch label={t("Erweitert")} hint={t("Für APIs, die vom Muster abweichen.")} checked={advanced} onChange={setAdvanced} />
+      {advanced && (
+        <>
+          <TextSetting label={t("Pfad des Endpunkts")} hint={t("Hinter der Adresse.")} value={value.path} mono onSave={(path) => set({ path: path || DEFAULTS.ai.path })} />
+          <LongText
+            label={t("Zusätzliche Felder der Anfrage")}
+            hint={t("Ein JSON-Objekt. Seine Felder kommen in die Anfrage und ersetzen gleichnamige, etwa {\"temperature\": 0}.")}
+            rows={3}
+            mono
+            value={value.extra_body}
+            placeholder={'{"temperature": 0}'}
+            onSave={(extra_body) => set({ extra_body })}
+          />
+          <TextSetting label={t("Pfad zur Antwort")} hint={t("JSON-Zeiger auf den Antworttext in der Antwort der API.")} value={value.answer_path} mono onSave={(answer_path) => set({ answer_path: answer_path || DEFAULTS.ai.answer_path })} />
+          <TextSetting label={t("Zeitlimit in Sekunden")} hint={t("So lange wartet die App auf die Antwort.")} value={String(value.timeout_s)} mono onSave={(text) => set({ timeout_s: Number.parseInt(text, 10) || DEFAULTS.ai.timeout_s })} />
+        </>
+      )}
     </>
   );
 }
@@ -286,6 +440,13 @@ export function SettingsPage({ me, onIdentity }: { me: Person; onIdentity: () =>
       </Group>
 
       <Group
+        title={t("KI-Unterstützung")}
+        footer={t("Für einen Vorschlag gehen Titel, Abstract und Schlagwörter des Eintrags sowie Titel, Fragestellung und Kriterien des Reviews an die eingetragene Adresse. Bei einem lokalen Modell bleibt alles auf diesem Rechner. Jeder Vorschlag wird im Log vermerkt; die Entscheidung trifft immer ein Mensch.")}
+      >
+        <AiRows value={settings.ai} onChange={(ai) => change({ ai })} onError={setError} />
+      </Group>
+
+      <Group
         title={t("Speicherorte")}
         action={<Reset onClick={() => change({ export_dir: "", package_dir: "" })} />}
         footer={t("Die Reviews liegen fest im Datenordner der App; ein Ordner in einer Cloud kann die Dateien beschädigen. Weitergegeben werden Pakete, nie die Review-Dateien selbst.")}
@@ -373,6 +534,27 @@ export function ProjectSettingsTab({ review }: { review: ReviewDetail }) {
         </Row>
         <FolderSetting label={t("Exporte")} hint={t("Berichte, Tabellen und andere Dateien zum Weitergeben.")} value={project.export_dir} inherited={program.export_dir} onChange={(export_dir) => change({ export_dir })} />
         <FolderSetting label={t("Pakete")} hint={t("Pakete und Rückmeldungen dieses Reviews.")} value={project.package_dir} inherited={program.package_dir} onChange={(package_dir) => change({ package_dir })} />
+      </Group>
+
+      <Group title={t("KI-Unterstützung")} footer={t("Adresse, Modell und Schlüssel stehen in den Einstellungen des Programms.")}>
+        <Setting label={t("Publikationsangaben mitsenden")} hint={t("Autoren, Jahr, Zeitschrift und DOI.")}>
+          <select
+            value={project.ai_publication === null ? PROGRAM : project.ai_publication ? "yes" : "no"}
+            aria-label={t("Publikationsangaben mitsenden")}
+            onChange={(e) => change({ ai_publication: e.target.value === PROGRAM ? null : e.target.value === "yes" })}
+          >
+            <option value={PROGRAM}>{t("Wie im Programm")}</option>
+            <option value="yes">{t("Ja")}</option>
+            <option value="no">{t("Nein")}</option>
+          </select>
+        </Setting>
+        <Switch
+          label={t("Prompt wie im Programm")}
+          hint={t("Ausgeschaltet bekommt dieses Review eine eigene Vorlage.")}
+          checked={project.ai_prompt === null}
+          onChange={(same) => change({ ai_prompt: same ? null : view.effective.ai_prompt })}
+        />
+        {project.ai_prompt !== null && <PromptSetting label={t("Prompt für dieses Review")} value={project.ai_prompt} onSave={(ai_prompt) => change({ ai_prompt })} onError={setError} />}
       </Group>
 
       <Group title={t("Screening-Seite")}>

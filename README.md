@@ -79,7 +79,7 @@ Tauri 2 mit der WebView von macOS, React 18.
 
 ## Wie es geprüft ist
 
-- **Kern:** 153 Tests, dazu 2 für das Lesen der Zotero-Antworten in der App. Darunter die Referenzwerte der früheren SQL-Tests (Cohen's Kappa gegen scikit-learn,
+- **Kern:** 160 Tests, dazu 3 in der App (Lesen der Zotero-Antworten, Anfrage und Antwort der KI). Darunter die Referenzwerte der früheren SQL-Tests (Cohen's Kappa gegen scikit-learn,
   Fleiss' Kappa am Wikipedia-Beispiel, Krippendorffs Alpha am publizierten Beispiel mit 0,743, PABAK, Prozent,
   sechs `final_decision`-Szenarien, Maybe-Regel). Die Werte erzeugt `crates/ort-core/tests/fixtures/make_agreement_fixtures.py`.
 - **Austausch:** veränderte Datei, nachträglich neu gehashte Datei ohne Signatur, Außenstehende, Lücken in einer
@@ -226,6 +226,16 @@ Nur für Entwicklung und Tests.
 - **Tastenkürzel:** Die Tasten für Include, Maybe, Exclude, das Blättern in der Liste und den Fokusmodus lassen
   sich in den Einstellungen ändern, auch als Kombination (etwa ⌥M). Die Ziffern 1 bis 9 für den Ausschlussgrund
   und Esc sind fest. Beim Tippen in einem Feld gelten nur Kürzel mit ⌃ oder ⌘.
+- **KI-Vorschlag:** Auf der Screening-Seite holt „KI-Vorschlag“ (anfangs Taste A) eine Einschätzung zum offenen
+  Eintrag ein. Die App fragt eine selbst eingetragene API nach dem Muster von OpenAI (`chat/completions`), etwa
+  ein lokales Ollama; Adresse, Modell und Prompt stehen in den Einstellungen, der API-Schlüssel im Schlüsselbund.
+  Der Prompt entsteht aus Titel, Fragestellung und Kriterien des Reviews und dem Eintrag (auf Wunsch mit
+  Autoren, Jahr, Zeitschrift); die Vorlage dazu lässt sich ändern, auch je Review. Für abweichende APIs lassen
+  sich Pfad, zusätzliche Felder der Anfrage und die Stelle des Antworttexts einstellen. Ein Dialog zeigt
+  Entscheidung, Grund und Begründung; übernehmen gibt die eigene Stimme ab, ablehnen lässt den Eintrag offen.
+  Jeder Vorschlag steht mit Modell, Prüfsumme des Prompts und Ausgang im Log, in der Kette der Stufe: Solange
+  die Stufe verblindet ist, sieht ihn niemand sonst. Ein Vorschlag zählt nie als Stimme. Noch nicht gebaut:
+  Vorschläge zum Volltext, für viele Einträge auf einmal, und die Nennung im Methodentext.
 - **Fokusmodus:** Beim Screening und bei der Eingabe im Formular blendet „Fokus“ (anfangs Taste F) Seitenleiste, Liste
   und Nebensächliches aus und schaltet das Fenster in den Vollbildmodus; Esc beendet ihn.
 - **Leitlinien:** Zu jeder Vorlage außer dem freien Ablauf liegt eine Zusammenfassung ihrer Leitlinie in der App

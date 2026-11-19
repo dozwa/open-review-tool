@@ -55,6 +55,51 @@ impl IdentityStore {
         Ok(identity)
     }
 
+    fn extra_path(&self, name: &str) -> PathBuf {
+        self.dir.join(format!("{name}.key"))
+    }
+
+    /// Ein weiteres Geheimnis neben dem privaten Schlüssel, etwa der API-Schlüssel der KI. Es liegt am
+    /// selben Ort wie dieser: im Schlüsselbund, mit `ORT_KEY_STORE=file` in `<name>.key`.
+    pub fn secret(&self, name: &str) -> Result<Option<String>, String> {
+        if self.file_keys {
+            return match std::fs::read_to_string(self.extra_path(name)) {
+                Ok(text) => Ok(Some(text.trim().to_string())),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(e) => Err(e.to_string()),
+            };
+        }
+        match keyring::Entry::new(KEYCHAIN_SERVICE, name).and_then(|entry| entry.get_password()) {
+            Ok(text) => Ok(Some(text)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(e) => Err(tr!("Der Schlüsselbund lässt sich nicht lesen: {}", e)),
+        }
+    }
+
+    pub fn set_secret(&self, name: &str, value: &str) -> Result<(), String> {
+        if self.file_keys {
+            let path = self.extra_path(name);
+            let _ = std::fs::remove_file(&path);
+            return write_private(&path, value);
+        }
+        keyring::Entry::new(KEYCHAIN_SERVICE, name)
+            .and_then(|entry| entry.set_password(value))
+            .map_err(|e| tr!("Schlüssel konnte nicht im Schlüsselbund gespeichert werden: {}", e))
+    }
+
+    pub fn clear_secret(&self, name: &str) -> Result<(), String> {
+        if self.file_keys {
+            return match std::fs::remove_file(self.extra_path(name)) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
+                _ => Ok(()),
+            };
+        }
+        match keyring::Entry::new(KEYCHAIN_SERVICE, name).and_then(|entry| entry.delete_credential()) {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(tr!("Der Schlüssel lässt sich nicht aus dem Schlüsselbund entfernen: {}", e)),
+        }
+    }
+
     fn read_secret(&self, public: &PublicIdentity) -> Result<Vec<u8>, String> {
         let encoded = if self.file_keys {
             std::fs::read_to_string(self.key_path()).map_err(|e| tr!("identity.key fehlt: {}", e))?

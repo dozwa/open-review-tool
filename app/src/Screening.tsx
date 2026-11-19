@@ -1,10 +1,11 @@
 // Screening in drei Spalten: Liste mit Filtern, Eintrag mit Entscheidung, Kriterien mit Erläuterung.
 // Welche Filter in einer verblindeten Stufe gesperrt sind, sagt der Kern (`locked`); er weist sie auch ab.
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
-import { api, canManage, canVote, errorText, FullText, MyVote, Progress, reasonsOf, RecordFilter, RecordItem, RecordList, StageDetail, term } from "./api";
+import { AiDialog, AiLine, AiState, suggestionLabel } from "./AiSuggestion";
+import { api, canManage, canVote, errorText, FullText, MyVote, Progress, reasonsOf, RecordFilter, RecordItem, RecordList, StageDetail, Suggestion, term } from "./api";
 import { CriteriaView } from "./Criteria";
 import { PdfView } from "./PdfView";
 import { DECISION_LABEL, RecordView } from "./StagePages";
@@ -63,7 +64,12 @@ function Screening() {
   const [focus, setFocus] = useFocusMode();
   // Aufbau der Seite aus den Einstellungen (Projekt vor Programm); die Schalter hier ändern sie.
   const [layout, setLayout] = useScreeningLayout(reviewId);
-  const keys = useSettings().shortcuts;
+  const settings = useSettings();
+  const keys = settings.shortcuts;
+  const aiOn = settings.ai.enabled;
+  // Der letzte eigene KI-Vorschlag zum offenen Eintrag und der Dialog dazu.
+  const [suggestion, setSuggestion] = useState<Suggestion | null>(null);
+  const [ai, setAi] = useState<AiState | null>(null);
   const showSource = layout.show_source;
   const showCriteria = layout.show_criteria;
   const setShowSource = (show_source: boolean) => setLayout({ show_source });
@@ -82,16 +88,26 @@ function Screening() {
     setNote(vote?.note ?? "");
   }, []);
 
-  // Ob es zum Eintrag einen Volltext gibt, weiß nur der Kern.
+  // Ob es zum Eintrag einen Volltext oder schon einen KI-Vorschlag gibt, weiß nur der Kern.
   const recordId = record?.id;
   useEffect(() => {
     let stale = false;
     setFulltext(null);
-    if (recordId) api.record(reviewId, stageId, recordId).then((found) => !stale && setFulltext(found.fulltext)).catch(() => undefined);
+    setSuggestion(null);
+    setAi(null);
+    if (recordId) {
+      api.record(reviewId, stageId, recordId).then((found) => {
+        if (stale) return;
+        setFulltext(found.fulltext);
+        setSuggestion(found.my_suggestion);
+      }).catch(() => undefined);
+    }
     return () => {
       stale = true;
     };
   }, [reviewId, stageId, recordId]);
+  const openRecord = useRef(recordId);
+  openRecord.current = recordId;
   const loadFulltext = useCallback(() => api.readFulltext(reviewId, recordId ?? ""), [reviewId, recordId]);
 
   const select = useCallback(async (recordId: string) => {
@@ -180,6 +196,41 @@ function Screening() {
     send((id) => api.vote(reviewId, stageId, id, choice, excluded ? primary : null, excluded ? reasons : [], note), label);
   }, [send, reviewId, stageId, primary, reasons, note, required]);
 
+  // KI-Vorschlag einholen. Kommt die Antwort, steht sie schon im Log; der Dialog zeigt sie nur.
+  const askAi = useCallback(async () => {
+    if (!recordId || busy) return;
+    setError("");
+    setAi({ step: "loading", recordId });
+    // Die Antwort gilt dem Eintrag, zu dem gefragt wurde; ist inzwischen ein anderer offen, verfällt sie hier.
+    const still = (current: AiState | null) => current?.step === "loading" && current.recordId === recordId;
+    try {
+      const found = await api.aiSuggest(reviewId, stageId, recordId);
+      if (openRecord.current === recordId) setSuggestion(found.suggestion);
+      setAi((current) => (still(current) ? { step: "done", recordId, suggestion: found.suggestion, prompt: found.prompt } : current));
+    } catch (e) {
+      setAi((current) => (still(current) ? { step: "error", recordId, text: errorText(e) } : current));
+    }
+  }, [reviewId, stageId, recordId, busy]);
+
+  /** Übernehmen: vermerken und mit dem Vorschlag abstimmen. Der Grund wird Hauptgrund, wenn die Stufe einen verlangt. */
+  const acceptAi = useCallback((found: Suggestion) => {
+    const excluded = found.suggested === "exclude";
+    setAi(null);
+    send(async (id) => {
+      await api.aiResolve(reviewId, stageId, id, found.id, "accepted");
+      await api.vote(reviewId, stageId, id, found.suggested, excluded && required ? found.reason : null, excluded && !required && found.reason ? [found.reason] : [], note);
+    }, t("{label} (KI-Vorschlag übernommen)", { label: suggestionLabel(found) }));
+  }, [send, reviewId, stageId, required, note]);
+
+  /** Ablehnen: vermerken, der Eintrag bleibt offen. */
+  const declineAi = useCallback((found: Suggestion) => {
+    setAi(null);
+    if (!recordId) return;
+    api.aiResolve(reviewId, stageId, recordId, found.id, "declined")
+      .then(() => setSuggestion((current) => (current?.id === found.id ? { ...current, outcome: "declined" } : current)))
+      .catch((e) => setError(errorText(e)));
+  }, [reviewId, stageId, recordId]);
+
   const toggleReason = useCallback((code: string) => {
     setError("");
     if (required) setPrimary((current) => (current === code ? null : code));
@@ -197,6 +248,11 @@ function Screening() {
         if (canVote(detail.role) && !detail.stage.closed) vote(choice);
         return;
       }
+      if (hits(event, keys.ai)) {
+        event.preventDefault();
+        if (aiOn && canVote(detail.role) && !detail.stage.closed) askAi();
+        return;
+      }
       const forward = hits(event, keys.next);
       if (forward || hits(event, keys.previous)) {
         event.preventDefault();
@@ -212,7 +268,7 @@ function Screening() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [vote, toggleReason, detail, reasonList, list, record, select, keys]);
+  }, [vote, toggleReason, detail, reasonList, list, record, select, keys, aiOn, askAi]);
 
   if (!detail) return error ? <Banner kind="error">{error}</Banner> : null;
   const { stage, criteria } = detail;
@@ -244,6 +300,19 @@ function Screening() {
       </div>
       <div className="progress-line"><span style={{ width: `${pct}%` }} /></div>
       {error && <Banner kind="error" onClose={() => setError("")}>{error}</Banner>}
+      {ai && (
+        <AiDialog
+          state={ai}
+          model={settings.ai.model}
+          reasons={reasonList}
+          required={required}
+          busy={busy}
+          onAccept={acceptAi}
+          onDecline={declineAi}
+          onClose={() => setAi(null)}
+          onRetry={askAi}
+        />
+      )}
 
       <div className="screening-columns">
         <aside className="screening-list" aria-label={t("Liste der {records}", { records })}>
@@ -368,6 +437,11 @@ function Screening() {
                     <button className="ghost" disabled={busy} onClick={() => send((id) => api.flag(reviewId, stageId, id, note), t("Zur Klärung"))} title={t("Nicht entscheidbar, zur Klärung geben")}>
                       <Icon name="flag" size={14} /> {t("Zur Klärung")}
                     </button>
+                    {aiOn && (
+                      <button className="ghost" disabled={busy} onClick={askAi} title={t("Vorschlag der KI zu diesem Eintrag einholen")}>
+                        <Icon name="spark" size={14} /> {t("KI-Vorschlag")} {keys.ai && <Kbd>{shortcutLabel(keys.ai)}</Kbd>}
+                      </button>
+                    )}
                   </div>
                   <div className="vote-buttons">
                     <button className="vote vote-include" disabled={busy} onClick={() => vote("include")}>
@@ -380,6 +454,7 @@ function Screening() {
                       <Icon name="x" /> Exclude {keys.exclude && <Kbd>{shortcutLabel(keys.exclude)}</Kbd>}
                     </button>
                   </div>
+                  {suggestion && <AiLine suggestion={suggestion} onShow={() => setAi({ step: "done", recordId: record.id, suggestion })} />}
                   {last && <p className="last-vote">{t("Gespeichert: {label}", { label: last })}</p>}
                 </div>
               )}

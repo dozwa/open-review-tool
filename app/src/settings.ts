@@ -21,6 +21,25 @@ export interface Shortcuts {
   next: string;
   previous: string;
   focus: string;
+  ai: string;
+}
+
+/** Zugang zu einer KI für Vorschläge im Screening. Der API-Schlüssel steht nicht hier, sondern im Schlüsselbund. */
+export interface Ai {
+  enabled: boolean;
+  /** Adresse der API bis vor den Pfad, z. B. `http://localhost:11434/v1`. */
+  url: string;
+  model: string;
+  /** Eigene Vorlage für den Prompt; leer heißt Standardvorlage. */
+  prompt: string;
+  /** Autoren, Jahr, Zeitschrift und DOI mitsenden. */
+  publication: boolean;
+  path: string;
+  /** JSON-Objekt, dessen Felder in die Anfrage kommen. */
+  extra_body: string;
+  /** JSON-Zeiger auf den Antworttext. */
+  answer_path: string;
+  timeout_s: number;
 }
 
 export interface Settings {
@@ -37,6 +56,7 @@ export interface Settings {
   screening: ScreeningLayout;
   /** Tastenkürzel wie `M` oder `Alt+M`; leer heißt ohne. */
   shortcuts: Shortcuts;
+  ai: Ai;
   /** Leer: Der Dialog beginnt im zuletzt benutzten Ordner. */
   export_dir: string;
   package_dir: string;
@@ -48,6 +68,8 @@ export interface ProjectSettings {
   export_dir: string | null;
   package_dir: string | null;
   screening: ScreeningLayout | null;
+  ai_prompt: string | null;
+  ai_publication: boolean | null;
   color: string;
 }
 
@@ -56,6 +78,8 @@ export interface Effective {
   export_dir: string;
   package_dir: string;
   screening: ScreeningLayout;
+  ai_prompt: string;
+  ai_publication: boolean;
 }
 
 export interface ProjectView {
@@ -78,7 +102,8 @@ export const DEFAULTS: Settings = {
   font_size: "normal",
   density: "normal",
   screening: { show_list: true, show_criteria: true, show_source: false, highlight: true },
-  shortcuts: { include: "I", maybe: "M", exclude: "E", next: "J", previous: "K", focus: "F" },
+  shortcuts: { include: "I", maybe: "M", exclude: "E", next: "J", previous: "K", focus: "F", ai: "A" },
+  ai: { enabled: false, url: "", model: "", prompt: "", publication: false, path: "/chat/completions", extra_body: "", answer_path: "/choices/0/message/content", timeout_s: 120 },
   export_dir: "",
   package_dir: "",
 };

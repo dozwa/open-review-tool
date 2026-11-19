@@ -1,6 +1,7 @@
 //! Tauri-Hülle des Open Review Tool. Dünne Befehle über `ort-core`; Rechte, Verblindung und alle
 //! Prüfungen liegen im Kern. Die Oberfläche liest und schreibt keine Dateien selbst.
 
+mod ai;
 #[cfg(feature = "bridge")]
 mod bridge;
 mod commands;
@@ -99,6 +100,13 @@ fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send
         commands::bundle_import,
         commands::chain_verify,
         commands::open_url,
+        commands::ai_suggest,
+        commands::ai_resolve,
+        commands::ai_test,
+        commands::ai_default_prompt,
+        commands::ai_key_status,
+        commands::ai_key_set,
+        commands::ai_key_clear,
     ]
 }
 

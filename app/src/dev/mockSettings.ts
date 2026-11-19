@@ -10,7 +10,12 @@ const folders = new Map<string, string | null>([["r1", "/Users/beispiel/Reviews/
 export function readMockSettings(): { settings: Settings; stored: boolean } {
   try {
     const text = localStorage.getItem(KEY);
-    if (text) return { settings: { ...DEFAULTS, ...JSON.parse(text) }, stored: true }; // Felder, die es beim Speichern noch nicht gab, nehmen den Standard
+    if (text) {
+      // Felder, die es beim Speichern noch nicht gab, nehmen den Standard.
+      const stored = JSON.parse(text) as Partial<Settings>;
+      const settings = { ...DEFAULTS, ...stored, shortcuts: { ...DEFAULTS.shortcuts, ...stored.shortcuts }, ai: { ...DEFAULTS.ai, ...stored.ai } };
+      return { settings, stored: true };
+    }
   } catch {
     // Ohne Speicher gelten die Standardwerte.
   }
@@ -19,7 +24,7 @@ export function readMockSettings(): { settings: Settings; stored: boolean } {
 
 function view(reviewId: string): ProjectView {
   const program = readMockSettings().settings;
-  const project = projects.get(reviewId) ?? { output_language: null, export_dir: null, package_dir: null, screening: null, color: reviewId === "r1" ? "green" : "" };
+  const project = projects.get(reviewId) ?? { output_language: null, export_dir: null, package_dir: null, screening: null, ai_prompt: null, ai_publication: null, color: reviewId === "r1" ? "green" : "" };
   return {
     project,
     effective: {
@@ -27,6 +32,8 @@ function view(reviewId: string): ProjectView {
       export_dir: project.export_dir ?? program.export_dir,
       package_dir: project.package_dir ?? program.package_dir,
       screening: project.screening ?? program.screening,
+      ai_prompt: project.ai_prompt ?? program.ai.prompt,
+      ai_publication: project.ai_publication ?? program.ai.publication,
     },
     file: `/Users/beispiel/Library/Application Support/org.openreviewtool.app/reviews/${reviewId}.ortreview`,
     fulltext_folder: folders.get(reviewId) ?? null,

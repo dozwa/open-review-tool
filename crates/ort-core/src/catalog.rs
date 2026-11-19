@@ -64,7 +64,7 @@ pub struct Spec {
     check: fn(&Value) -> Check,
 }
 
-pub static CATALOG: [Spec; 30] = [
+pub static CATALOG: [Spec; 32] = [
     Spec {
         name: "ReviewCreated",
         label: "Review angelegt",
@@ -163,6 +163,24 @@ pub static CATALOG: [Spec; 30] = [
         writer: Writer::Write,
         stage: StageRule::Open,
         check: record_flagged,
+    },
+    Spec {
+        name: "AiSuggestionReceived",
+        label: "KI-Vorschlag",
+        version: 1,
+        chain: Chain::Stage,
+        writer: Writer::Write,
+        stage: StageRule::Open,
+        check: ai_suggestion_received,
+    },
+    Spec {
+        name: "AiSuggestionResolved",
+        label: "KI-Vorschlag übernommen oder abgelehnt",
+        version: 1,
+        chain: Chain::Stage,
+        writer: Writer::Write,
+        stage: StageRule::Open,
+        check: ai_suggestion_resolved,
     },
     Spec {
         name: "ConsensusRecorded",
@@ -880,6 +898,29 @@ fn record_flagged(p: &Value) -> Check {
     optional(p, "note", is_text)
 }
 
+/// Längster Begründungstext eines KI-Vorschlags, in Zeichen.
+pub const MAX_RATIONALE: usize = 4000;
+
+// Die Entscheidung heißt hier `suggested` und nicht `decision`: Ein Vorschlag ist keine Stimme, und die
+// Regeln für Ausschlussgründe gelten für ihn nicht.
+fn ai_suggestion_received(p: &Value) -> Check {
+    uuid(p, "record_id")?;
+    filled(p, "model")?;
+    filled(p, "prompt_sha256")?;
+    one_of(p, "suggested", &["include", "exclude", "maybe"])?;
+    optional(p, "reason", filled)?;
+    if text(p, "rationale")?.chars().count() > MAX_RATIONALE {
+        return Err(tr!("Feld „{}“ ist länger als {} Zeichen.", "rationale", MAX_RATIONALE));
+    }
+    Ok(())
+}
+
+fn ai_suggestion_resolved(p: &Value) -> Check {
+    uuid(p, "record_id")?;
+    uuid(p, "suggestion")?;
+    one_of(p, "outcome", &["accepted", "declined"])
+}
+
 fn consensus_recorded(p: &Value) -> Check {
     uuid(p, "record_id")?;
     one_of(p, "decision", &["include", "exclude"])?;
@@ -985,6 +1026,33 @@ mod tests {
         assert!(with(json!({"round": 0})).unwrap_err().contains("kleiner als 1"));
         assert!(with(json!({"verify": {"scope": "sample", "percent": 0, "seed": 7}})).unwrap_err().contains("Anteil"));
         assert!(with(json!({"verify": {"scope": "sample", "percent": 20}})).unwrap_err().contains("seed"));
+    }
+
+    #[test]
+    fn ai_suggestions_are_checked() {
+        let stage = Uuid::new_v4();
+        let record = Uuid::new_v4().to_string();
+        let received = |extra: Value| {
+            let mut p = json!({"record_id": record, "model": "llama3", "prompt_sha256": "ab", "suggested": "exclude", "rationale": "Falsche Population."});
+            p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            validate("AiSuggestionReceived", 1, Some(&stage), &p)
+        };
+        assert!(received(json!({})).is_ok());
+        assert!(received(json!({"reason": "E1"})).is_ok());
+        assert!(received(json!({"reason": null})).is_ok());
+        assert!(received(json!({"suggested": "vielleicht"})).unwrap_err().contains("unzulässigen Wert"));
+        assert!(received(json!({"model": " "})).unwrap_err().contains("leer"));
+        assert!(received(json!({"rationale": "x".repeat(MAX_RATIONALE + 1)})).unwrap_err().contains("länger"));
+        assert!(validate("AiSuggestionReceived", 1, None, &json!({})).is_err());
+
+        let resolved = |outcome: &str| {
+            let p = json!({"record_id": record, "suggestion": Uuid::new_v4().to_string(), "outcome": outcome});
+            validate("AiSuggestionResolved", 1, Some(&stage), &p)
+        };
+        assert!(resolved("accepted").is_ok());
+        assert!(resolved("declined").is_ok());
+        assert!(resolved("ignoriert").unwrap_err().contains("unzulässigen Wert"));
+        assert!(is_blindable("AiSuggestionReceived") && is_blindable("AiSuggestionResolved"));
     }
 
     #[test]

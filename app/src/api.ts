@@ -391,6 +391,8 @@ export interface Vote {
   primary_reason: string | null;
   reasons: string[];
   note: string;
+  /** Was die KI dieser Person vorgeschlagen hatte, falls sie einen Vorschlag eingeholt hat. */
+  ai: string | null;
 }
 
 /** Filter der Liste auf der Screening-Seite. Gesperrte Filter weist der Kern ab. */
@@ -435,6 +437,25 @@ export interface RecordDetail {
   record: RecordItem;
   my_vote: MyVote | null;
   fulltext: FullText | null;
+  my_suggestion: Suggestion | null;
+}
+
+/** Ein KI-Vorschlag zu einem Eintrag, wie er im Log steht. Er ist keine Stimme. */
+export interface Suggestion {
+  id: string;
+  model: string;
+  suggested: string;
+  reason: string | null;
+  rationale: string;
+  /** `accepted`, `declined` oder `null`, solange nichts vermerkt ist. */
+  outcome: string | null;
+  at: string;
+}
+
+export interface AiSuggestion {
+  suggestion: Suggestion;
+  /** Der Prompt, der dafür gesendet wurde. */
+  prompt: string;
 }
 
 /** Stand eines Volltexts. Die Datei liegt im verknüpften Ordner oder in Zotero, nie in der App. */
@@ -1017,6 +1038,14 @@ export const api = {
   ) => call<void>("vote_cast", { reviewId, stageId, recordId, decision, primaryReason, reasons, note }),
   flag: (reviewId: string, stageId: string, recordId: string, note: string) =>
     call<void>("record_flag", { reviewId, stageId, recordId, note }),
+  aiSuggest: (reviewId: string, stageId: string, recordId: string) => call<AiSuggestion>("ai_suggest", { reviewId, stageId, recordId }),
+  aiResolve: (reviewId: string, stageId: string, recordId: string, suggestion: string, outcome: "accepted" | "declined") =>
+    call<void>("ai_resolve", { reviewId, stageId, recordId, suggestion, outcome }),
+  aiTest: () => call<string>("ai_test"),
+  aiDefaultPrompt: () => call<string>("ai_default_prompt"),
+  aiKeyStatus: () => call<boolean>("ai_key_status"),
+  aiKeySet: (key: string) => call<void>("ai_key_set", { key }),
+  aiKeyClear: () => call<void>("ai_key_clear"),
   consensus: (reviewId: string, stageId: string, recordId: string, decision: string, primaryReason: string | null) =>
     call<void>("consensus_record", { reviewId, stageId, recordId, decision, primaryReason }),
   unblind: (reviewId: string, stageId: string) => call<void>("stage_unblind", { reviewId, stageId }),

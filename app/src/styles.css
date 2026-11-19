@@ -654,8 +654,8 @@ main:has(.screening) { max-width: none; padding: 40px 0 0; }
 .my-vote, .reason-hint { margin-bottom: 10px; color: var(--ink-2); font-size: 12px; }
 .reasons .chip { height: auto; min-height: 24px; padding: 2px 10px; white-space: normal; text-align: left; }
 .reasons { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
-.dock-row { display: flex; gap: 8px; margin-bottom: 10px; }
-.dock-row .note { flex: 1; height: 30px; border-radius: 8px; padding: 0 10px; }
+.dock-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.dock-row .note { flex: 1; min-width: 140px; height: 30px; border-radius: 8px; padding: 0 10px; }
 .vote-buttons { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 /* Entscheidungsknöpfe: getönte Fläche in der Farbe der Entscheidung statt einer vollen. Ruhiger neben dem
    Text, und die Farbe bleibt als Signal erhalten. `--v` ist die Farbe der Entscheidung. */
@@ -963,3 +963,49 @@ button.small { height: 26px; padding: 0 10px; }
 .shortcut { min-width: 96px; height: 26px; padding: 0 8px; justify-content: center; }
 .shortcut kbd { font: 500 13px/1 inherit; font-family: inherit; letter-spacing: 0.5px; background: none; opacity: 1; }
 .shortcut.recording { border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); color: var(--ink-2); font-size: 12px; }
+
+/* Dialog über der Seite, etwa der KI-Vorschlag im Screening. */
+.modal-layer { position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, 0.28); display: grid; place-items: center; padding: 24px; }
+.modal {
+  width: min(560px, 100%); max-height: min(720px, 100%); display: flex; flex-direction: column; background: var(--content);
+  border: 0.5px solid var(--line-strong); border-radius: 14px; box-shadow: var(--shadow), 0 24px 60px rgba(0, 0, 0, 0.22); animation: rise 0.16s ease-out;
+}
+.modal > header { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 18px 10px; }
+.modal > header strong { font-size: 15px; }
+.modal-body { overflow-y: auto; padding: 4px 18px 14px; display: flex; flex-direction: column; gap: 10px; }
+.modal-body > .banner { margin: 0; }
+.modal > footer { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px; border-top: 0.5px solid var(--line); }
+.modal > footer kbd { margin-left: 4px; }
+
+.ai-wait { display: flex; align-items: center; gap: 10px; font-weight: 500; }
+.spinner { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--line-strong); border-top-color: var(--accent); animation: spin 0.8s linear infinite; flex: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
+.ai-decision {
+  --v: var(--c-may); display: flex; align-items: baseline; gap: 10px; padding: 10px 12px; border-radius: 10px;
+  background: color-mix(in srgb, var(--v) 13%, var(--content)); border: 1px solid color-mix(in srgb, var(--v) 38%, transparent);
+}
+.ai-decision.d-include { --v: var(--c-inc); }
+.ai-decision.d-exclude { --v: var(--c-exc); }
+.ai-decision strong { font-size: 16px; color: color-mix(in srgb, var(--v) 72%, var(--ink)); }
+.ai-decision span { color: var(--ink-2); }
+.ai-rationale { line-height: 1.55; white-space: pre-wrap; }
+.ai-meta { color: var(--ink-3); font-size: 12px; }
+.ai-error { white-space: pre-wrap; overflow-wrap: anywhere; }
+.ai-prompt summary { cursor: pointer; color: var(--ink-2); font-size: 12px; }
+.ai-prompt pre {
+  margin-top: 6px; padding: 10px; max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere;
+  font: 11.5px/1.5 ui-monospace, "SF Mono", Menlo, monospace; background: var(--sidebar); border-radius: 8px;
+}
+.ai-line { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 8px; color: var(--ink-2); font-size: 12px; }
+.ai-line .icon, .ai-mark .icon { color: var(--accent); }
+.ai-mark { display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; color: var(--ink-2); font-size: 11.5px; }
+
+/* Einstellungen: Zeile mit einem Textfeld über die ganze Breite. */
+.row.stacked { flex-direction: column; align-items: stretch; gap: 8px; padding-top: 10px; padding-bottom: 10px; }
+.row.stacked > .inline-actions { justify-content: flex-start; }
+.row.stacked textarea { font-size: 12.5px; }
+.row input.mono, .row textarea.mono { font-size: 12px; }
+.test-ok { color: var(--c-inc); }
+.test-failed { color: var(--c-exc); overflow-wrap: anywhere; }
+.row > .inline-actions input:not(.switch) { width: 260px; }

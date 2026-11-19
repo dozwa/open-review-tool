@@ -9,6 +9,7 @@ use ort_core::fulltext::{
     Assign, FileProblem, FullTextOverview, Location, Suggestion, ZoteroConfirm, ZoteroLink, ZoteroSuggestion,
 };
 use ort_core::guidance::{self, Guideline};
+use ort_core::projection::SuggestionInfo;
 use ort_core::protocol::Protocol;
 use ort_core::registration::RegistrationDraft;
 use ort_core::report::Report;
@@ -27,7 +28,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Runtime, State};
 use uuid::Uuid;
 
-use crate::{zotero, AppState};
+use crate::{ai, zotero, AppState};
 
 type Res<T> = Result<T, String>;
 
@@ -794,4 +795,102 @@ pub async fn open_url(url: String) -> Res<()> {
     }
     std::process::Command::new("open").arg(&url).spawn().map_err(err)?;
     Ok(())
+}
+
+// ---------------------------------------------------------------- KI-Vorschlag
+
+/// Ein Vorschlag der KI, wie er im Log steht, und der Prompt, der dafür gesendet wurde.
+#[derive(Serialize)]
+pub struct AiSuggestionView {
+    suggestion: SuggestionInfo,
+    prompt: String,
+}
+
+/// Zugang zur KI, wie er eingestellt ist. Ohne Adresse oder Modell gibt es keine Anfrage.
+fn ai_access(state: &AppState) -> Res<(settings::Ai, Option<String>)> {
+    let access = Settings::load(&state.data_dir).ai;
+    if !access.enabled || access.url.is_empty() || access.model.trim().is_empty() {
+        return Err(tr!("Die KI ist nicht eingerichtet. Trage in den Einstellungen Adresse und Modell ein."));
+    }
+    Ok((access, state.identities.secret(ai::KEY_NAME)?))
+}
+
+/// Holt einen Vorschlag der KI zu einem Eintrag und vermerkt ihn im Log. Die Stimme gibt danach die Person ab.
+#[tauri::command]
+pub async fn ai_suggest(
+    state: State<'_, AppState>,
+    review_id: String,
+    stage_id: String,
+    record_id: String,
+) -> Res<AiSuggestionView> {
+    let (access, key) = ai_access(&state)?;
+    let stage = uuid(&stage_id)?;
+    // Die Datei des Reviews bleibt nicht offen, solange die KI rechnet.
+    let request = {
+        let review = open(&state, &review_id)?;
+        let own = settings::resolve(&Settings::load(&state.data_dir), &review.project_settings().map_err(err)?);
+        let options = ort_core::ai::Options { template: own.ai_prompt, publication: own.ai_publication };
+        review.ai_request(&stage, &record_id, &options).map_err(err)?
+    };
+    let model = access.model.trim().to_string();
+    let messages = request.messages.clone();
+    let answer = tauri::async_runtime::spawn_blocking(move || ai::complete(&access, key.as_deref(), &messages))
+        .await
+        .map_err(err)??;
+    let suggestion = open(&state, &review_id)?
+        .record_ai_suggestion(&stage, &record_id, &model, &request.prompt_sha256, &answer)
+        .map_err(|e| format!("{e}\n\n{}", ai::excerpt(&answer, 1500)))?;
+    Ok(AiSuggestionView { suggestion, prompt: request.prompt() })
+}
+
+/// Vermerkt, ob ein Vorschlag übernommen (`accepted`) oder abgelehnt (`declined`) wurde.
+#[tauri::command]
+pub async fn ai_resolve(
+    state: State<'_, AppState>,
+    review_id: String,
+    stage_id: String,
+    record_id: String,
+    suggestion: String,
+    outcome: String,
+) -> Res<()> {
+    open(&state, &review_id)?
+        .resolve_ai_suggestion(&uuid(&stage_id)?, &record_id, &uuid(&suggestion)?, &outcome)
+        .map_err(err)
+}
+
+/// Schickt eine kurze Probe an die KI und gibt deren Antwort zurück.
+#[tauri::command]
+pub async fn ai_test(state: State<'_, AppState>) -> Res<String> {
+    let (access, key) = ai_access(&state)?;
+    let messages = vec![ort_core::ai::Message { role: "user".into(), content: tr!("Antworte mit dem Wort OK.") }];
+    let answer = tauri::async_runtime::spawn_blocking(move || ai::complete(&access, key.as_deref(), &messages))
+        .await
+        .map_err(err)??;
+    Ok(ai::excerpt(&answer, 300))
+}
+
+/// Die Standardvorlage des Prompts in der Sprache der Oberfläche, als Ausgangspunkt für eine eigene.
+#[tauri::command]
+pub async fn ai_default_prompt() -> Res<String> {
+    Ok(ort_core::ai::default_template())
+}
+
+/// Ob ein API-Schlüssel hinterlegt ist. Der Schlüssel selbst geht nie an die Oberfläche zurück.
+#[tauri::command]
+pub async fn ai_key_status(state: State<'_, AppState>) -> Res<bool> {
+    Ok(state.identities.secret(ai::KEY_NAME)?.is_some())
+}
+
+#[tauri::command]
+pub async fn ai_key_set(state: State<'_, AppState>, key: String) -> Res<()> {
+    let key = key.trim();
+    if key.is_empty() || key.contains(char::is_whitespace) {
+        return Err(tr!("Der API-Schlüssel ist leer oder enthält Leerzeichen."));
+    }
+    state.identities.set_secret(ai::KEY_NAME, key)
+}
+
+#[tauri::command]
+pub async fn ai_key_clear(state: State<'_, AppState>) -> Res<()> {
+    state.identities.clear_secret(ai::KEY_NAME)
 }

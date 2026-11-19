@@ -420,3 +420,42 @@ fn duplicate_decisions_reach_everyone_with_the_package() {
         assert!(matches!(member.resolve_duplicates(&decisions), Err(Error::Forbidden(_))));
     }
 }
+
+#[test]
+fn ai_suggestions_need_write_rights_and_an_open_screening_stage() {
+    let (t, stage) = screened();
+    let record = t.r1.next_record(&stage).unwrap().record.unwrap().id.to_string();
+    let received = json!({"record_id": record, "model": "llama3", "prompt_sha256": "ab", "suggested": "exclude",
+        "rationale": "Passt nicht."});
+
+    // Richtige Rolle: Der Vorschlag kommt an, auch ohne Grund in einer Stufe ohne Pflichtgrund.
+    let suggestion = t.r1.record_ai_suggestion(&stage, &record, "llama3", "ab", r#"{"decision": "maybe"}"#).unwrap();
+    t.r1.resolve_ai_suggestion(&stage, &record, &suggestion.id, "declined").unwrap();
+    let report = send_return(&t.r1, &t.owner);
+    assert!(report.rejected.is_empty(), "{:?}", report.rejected);
+    assert_eq!(report.accepted, 4, "zwei Stimmen, Vorschlag und Vermerk");
+
+    // Falsche Rolle und unzulässiger Wert, an der App vorbei geschrieben.
+    let forged = [
+        (&t.viewer, received.clone(), "nicht abstimmen"),
+        (
+            &t.r2,
+            json!({"record_id": record, "model": "x", "prompt_sha256": "ab", "suggested": "ja", "rationale": ""}),
+            "unzulässigen Wert",
+        ),
+    ];
+    for (member, payload, reason) in forged {
+        let (_dir, copy) = copy_of(&t, member);
+        copy.store().append(copy.me(), "AiSuggestionReceived", Some(stage), payload).unwrap();
+        let report = merge(&t.owner, &wire(&export_return(&copy).unwrap())).unwrap();
+        assert_eq!(report.accepted, 0);
+        assert!(report.rejected[0].contains(reason), "{:?}", report.rejected);
+    }
+
+    // Nach dem Schließen der Stufe kommt kein Vorschlag mehr an.
+    let (_dir, late) = copy_of(&t, &t.r2);
+    late.store().append(late.me(), "AiSuggestionReceived", Some(stage), received).unwrap();
+    t.owner.close_stage(&stage).unwrap();
+    let report = merge(&t.owner, &wire(&export_return(&late).unwrap())).unwrap();
+    assert!(report.rejected[0].contains("geschlossen"), "{:?}", report.rejected);
+}
