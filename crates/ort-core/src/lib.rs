@@ -9,7 +9,7 @@
 //! [`store`] (einzige Schreibstelle) →
 //! [`projection`], [`workflow`] und [`agreement`] (aus dem Log berechnet) → [`service`] (Fachlogik,
 //! Rechte, Verblindung) → [`exchange`] (Dateien zwischen Personen). [`report`] rechnet aus alldem
-//! das Flussdiagramm und die Anhänge.
+//! das Flussdiagramm und die Anhänge, [`sources`] bündelt Einträge zu Quellen.
 
 pub mod agreement;
 pub mod canonical;
@@ -25,6 +25,7 @@ pub mod projection;
 pub mod report;
 pub mod search;
 pub mod service;
+pub mod sources;
 pub mod store;
 pub mod workflow;
 

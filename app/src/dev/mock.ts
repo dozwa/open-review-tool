@@ -103,8 +103,17 @@ const jbiStations = [
   station("fulltext", "screening", "Volltext-Screening", "Eingeschlossene aus Titel/Abstract am Volltext prüfen, danach Klärung.", {
     blocking: true, defaults: { name: "Volltext-Screening", round: 1, scope: "from_stage", sample_size: null, source_stage: "s2", rules, reason_required: true },
   }),
-  station("citation_search", "setup", "Zitationssuche", "Vorwärts und rückwärts suchen, bis nichts Neues mehr kommt.", { tool: "citation" }),
-  station("bundling", "setup", "Quellen bündeln", "Begleitpublikationen derselben Studie zu einer Quelle zusammenfassen.", { tool: "bundling" }),
+  station("citation_search", "setup", "Zitationssuche", "Vorwärts und rückwärts suchen, bis nichts Neues mehr kommt.", {
+    tool: "citation", available: true, blocking: true,
+    checks: [
+      { check: "citation_search_documented", label: "Zitationssuche festgehalten", passed: false, detail: "noch keine Suche und kein Import mit dieser Herkunft" },
+      { check: "all_records_assigned", label: "Alle Einträge einer Runde zugeteilt", passed: true, detail: "0 ohne Runde" },
+    ],
+  }),
+  station("bundling", "setup", "Quellen bündeln", "Begleitpublikationen derselben Studie zu einer Quelle zusammenfassen.", {
+    tool: "bundling", available: true, blocking: true,
+    checks: [{ check: "source_types_set", label: "Jede eingeschlossene Quelle hat eine Quellenart", passed: false, detail: "3 von 4 ohne Quellenart" }],
+  }),
   station("charting_pilot", "form", "Charting-Pilot", "Je Quellenart zwei bis drei Quellen unabhängig extrahieren und das Formular abstimmen."),
   station("charting", "form", "Charting", "Alle Quellen mit dem abgestimmten Formular extrahieren und abgleichen."),
   station("report", "report", "Auswertung und Bericht", "Flussdiagramm, Tabellen und Methodentext.", { available: true }),
@@ -194,6 +203,42 @@ const dupRecord = (id: string, extra: Record<string, unknown>) => ({
   id, title: "Smartphone-based headache diary for adults with episodic migraine: a randomised trial", abstract: "",
   authors: "Keller, Jana; Moreau, Luc", year: 2023, journal: "Cephalalgia Reports", doi: "", url: "", keywords: "", duplicate_of: null, ...extra,
 });
+const sourceTypes = [
+  { key: "primary_study", label: "Primärstudie" },
+  { key: "review", label: "Review oder Evidenzsynthese" },
+  { key: "guideline", label: "Leitlinie oder Policy-Dokument" },
+  { key: "grey", label: "Graue Literatur" },
+  { key: "opinion", label: "Meinung, Kommentar oder Editorial" },
+  { key: "other", label: "Sonstiges" },
+];
+const sourceRecord = (id: string, title: string, authors: string, year: number, journal: string) =>
+  ({ id, title, abstract: "", authors, year, journal, doi: "", url: "", keywords: "", duplicate_of: null, included: true });
+// Eingeschlossene Einträge; `study` und `primary` beschreiben die Bündel.
+let sourceRecords = [
+  { ...sourceRecord("e1", "App-based relaxation training for adults with migraine: a randomised trial", "Hartmann, Eva; Lindqvist, Per", 2022, "Headache Care"), study: "b1", primary: true, type: "primary_study" },
+  { ...sourceRecord("e2", "App-based relaxation training for adults with migraine: twelve-month follow-up", "Hartmann, Eva; Lindqvist, Per", 2023, "Headache Care"), study: "b1", primary: false, type: "" },
+  { ...sourceRecord("e3", "Smartphone-based headache diary for adults with episodic migraine: a randomised trial", "Keller, Jana; Moreau, Luc", 2023, "Cephalalgia Reports"), study: "", primary: true, type: "" },
+  { ...sourceRecord("e4", "Telemedicine follow-up in specialised headache clinics", "Okonkwo, Ada", 2021, "Digital Neurology"), study: "", primary: true, type: "" },
+  { ...sourceRecord("e5", "Digital self-management of migraine: recommendations of a working group", "Sauer, Timo", 2024, ""), study: "", primary: true, type: "" },
+];
+let studyLabels: Record<string, string> = { b1: "Hartmann-Studie" };
+function mockSources() {
+  const groups = new Map<string, typeof sourceRecords>();
+  for (const r of sourceRecords) groups.set(r.study || r.id, [...(groups.get(r.study || r.id) ?? []), r]);
+  const sources = [...groups.values()].map((group) => {
+    const records = [...group].sort((x, y) => Number(y.primary) - Number(x.primary));
+    return {
+      id: records[0].id, study_id: records[0].study || null, label: studyLabels[records[0].study] ?? "",
+      source_type: records.find((r) => r.type)?.type ?? "", records,
+    };
+  });
+  const count = (key: string) => sources.filter((s) => s.source_type === key).length;
+  return {
+    sources, source_types: sourceTypes, n_records: sourceRecords.length, n_sources: sources.length, n_without_type: count(""),
+    by_type: sourceTypes.map((t) => ({ ...t, n: count(t.key) })).filter((t) => t.n > 0), level: "Volltext-Screening", complete: false,
+  };
+}
+
 let duplicatePairs = [
   {
     a: dupRecord("d1", { abstract: "Background: Paper diaries are often incomplete.", doi: "10.5555/mig.2023.1004" }),
@@ -400,6 +445,24 @@ export function installMock() {
           { name: "Clara Weiß", decision: "maybe", primary_reason: null, reasons: [], note: "Kein Abstract vorhanden, Volltext nötig." },
         ] },
       ];
+      case "sources": return a.reviewId === "r2"
+        ? { sources: [], source_types: [], n_records: 0, n_sources: 0, n_without_type: 0, by_type: [], level: null, complete: false }
+        : mockSources();
+      case "study_link": {
+        const chosen = a.records as string[];
+        const study = (a.studyId as string | null) ?? `b${Object.keys(studyLabels).length + 1}`;
+        studyLabels = { ...studyLabels, [study]: String(a.label) };
+        sourceRecords = sourceRecords.map((r) => (chosen.includes(r.id) ? { ...r, study, primary: r.id === a.primary } : r));
+        return study;
+      }
+      case "study_dissolve":
+        sourceRecords = sourceRecords.map((r) => (r.study === a.studyId ? { ...r, study: "", primary: true } : r));
+        return null;
+      case "source_type_set": {
+        const chosen = a.records as string[];
+        sourceRecords = sourceRecords.map((r) => (chosen.includes(r.id) ? { ...r, type: String(a.sourceType) } : r));
+        return chosen.length;
+      }
       case "report": return a.reviewId === "r2"
         ? { ...mockReport, flow: { ...mockReport.flow, sources: [], identified: 0, exact_duplicates: 0, resolved_duplicates: 0, unique: 0, levels: [], included: null }, svg: "", methods: "# Methoden: Auswahl der Quellen\n\nDas Review lief ohne feste Vorlage.", search_appendix: "# Suchanhang\n\nEs ist keine Suche festgehalten.\n", n_excluded_rows: 0 }
         : mockReport;

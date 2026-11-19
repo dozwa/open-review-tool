@@ -589,6 +589,44 @@ export interface FlowLevel {
   blinded: number;
   reasons: ReasonCount[];
   fulltext: boolean;
+  /** Von den Geprüften und Eingeschlossenen: Einträge aus Zitationssuche und anderen Wegen. */
+  other_assessed: number;
+  other_included: number;
+}
+
+export interface TypeCount {
+  /** Schlüssel der Quellenart; leer für „ohne Quellenart“. */
+  key: string;
+  label: string;
+  n: number;
+}
+
+export interface SourceRecord extends RecordItem {
+  primary: boolean;
+  /** Ob der Eintrag am Ende der Auswahl eingeschlossen ist. */
+  included: boolean;
+}
+
+/** Eine Quelle: ein einzelner Eintrag oder ein Bündel mit Haupteintrag. */
+export interface SourceView {
+  /** ID des Haupteintrags. */
+  id: string;
+  study_id: string | null;
+  label: string;
+  source_type: string;
+  records: SourceRecord[];
+}
+
+export interface SourceList {
+  sources: SourceView[];
+  /** Quellenarten der Vorlage; ohne Liste ist die Quellenart freier Text. */
+  source_types: SchemaElement[];
+  n_records: number;
+  n_sources: number;
+  n_without_type: number;
+  by_type: TypeCount[];
+  level: string | null;
+  complete: boolean;
 }
 
 export interface Flow {
@@ -597,8 +635,13 @@ export interface Flow {
   exact_duplicates: number;
   resolved_duplicates: number;
   unique: number;
+  /** Von `identified`: Treffer aus Zitationssuche und anderen Wegen. */
+  other_identified: number;
   levels: FlowLevel[];
   included: number | null;
+  /** Dasselbe nach dem Bündeln. */
+  included_sources: number | null;
+  source_types: TypeCount[];
   complete: boolean;
   record_term: string;
   records_term: string;
@@ -616,7 +659,7 @@ export interface Report {
   n_excluded_rows: number;
 }
 
-export type ReportFileKind = "diagram" | "excluded" | "included" | "search" | "methods";
+export type ReportFileKind = "diagram" | "excluded" | "included" | "sources" | "search" | "methods";
 
 export const api = {
   identity: () => call<Person | null>("identity_get"),
@@ -643,6 +686,12 @@ export const api = {
   resolveDuplicates: (reviewId: string, pairs: PairDecision[]) =>
     call<number>("duplicates_resolve", { reviewId, pairs }),
   verifyChain: (reviewId: string) => call<ChainReport>("chain_verify", { reviewId }),
+  sources: (reviewId: string) => call<SourceList>("sources", { reviewId }),
+  linkStudy: (reviewId: string, studyId: string | null, label: string, records: string[], primary: string) =>
+    call<string>("study_link", { reviewId, studyId, label, records, primary }),
+  dissolveStudy: (reviewId: string, studyId: string) => call<void>("study_dissolve", { reviewId, studyId }),
+  setSourceType: (reviewId: string, records: string[], sourceType: string) =>
+    call<number>("source_type_set", { reviewId, records, sourceType }),
   report: (reviewId: string) => call<Report>("report", { reviewId }),
   exportReport: (reviewId: string, kind: ReportFileKind, path: string) =>
     call<void>("report_export", { reviewId, kind, path }),

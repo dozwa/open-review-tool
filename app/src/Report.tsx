@@ -13,11 +13,12 @@ const FILES: Record<ReportFileKind, { name: string; type: string; extension: str
   diagram: { name: "flussdiagramm.svg", type: "SVG", extension: "svg" },
   excluded: { name: "ausgeschlossene-volltexte.csv", type: "CSV", extension: "csv" },
   included: { name: "eingeschlossen.ris", type: "RIS", extension: "ris" },
+  sources: { name: "eingeschlossene-quellen.csv", type: "CSV", extension: "csv" },
   search: { name: "suchanhang.md", type: "Markdown", extension: "md" },
   methods: { name: "methoden-auswahl.md", type: "Markdown", extension: "md" },
 };
 
-function LevelRow({ level }: { level: FlowLevel }) {
+function LevelRow({ level, branch }: { level: FlowLevel; branch: boolean }) {
   const r = level.retrieval;
   return (
     <tr>
@@ -28,6 +29,7 @@ function LevelRow({ level }: { level: FlowLevel }) {
       <td>{level.input}</td>
       <td>{r ? r.unavailable + r.open : "–"}</td>
       <td>{level.assessed}</td>
+      {branch && <td>{level.other_assessed}</td>}
       <td>{level.included}</td>
       <td>{level.excluded}</td>
       <td>
@@ -84,17 +86,24 @@ export function ReportTab({ review, run }: { review: ReviewDetail; run: Run }) {
   if (!report) return null;
   const flow = report.flow;
   const hasLevels = flow.levels.length > 0;
+  // Zweig „andere Quellen“: Treffer aus Zitationssuche und anderen Wegen
+  const branch = flow.other_identified > 0;
+  const sources = flow.included_sources ?? flow.included;
+  const bundled = flow.included !== null && sources !== null && sources !== flow.included;
 
   return (
     <>
       <div className="stats">
-        <Stat label="Identifiziert" value={flow.identified.toLocaleString("de-DE")} detail={`${flow.sources.length} ${flow.sources.length === 1 ? "Import-Quelle" : "Import-Quellen"}`} />
+        <Stat label="Identifiziert" value={flow.identified.toLocaleString("de-DE")} detail={`${flow.sources.length} ${flow.sources.length === 1 ? "Import-Quelle" : "Import-Quellen"}${branch ? `, davon ${flow.other_identified} aus anderen Quellen` : ""}`} />
         <Stat label="Dubletten entfernt" value={(flow.exact_duplicates + flow.resolved_duplicates).toLocaleString("de-DE")} detail={`${flow.unique.toLocaleString("de-DE")} ${flow.records_term} bleiben`} />
         <Stat
           label="Eingeschlossen"
           tone={flow.complete ? "inc" : "may"}
-          value={flow.included === null ? "–" : flow.included.toLocaleString("de-DE")}
-          detail={flow.included === null ? "noch keine Auswahl" : flow.complete ? "Auswahl abgeschlossen" : "vorläufig, die Auswahl läuft noch"}
+          value={sources === null ? "–" : sources.toLocaleString("de-DE")}
+          detail={[
+            sources === null ? "noch keine Auswahl" : flow.complete ? "Auswahl abgeschlossen" : "vorläufig, die Auswahl läuft noch",
+            bundled ? `${flow.sources_term}, gebündelt aus ${flow.included} ${flow.included === 1 ? "Eintrag" : `${flow.records_term}n`}` : "",
+          ].filter(Boolean).join(" · ")}
         />
       </div>
 
@@ -122,12 +131,13 @@ export function ReportTab({ review, run }: { review: ReviewDetail; run: Run }) {
                 <th scope="col">Eingang</th>
                 <th scope="col">Nicht beschafft</th>
                 <th scope="col">Geprüft</th>
+                {branch && <th scope="col">davon andere Quellen</th>}
                 <th scope="col">Eingeschlossen</th>
                 <th scope="col">Ausgeschlossen</th>
                 <th scope="col">Offen</th>
               </tr>
             </thead>
-            <tbody>{flow.levels.map((level) => <LevelRow key={level.key} level={level} />)}</tbody>
+            <tbody>{flow.levels.map((level) => <LevelRow key={level.key} level={level} branch={branch} />)}</tbody>
           </table>
         </Group>
       ) : (
@@ -148,6 +158,16 @@ export function ReportTab({ review, run }: { review: ReviewDetail; run: Run }) {
             <span className="muted">RIS, {flow.included ?? 0} {flow.included === 1 ? flow.record_term : flow.records_term}{flow.complete ? "" : " (vorläufig)"}; lässt sich in Zotero importieren</span>
           </div>
           <button className="small" disabled={!hasLevels} onClick={() => saveFile("included")}><Icon name="download" size={13} /> Speichern</button>
+        </div>
+        <div className="report-file">
+          <div>
+            <strong>{flow.sources_term} mit Bündeln und Quellenart</strong>
+            <span className="muted">
+              CSV, {sources ?? 0} {sources === 1 ? flow.source_term : flow.sources_term}; je {flow.record_term} eine Zeile, {flow.records_term} desselben Bündels tragen dieselbe Nummer
+              {flow.source_types.length > 0 && ` · ${flow.source_types.map((t) => `${t.label}: ${t.n}`).join(", ")}`}
+            </span>
+          </div>
+          <button className="small" disabled={!hasLevels} onClick={() => saveFile("sources")}><Icon name="csv" size={13} /> Speichern</button>
         </div>
       </Group>
 

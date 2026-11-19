@@ -12,7 +12,7 @@ use ort_core::exchange::{export_return, merge};
 use ort_core::fulltext::Assign;
 use ort_core::projection::Verify;
 use ort_core::report::{Level, Retrieval};
-use ort_core::service::{OpenStage, PairDecision, RecordFilter, StageView};
+use ort_core::service::{ImportSource, OpenStage, PairDecision, RecordFilter, StageView};
 use ort_core::workflow::{builtin_template, StationView};
 use ort_core::Review;
 use serde_json::json;
@@ -94,6 +94,8 @@ fn review_carries_its_template_in_the_log() {
             "title_abstract",
             "fulltext_retrieval",
             "fulltext",
+            "citation_search",
+            "bundling",
             "report"
         ]
     );
@@ -196,7 +198,7 @@ fn failed_gate_can_be_overridden_with_a_reason() {
 
     assert!(matches!(t.owner.override_gate("pilot_title_abstract", "  "), Err(Error::Invalid(_))));
     assert!(matches!(t.r1.override_gate("pilot_title_abstract", "Grund"), Err(Error::Forbidden(_))));
-    assert!(matches!(t.owner.override_gate("citation_search", "Grund"), Err(Error::Invalid(_))), "sperrt nichts");
+    assert!(matches!(t.owner.override_gate("report", "Grund"), Err(Error::Invalid(_))), "sperrt nichts");
     t.owner.override_gate("pilot_title_abstract", "Team hat sich mündlich abgestimmt").unwrap();
     let view = station(&t.owner, "pilot_title_abstract");
     assert_eq!(view.state, "done");
@@ -1095,6 +1097,158 @@ fn abbreviated_selection_is_named_as_a_limitation() {
     assert!(report.search_appendix.contains("Es ist keine Suche festgehalten."));
 }
 
+/// Treffer einer Zitationssuche: Der erste ist schon da (gleiche DOI), zwei sind neu.
+const CITATIONS: &str = "TY  - JOUR
+AU  - Lee, Min
+TI  - Large language models for symptom extraction
+PY  - 2020
+DO  - 10.1000/llm2020
+ER  -
+
+TY  - JOUR
+AU  - Novak, Petra
+TI  - Two-year outcomes after rule-based triage of migraine
+PY  - 2022
+DO  - 10.1000/followup
+ER  -
+
+TY  - RPRT
+AU  - Weber, Ida
+TI  - Headache services in rural regions
+PY  - 2018
+ER  -
+";
+
+#[test]
+fn citation_search_runs_as_a_further_round_and_bundles_count_once() {
+    let t = team_with_fulltexts();
+    let close = |stage: &StageView| {
+        t.owner.unblind_stage(&stage.id).unwrap();
+        assert!(t.owner.close_stage(&stage.id).unwrap().gate.unwrap().passed);
+    };
+    let ft = open(&t, "fulltext", |_| {});
+    vote_all(&t, &ft.id, &["include"; 4], &["include"; 4]);
+    close(&ft);
+    assert_eq!(states(&t.owner)["bundling"], "locked", "erst die Zitationssuche");
+    let check = |station_key: &str, key: &str| {
+        station(&t.owner, station_key).checks.into_iter().find(|c| c.check == key).unwrap()
+    };
+    assert_eq!(check("citation_search", "citation_search_documented").passed, Some(false));
+
+    // Die Zitationssuche wird wie jede Suche festgehalten; ihr Import bringt zwei neue Einträge.
+    let found =
+        search("Zitationssuche", json!({"origin": "citation", "platform": "", "query": "Literaturverzeichnisse"}));
+    let made = t.owner.publish_search(&found).unwrap();
+    let from = ImportSource { search_id: Some(made.id), ..ImportSource::default() };
+    let batch = t.owner.import_file_with("zitationen.ris", CITATIONS, &from).unwrap();
+    assert_eq!((batch.n_records, batch.n_duplicates), (3, 1), "{}", batch.error);
+    assert_eq!(check("citation_search", "citation_search_documented").passed, Some(true));
+    let unassigned = check("citation_search", "all_records_assigned");
+    assert_eq!((unassigned.passed, unassigned.detail.as_str()), (Some(false), "2 ohne Runde"));
+    let report = t.owner.report().unwrap();
+    assert_eq!(report.problems, Vec::<String>::new());
+    assert_eq!((report.flow.other_identified, report.flow.levels[0].not_assigned, report.flow.complete), (3, 2, false));
+
+    // Zweiter Durchlauf: Jede Station bekommt nur, was neu ist.
+    let ta = open(&t, "title_abstract", |_| {});
+    assert_eq!((ta.round, ta.n_records), (2, 2));
+    vote_all(&t, &ta.id, &["include"; 2], &["include"; 2]);
+    close(&ta);
+    assert!(t
+        .owner
+        .open_stage(&t.owner.stage_defaults("title_abstract").unwrap())
+        .unwrap_err()
+        .to_string()
+        .contains("nichts Neues"));
+    assert_eq!(check("fulltext_retrieval", "all_fulltext_status").detail, "4 von 6 beschafft, 0 nicht beschaffbar");
+    retrieve_fulltexts(&t);
+    let ft2 = open(&t, "fulltext", |_| {});
+    assert_eq!((ft2.round, ft2.n_records), (2, 2), "die vier aus Runde 1 liegen nicht noch einmal vor");
+    let new = order_of(&t.owner, &ft2.id);
+    for reviewer in [&t.r1, &t.r2] {
+        reviewer.cast_vote(&ft2.id, &new[0], "include", None, &[], "").unwrap();
+        reviewer.cast_vote(&ft2.id, &new[1], "exclude", Some("E1"), &[], "").unwrap();
+        send_return(reviewer, &t.owner);
+    }
+    close(&ft2);
+    assert_eq!(states(&t.owner)["citation_search"], "done");
+
+    // Der Zweig „andere Quellen“ im Diagramm.
+    let report = t.owner.report().unwrap();
+    let flow = &report.flow;
+    assert_eq!(report.problems, Vec::<String>::new());
+    assert_eq!((flow.identified, flow.exact_duplicates, flow.unique, flow.other_identified), (9, 3, 6, 3));
+    assert_eq!((level_numbers(&flow.levels[0]), flow.levels[0].rounds), ((6, 6, 6, 0, 0), 2));
+    assert_eq!((level_numbers(&flow.levels[1]), flow.levels[1].rounds), ((6, 6, 5, 1, 0), 2));
+    assert_eq!((flow.levels[1].other_assessed, flow.levels[1].other_included), (2, 1));
+    assert!(flow.complete);
+    for text in [
+        "Datenbanken und Register: 6",
+        "Andere Quellen: 3",
+        "Zitationssuche: 3",
+        "Identifiziert: 9 Einträge",
+        "aus anderen Quellen: 2",
+        "Einträge aus anderen Quellen: 1",
+        "<polyline",
+    ] {
+        assert!(report.svg.contains(text), "{text} fehlt im Diagramm");
+    }
+    assert!(report.methods.contains("Davon stammen 3 aus der Zitationssuche"));
+
+    // Bündeln: Zwei Einträge derselben Studie zählen als eine Quelle.
+    let list = t.owner.sources().unwrap();
+    assert_eq!((list.n_records, list.n_sources, list.n_without_type, list.complete), (5, 5, 5, true));
+    assert_eq!(list.level.as_deref(), Some("Volltext-Screening"));
+    let ids: Vec<Uuid> = list.sources.iter().map(|s| s.id).collect();
+    let (a, b, c) = (ids[0], ids[1], ids[2]);
+    assert!(matches!(t.r1.link_study(None, "", &[a, b], &a), Err(Error::Forbidden(_))));
+    assert!(matches!(t.owner.link_study(None, "", &[a], &a), Err(Error::Invalid(_))));
+    assert!(matches!(t.owner.link_study(None, "", &[a, b], &c), Err(Error::Invalid(_))));
+    let study = t.owner.link_study(None, "Kohorte Prag", &[a, b], &b).unwrap();
+    assert!(matches!(t.owner.link_study(None, "", &[b, c], &c), Err(Error::Conflict(_))), "b ist schon gebündelt");
+    let list = t.owner.sources().unwrap();
+    assert_eq!((list.n_records, list.n_sources), (5, 4));
+    let bundle = list.sources.iter().find(|s| s.study_id == Some(study)).unwrap();
+    assert_eq!((bundle.id, bundle.label.as_str(), bundle.records.len()), (b, "Kohorte Prag", 2));
+    assert!(bundle.records[0].primary && !bundle.records[1].primary);
+
+    // Quellenart: Das Gate verlangt sie für jede Quelle, die Vorlage nennt die Auswahl.
+    assert_eq!(check("bundling", "source_types_set").detail, "4 von 4 ohne Quellenart");
+    assert!(matches!(t.owner.set_source_type(&ids, "roman"), Err(Error::Invalid(_))));
+    assert!(matches!(t.r1.set_source_type(&ids, "review"), Err(Error::Forbidden(_))));
+    t.owner.set_source_type(&ids, "primary_study").unwrap();
+    t.owner.set_source_type(&[c], "review").unwrap();
+    assert_eq!(states(&t.owner)["bundling"], "done");
+
+    // Bericht und Dateien zählen Quellen; alle im Team sehen dasselbe.
+    send_package(&t.owner, &t.viewer);
+    let report = t.viewer.report().unwrap();
+    assert_eq!(report.problems, Vec::<String>::new());
+    assert_eq!((report.flow.included, report.flow.included_sources), (Some(5), Some(4)));
+    let kinds: Vec<(&str, i64)> = report.flow.source_types.iter().map(|k| (k.label.as_str(), k.n)).collect();
+    assert_eq!(kinds, [("Primärstudie", 3), ("Review oder Evidenzsynthese", 1)]);
+    for text in ["Eingeschlossen: 4 Quellen", "Einträge darin: 5", "Primärstudie: 3"] {
+        assert!(report.svg.contains(text), "{text} fehlt im Diagramm");
+    }
+    assert!(report.methods.contains("Gezählt werden 4 Quellen."));
+    let csv = t.viewer.report_file("sources").unwrap();
+    assert_eq!(csv.filename, "eingeschlossene-quellen.csv");
+    let lines: Vec<&str> = csv.content.lines().skip(1).collect();
+    assert_eq!(lines.len(), 5, "je Eintrag eine Zeile");
+    let bundled: Vec<&&str> = lines.iter().filter(|l| l.contains("Kohorte Prag")).collect();
+    assert_eq!(bundled.len(), 2);
+    assert_eq!(bundled[0].split(',').next(), bundled[1].split(',').next(), "dieselbe Nummer der Quelle");
+    assert!(bundled[0].contains(",primary,yes,") && bundled[1].contains(",companion,yes,"));
+    assert_eq!(t.viewer.report_file("included").unwrap().content.matches("TY  - ").count(), 5);
+
+    // Aufgelöst zählt wieder jeder Eintrag für sich.
+    assert!(matches!(t.r1.dissolve_study(&study), Err(Error::Forbidden(_))));
+    t.owner.dissolve_study(&study).unwrap();
+    assert_eq!(t.owner.sources().unwrap().n_sources, 5);
+    assert!(matches!(t.owner.dissolve_study(&study), Err(Error::NotFound(_))));
+    assert!(t.owner.verify_chain().unwrap().ok);
+}
+
 /// Derselbe Ablauf für jede Vorlage: Stationen der Reihe nach, bis alle abgeschlossen sind, die die
 /// App bearbeiten kann. Im Test steht kein Schlüssel einer Station.
 fn walk(template: &str) {
@@ -1109,6 +1263,15 @@ fn walk(template: &str) {
                     Some("protocol") => drop(t.owner.publish_criteria(&criteria("")).unwrap()),
                     Some("search") => drop(t.owner.publish_search(&search("MEDLINE", json!({}))).unwrap()),
                     Some("fulltext") => drop(retrieve_fulltexts(&t)),
+                    Some("citation") => {
+                        let found = search("Zitationssuche", json!({"origin": "citation", "platform": ""}));
+                        t.owner.publish_search(&found).unwrap();
+                    }
+                    Some("bundling") => {
+                        let list = t.owner.sources().unwrap();
+                        let ids: Vec<Uuid> = list.sources.iter().map(|s| s.id).collect();
+                        t.owner.set_source_type(&ids, &list.source_types[0].key).unwrap();
+                    }
                     _ => {}
                 }
                 if now.blocking {

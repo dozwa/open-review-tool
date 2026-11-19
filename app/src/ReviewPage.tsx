@@ -30,13 +30,14 @@ import { CriteriaEditor, CriteriaView } from "./Criteria";
 import { Duplicates } from "./Duplicates";
 import { FullTextTab } from "./FullTexts";
 import { ReportTab } from "./Report";
+import { SourcesTab } from "./Sources";
 import { searchName, SearchTab } from "./Search";
 import { ROLE_LABEL, useRefreshSidebar } from "./shared";
 import { Avatar, Banner, Empty, Group, Icon, PageHeader, Pill, Row, Segmented, Stat } from "./ui";
 
 const IMPORT_STATUS: Record<string, string> = { running: "läuft", done: "fertig", failed: "fehlgeschlagen" };
 
-type Tab = "overview" | "exchange" | "members" | "search" | "imports" | "fulltext" | "criteria" | "report" | "proof";
+type Tab = "overview" | "exchange" | "members" | "search" | "imports" | "fulltext" | "sources" | "criteria" | "report" | "proof";
 
 export function stageState(stage: Stage): string {
   if (stage.closed) return "Geschlossen";
@@ -93,6 +94,7 @@ export function ReviewPage() {
     { value: "search", label: "Suche", icon: "search" },
     { value: "imports", label: "Import", icon: "upload" },
     { value: "fulltext", label: "Volltexte", icon: "file" },
+    { value: "sources", label: term(review.workflow.terms, "sources", "Quellen"), icon: "stack" },
     { value: "criteria", label: "Kriterien", icon: "list" },
     { value: "report", label: "Bericht", icon: "chart" },
     { value: "proof", label: "Nachweis", icon: "shield" },
@@ -123,6 +125,7 @@ export function ReviewPage() {
         {tab === "search" && <SearchTab review={review} run={run} />}
         {tab === "imports" && <ImportsTab review={review} run={run} />}
         {tab === "fulltext" && <FullTextTab review={review} run={run} />}
+        {tab === "sources" && <SourcesTab review={review} run={run} />}
         {tab === "criteria" && <CriteriaTab review={review} run={run} />}
         {tab === "report" && <ReportTab review={review} run={run} />}
         {tab === "proof" && <ProofTab review={review} />}
@@ -140,6 +143,8 @@ const TOOL_TABS: Record<string, { tab: Tab; label: string }[]> = {
   search: [{ tab: "search", label: "Suche" }],
   import: [{ tab: "imports", label: "Import und Dubletten" }],
   fulltext: [{ tab: "fulltext", label: "Volltexte" }],
+  citation: [{ tab: "search", label: "Suche festhalten" }, { tab: "imports", label: "Treffer einlesen" }],
+  bundling: [{ tab: "sources", label: "Quellen bündeln" }],
 };
 
 /** Stationen der Vorlage als Leiste: Wo steht das Review? */

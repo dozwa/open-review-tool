@@ -7,16 +7,17 @@ Zusammenarbeit ohne Server über Austauschdateien.
 
 > Status (19.11.2026): Mac-App mit Rust und Tauri 2. Der vollständige Ablauf eines Scoping Reviews wird nach
 > `docs/umsetzungsplan.md` in Meilensteinen gebaut; fertig sind 0 (Fundament), 1 (Vorlage und Ablauf),
-> 2 (Kriterien und Screening-Ansicht), 3 (Suche, Import, Dubletten), 4 (Volltext, ohne das Markieren) und
-> 5 (Bericht, Teil 1).
+> 2 (Kriterien und Screening-Ansicht), 3 (Suche, Import, Dubletten), 4 (Volltext, ohne das Markieren),
+> 5 (Bericht, Teil 1) und 6 (Zitationssuche, Bündeln, Quellenart).
 > Enthalten: Identität mit Schlüssel im Schlüsselbund, Reviews mit Rollen, Review-Typ als Vorlage mit Stationen,
 > Gates und Runden, Kriterien mit Kürzeln und Erläuterungen, Suchen mit Versionen und Peer-Review-Vermerk, Import
 > von RIS, BibTeX und PubMed (nbib) mit Suchversion und Herkunft, exakte und unscharfe Dubletten, Stufen mit drei
 > Auswahlregeln, verblindetes Screening in drei Spalten mit Filtern, Volltexte aus einem Ordner oder aus Zotero
 > mit Prüfsumme und Vorschau in der App, Pflichtgrund im Volltext, Konflikte und Konsens (auch als
 > Dritt-Entscheid), Übereinstimmung, CSV-Export, Pakete und Rückmeldungen, Bericht mit Flussdiagramm (SVG),
-> ausgeschlossenen Volltexten mit Grund, Eingeschlossenen als RIS, Suchanhang und Methodentext zur Auswahl.
-> Noch nicht enthalten: Markieren im Volltext, Rückschreiben nach Zotero, Zitationssuche, Charting, Checkliste
+> ausgeschlossenen Volltexten mit Grund, Eingeschlossenen als RIS, Suchanhang und Methodentext zur Auswahl,
+> Zitationssuche als weitere Runde mit eigenem Zweig im Diagramm, Bündeln von Einträgen zu Quellen mit Quellenart.
+> Noch nicht enthalten: Markieren im Volltext, Rückschreiben nach Zotero, Charting, Checkliste
 > PRISMA-ScR, signierte und notarisierte App.
 
 ## So arbeitet ein Team
@@ -58,7 +59,7 @@ die Schlüsselbund-Sicherung von macOS.
 
 | Pfad | Inhalt |
 | --- | --- |
-| `crates/ort-core/` | Fachkern ohne Oberfläche: Event-Log (`event.rs`, `store.rs`), Register der Ereignistypen (`catalog.rs`), Projektionen, Vorlagen und Ablauf (`workflow.rs`), Kriterien (`criteria.rs`), Suchen (`search.rs`), Dubletten (`duplicates.rs`), Volltexte (`fulltext.rs`), Bericht (`report.rs`), Übereinstimmung, Import, Fachlogik (`service.rs`), Austausch (`exchange.rs`) |
+| `crates/ort-core/` | Fachkern ohne Oberfläche: Event-Log (`event.rs`, `store.rs`), Register der Ereignistypen (`catalog.rs`), Projektionen, Vorlagen und Ablauf (`workflow.rs`), Kriterien (`criteria.rs`), Suchen (`search.rs`), Dubletten (`duplicates.rs`), Volltexte (`fulltext.rs`), Bericht (`report.rs`), Bündel und Quellenart (`sources.rs`), Übereinstimmung, Import, Fachlogik (`service.rs`), Austausch (`exchange.rs`) |
 | `crates/ort-core/templates/` | Mitgelieferte Vorlagen: „JBI Scoping Review“ und „Freier Ablauf“ |
 | `crates/ort-core/tests/` | Tests für Log, Projektionen, Referenzwerte, Import, Austausch, Vorlagen und Gates und den Ablauf mit vier Personen |
 | `app/src-tauri/` | Tauri-Hülle: Befehle für die Oberfläche, Identität und Schlüsselbund |
@@ -71,7 +72,7 @@ Tauri 2 mit der WebView von macOS, React 18.
 
 ## Wie es geprüft ist
 
-- **Kern:** 117 Tests, dazu 2 für das Lesen der Zotero-Antworten in der App. Darunter die Referenzwerte der früheren SQL-Tests (Cohen's Kappa gegen scikit-learn,
+- **Kern:** 122 Tests, dazu 2 für das Lesen der Zotero-Antworten in der App. Darunter die Referenzwerte der früheren SQL-Tests (Cohen's Kappa gegen scikit-learn,
   Fleiss' Kappa am Wikipedia-Beispiel, Krippendorffs Alpha am publizierten Beispiel mit 0,743, PABAK, Prozent,
   sechs `final_decision`-Szenarien, Maybe-Regel). Die Werte erzeugt `crates/ort-core/tests/fixtures/make_agreement_fixtures.py`.
 - **Austausch:** veränderte Datei, nachträglich neu gehashte Datei ohne Signatur, Außenstehende, Lücken in einer
@@ -96,6 +97,11 @@ Tauri 2 mit der WebView von macOS, React 18.
   der Gründe), vor dem Volltext, während der verblindeten Stufe, im Konflikt und nach dem Abschluss, bei der
   Leitung und bei der Person mit Leserecht. Entscheidungen einer verblindeten Stufe stehen in keiner Zahl und
   in keiner Datei. Der RIS-Export wird vom eigenen Import wieder gelesen.
+- **Zitationssuche und Bündel:** Nach einem Import mit der Herkunft „Zitationssuche“ bekommt die zweite Runde
+  von Titel/Abstract und Volltext nur die neuen Einträge; eine dritte Runde ohne Neues wird abgewiesen. Der
+  Zweig „andere Quellen“ steht im Diagramm, und es geht weiter auf. Zwei gebündelte Einträge zählen in
+  Bericht, Diagramm und Quellen-CSV als eine Quelle; aufgelöst zählen sie wieder einzeln. Bündeln und
+  Quellenart darf nur die Leitung, über die App und an ihr vorbei.
 - **Ablauf:** Owner, zwei Reviewer und eine Person mit Leserecht mit getrennten Dateien, nur über Pakete und
   Rückmeldungen: verblindetes Screening, Paket ohne fremde Stimmen, Entblinden, Konflikte, Konsens, Revision,
   CSV, Abschluss mit Snapshot, abgewiesene Nachzügler, Folgestufe, Bericht, Prüfung aller Ketten.
@@ -143,20 +149,36 @@ Nur für Entwicklung und Tests.
   berechnet und stehen nicht im Log. Die DOI in einer PDF findet die App nur, wenn die Metadaten
   unkomprimiert in der Datei stehen. Volltexte aus Zotero prüft „Dateien prüfen“ nicht mit; ihre Prüfsumme
   wird beim Öffnen geprüft. Das Markieren im Volltext (zweiter Schritt im Plan) ist noch nicht gebaut.
-- **Volltext-Stufe in Runden:** Später beschaffte Volltexte laufen als weitere Runde der Station. Der Bericht
-  führt die Runden zusammen (für einen Eintrag gilt die letzte Runde, in der er zugeteilt war). Eine Stufe,
-  die aus dem Volltext-Screening schöpft, nimmt dagegen bisher nur die letzte Runde; das wird mit dem Charting
-  (Meilenstein 7) gebraucht und dort gelöst.
-- **Bericht:** Das Flussdiagramm hat eine Spalte; der Zweig „andere Quellen“ kommt mit der Zitationssuche
-  (Meilenstein 6). Eine Ebene ist eine Screening-Station mit allen Runden, im freien Ablauf jede Stufe für
+- **Runden:** In einer Vorlage mit festen Runden legt eine Station nichts doppelt vor: Eine weitere Runde
+  bekommt nur Einträge, die in keiner früheren waren (später beschaffte Volltexte, Treffer der Zitationssuche).
+  Eine Runde über dieselben Einträge zu wiederholen geht damit nicht; der Pilot zieht als Stichprobe jedes Mal
+  neu. Eine Station, die aus einer anderen schöpft, nimmt die Eingeschlossenen aller Runden; für einen Eintrag
+  gilt die letzte Runde, in der er entschieden ist. Im freien Ablauf bleibt alles wie bisher.
+- **Zitationssuche:** Sie wird wie jede Suche festgehalten (Herkunft „Zitationssuche“) und ihr Import läuft
+  durch dieselben Stationen. Das Gate der Station verlangt eine solche Suche oder einen solchen Import und
+  dass kein Eintrag ohne Runde ist. Wer keine Zitationssuche macht, übersteuert das Gate mit Begründung; das
+  ist die dokumentierte Grenze. Ob eine weitere Suche noch Neues bringt, entscheidet das Team.
+- **Andere Quellen im Diagramm:** PRISMA 2020 führt andere Wege als eigene Spalte bis zum Einschluss. Hier
+  laufen diese Einträge durch dieselben Stufen wie alle anderen; das Diagramm zeigt sie deshalb als eigenen
+  Kasten, der in den Fluss mündet, und nennt in jeder Ebene, wie viele der Geprüften daher stammen. Einträge
+  ohne Angabe der Herkunft zählen zu Datenbanken und Registern.
+- **Bündel und Quellenart:** Ein Bündel hat einen Haupteintrag; seine Quellenart gilt für die Quelle. Ein
+  Eintrag gehört zu höchstens einem Bündel: Die App weist einen zweiten Versuch ab, beim Zusammenführen
+  gewinnt das spätere Bündel, und ein Bündel mit weniger als zwei Einträgen ist aufgelöst. Gebündelt werden
+  kann auch ein nicht eingeschlossener Eintrag; er zählt nicht mit. Die Quellenarten kommen aus der Vorlage,
+  im freien Ablauf sind sie freier Text. Vorschläge für Bündel gibt es nicht; die Liste ist nach Erstautor
+  sortiert. Der RIS-Export enthält weiter alle eingeschlossenen Einträge, die Quellen-CSV die Zuordnung.
+  Reviews, die vor diesem Stand angelegt wurden, haben die Gates für Zitationssuche und Bündeln nicht, weil
+  ihre Vorlage im Log steht.
+- **Bericht:** Eine Ebene ist eine Screening-Station mit allen Runden, im freien Ablauf jede Stufe für
   sich. Stichproben wie der Pilot stehen im Methodentext, nicht im Diagramm. Einträge in einer verblindeten
   Stufe zählen als offen. Der Bericht ist berechnet und steht nicht im Log; der Methodentext ist ein Entwurf
   ohne Namen. Die PMID steht im RIS-Export im Feld `AN`.
 - **Rollenprüfung beim Einlesen:** nach dem Stand nach dem Zusammenführen, nicht zum Zeitpunkt jedes Ereignisses.
 - **Gates:** Das Ergebnis wird beim Schließen einer Stufe auf dem Rechner der Leitung berechnet und als
   `GateEvaluated` festgehalten. Schließen ist auch mit nicht erfülltem Gate möglich; gesperrt wird die nächste
-  Station. Stationen, die die App noch nicht bearbeiten kann (Zitationssuche, Bündeln, Charting), stehen in der
-  Leiste als „folgt“ und sperren nichts.
+  Station. Stationen, die die App noch nicht bearbeiten kann (Charting), stehen in der Leiste als „folgt“ und
+  sperren nichts.
 - **Eine Stimme mit Prüfung (`single_verified`):** Die Stufe ist nie verblindet, weil die zweite Person die
   Ausschlüsse sehen muss. Wer was schon bewertet hat, weiß eine Person erst nach dem nächsten Paket.
 - **Gründe:** Ausschlussgründe sind die Kürzel der Ausschlusskriterien. Beim Einlesen werden sie nur in Stufen

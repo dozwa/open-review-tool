@@ -499,25 +499,27 @@ impl Review {
         let template = &workflow.template;
         let source = template.stations.iter().find(|s| s.requires_fulltext).and_then(|s| s.input.as_ref());
         let sources: Vec<&StageState> = match source.and_then(|i| i.station.as_deref()) {
-            Some(key) => stages
-                .iter()
-                .filter(|s| workflow.station_of(s).is_some_and(|x| x.key == key))
-                .max_by_key(|s| s.config.round)
-                .into_iter()
-                .collect(),
+            // Alle Runden der Station; für einen Eintrag gilt die letzte, in der er entschieden ist.
+            Some(key) => {
+                let mut rounds: Vec<&StageState> =
+                    stages.iter().filter(|s| workflow.station_of(s).is_some_and(|x| x.key == key)).collect();
+                rounds.sort_by_key(|s| s.config.round);
+                rounds
+            }
             None => stages.iter().collect(),
         };
         let resolutions = self.resolutions()?;
-        let mut out = BTreeSet::new();
+        let mut decided: BTreeMap<Uuid, bool> = BTreeMap::new();
         for stage in sources.into_iter().filter(|s| !s.blind_active()) {
             for (id, decision) in stage.final_decisions() {
                 let Ok(id) = Uuid::parse_str(&id) else { continue };
-                if decision.decision.as_deref() == Some("include") && !resolutions.is_removed(&id) {
-                    out.insert(id);
-                }
+                let included = decision.decision.as_deref() == Some("include") && !resolutions.is_removed(&id);
+                // Ohne Vorlage zählt ein Einschluss in irgendeiner Stufe, wie bisher.
+                let entry = decided.entry(id).or_insert(false);
+                *entry = if source.is_some_and(|i| i.station.is_some()) { included } else { *entry || included };
             }
         }
-        Ok(out)
+        Ok(decided.into_iter().filter(|(_, included)| *included).map(|(id, _)| id).collect())
     }
 
     fn scope_now(&self) -> Result<BTreeSet<Uuid>> {

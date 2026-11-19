@@ -715,3 +715,23 @@ button.small { height: 26px; padding: 0 10px; }
   margin: 0; padding: 14px 16px; max-height: 420px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere;
   font: inherit; font-size: 13px; line-height: 1.55; -webkit-user-select: text; user-select: text;
 }
+
+/* Quellen bündeln */
+.source { padding: 12px 14px; }
+.source + .source { border-top: 0.5px solid var(--line); }
+.source-head { display: flex; gap: 12px; align-items: flex-start; }
+.source-head > input[type="checkbox"] { margin-top: 3px; flex: none; }
+.source-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.source-main p { margin: 0; font-size: 12.5px; overflow-wrap: anywhere; }
+.source-main .source-title { font-size: 13.5px; font-weight: 600; margin-bottom: 2px; }
+.source-record.companion { padding-left: 14px; border-left: 2px solid var(--line); }
+.source-record .source-role { margin-top: 5px; display: flex; gap: 6px; align-items: center; }
+.source-side { flex: none; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+.source-type { width: 230px; max-width: 100%; }
+.source-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 14px; }
+.source-actions input { flex: 1; min-width: 220px; }
+@media (max-width: 760px) {
+  .source-head { flex-wrap: wrap; }
+  .source-side { align-items: stretch; width: 100%; }
+  .source-type { width: 100%; }
+}

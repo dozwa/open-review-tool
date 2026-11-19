@@ -235,6 +235,40 @@ fn searches_and_duplicate_decisions_need_the_lead() {
 }
 
 #[test]
+fn bundles_and_source_types_need_the_lead() {
+    let t = Team::new();
+    let records = t.owner.records(None, false).unwrap();
+    let (a, b) = (records[0].id, records[1].id);
+
+    // Richtige Rolle: Die Leitung bündelt und setzt die Quellenart; mit dem Paket kommt beides an.
+    let stage = t.open_stage(|p| (p.blind, p.min_reviewers) = (false, 1));
+    for record in &records {
+        t.owner.cast_vote(&stage.id, &record.id.to_string(), "include", None, &[], "").unwrap();
+    }
+    let study = t.owner.link_study(None, "Kohorte", &[a, b], &a).unwrap();
+    t.owner.set_source_type(&[a], "Primärstudie").unwrap();
+    send_package(&t.owner, &t.r1);
+    let seen = t.r1.sources().unwrap();
+    assert_eq!((seen.n_records, seen.n_sources), (4, 3));
+    let bundle = seen.sources.iter().find(|s| s.study_id == Some(study)).unwrap();
+    assert_eq!((bundle.id, bundle.source_type.as_str()), (a, "Primärstudie"), "ohne Liste ist die Art freier Text");
+
+    // Falsche Rolle an der App vorbei.
+    let forged = [
+        ("RecordsLinkedToStudy", json!({"study_id": study.to_string(), "label": "", "records": [], "primary": null})),
+        ("SourceTypeSet", json!({"records": [b.to_string()], "source_type": "Review"})),
+    ];
+    for (event_type, payload) in forged {
+        let (_dir, copy) = copy_of(&t, &t.r1);
+        copy.store().append(copy.me(), event_type, None, payload).unwrap();
+        let report = merge(&t.owner, &wire(&export_return(&copy).unwrap())).unwrap();
+        assert_eq!(report.accepted, 0, "{event_type}");
+        assert!(report.rejected[0].contains("Owner und Admins"), "{event_type}: {:?}", report.rejected);
+    }
+    assert_eq!(t.owner.sources().unwrap().n_sources, 3, "das Bündel steht noch");
+}
+
+#[test]
 fn fulltext_status_needs_write_rights_and_zotero_links_need_the_lead() {
     let t = Team::new();
     let record = t.owner.records(None, false).unwrap()[0].id;

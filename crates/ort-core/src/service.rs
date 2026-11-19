@@ -24,6 +24,7 @@ use crate::fulltext::FullText;
 use crate::import;
 use crate::projection::{FinalDecision, MaybeMode, ReviewState, StageState, Verify};
 use crate::search::{Search, SearchVersion, Searches, SEARCH_TYPES};
+use crate::sources;
 use crate::store::{AssignmentRow, BatchRow, RecordRow, Store};
 use crate::workflow::{self, Facts, GateResult, SchemaElement, StationView, Template, Workflow, WORKFLOW_TYPES};
 
@@ -631,7 +632,32 @@ impl Review {
             true => duplicates::candidates(&self.store.record_keys()?, &resolutions).len() as i64,
             false => 0,
         };
+        let asks = |check: &str| workflow.template.stations.iter().any(|s| s.gate.iter().any(|g| g.check == check));
+        let n_citation_searches = match asks("citation_search_documented") {
+            true => {
+                let searches = self.search_state()?;
+                let named = searches.list.iter().filter(|s| s.versions.last().is_some_and(|v| v.origin == "citation"));
+                let loose = self.import_events()?.into_iter().filter(|e| e.origin == "citation" && e.search.is_none());
+                (named.count() + loose.count()) as i64
+            }
+            false => 0,
+        };
+        let unassigned_records = match asks("all_records_assigned") {
+            true => self.unassigned(workflow, stages, &resolutions)?,
+            false => 0,
+        };
+        let (n_sources, sources_without_type) = match asks("source_types_set") {
+            true => {
+                let units = sources::units(&self.selection()?.included, &self.studies()?);
+                (units.len() as i64, units.iter().filter(|u| u.source_type.is_empty()).count() as i64)
+            }
+            false => (0, 0),
+        };
         Ok(Facts {
+            n_citation_searches,
+            unassigned_records,
+            n_sources,
+            sources_without_type,
             criteria_published: Criteria::from_payload(state.criteria.as_ref()).version > 0,
             n_writers: state.members.values().filter(|m| WRITE_ROLES.contains(&m.role.as_str())).count() as i64,
             n_records: total - exact - resolved,
@@ -641,6 +667,35 @@ impl Review {
             fulltext_retrieved,
             fulltext_unavailable,
         })
+    }
+
+    /// Einträge ohne Dubletten, die in einer Station mit allen Einträgen keiner Runde zugeteilt sind.
+    /// Nach einem späteren Import (Zitationssuche) sind das die neuen Einträge.
+    fn unassigned(&self, workflow: &Workflow, stages: &[StageState], resolutions: &Resolutions) -> Result<i64> {
+        let active: BTreeSet<Uuid> = self
+            .store
+            .record_keys()?
+            .into_iter()
+            .filter(|k| k.duplicate_of.is_none() && !resolutions.is_removed(&k.id))
+            .map(|k| k.id)
+            .collect();
+        let mut most = 0;
+        for station in &workflow.template.stations {
+            let whole = station.kind == "screening"
+                && !station.free_rounds
+                && station.input.as_ref().is_none_or(|i| i.scope == "all");
+            if !whole {
+                continue;
+            }
+            let mut left = active.clone();
+            for stage in stages.iter().filter(|s| workflow.station_of(s).is_some_and(|x| x.key == station.key)) {
+                for assignment in self.store.assignments(Some(&stage.config.id))? {
+                    left.remove(&assignment.record_id);
+                }
+            }
+            most = most.max(left.len() as i64);
+        }
+        Ok(most)
     }
 
     /// Stationen der Vorlage mit Zustand, Runden und Gates.
@@ -993,6 +1048,11 @@ impl Review {
                 }
             })
             .collect())
+    }
+
+    /// Import → Herkunft, für jeden Import, den das Log nennt.
+    pub(crate) fn import_origins(&self) -> Result<Vec<(Uuid, String)>> {
+        Ok(self.import_events()?.into_iter().filter_map(|e| Some((e.batch_id?, e.origin))).collect())
     }
 
     /// Treffer je Quelle und Dublettenzahl, allein aus dem Log. Grundlage für das Flussdiagramm.
@@ -1417,15 +1477,35 @@ impl Review {
         let source_stage = params.source_stage.or(view.defaults.as_ref().and_then(|d| d.source_stage));
 
         let resolutions = self.resolutions()?;
+        let sample_scope = params.scope == "sample";
         let mut seed = params.seed;
         let ids: Vec<String> = match params.scope.as_str() {
             "from_stage" => {
                 let source_id = source_stage.ok_or_else(|| invalid("Quellstufe fehlt."))?;
                 let source = self.stage_state(&source_id)?;
-                source
-                    .final_decisions()
+                // Speist eine Station mit festen Runden, zählen alle ihre Runden: Was eine frühere
+                // Runde eingeschlossen hat, geht nicht verloren, wenn später eine weitere dazukam.
+                let feeding = workflow.station_of(&source).filter(|s| {
+                    workflow.published()
+                        && !s.free_rounds
+                        && station.input.as_ref().and_then(|i| i.station.as_deref()) == Some(s.key.as_str())
+                });
+                let mut sources: Vec<&StageState> = match feeding {
+                    Some(feeding) => {
+                        stages.iter().filter(|s| workflow.station_of(s).is_some_and(|x| x.key == feeding.key)).collect()
+                    }
+                    None => vec![&source],
+                };
+                sources.sort_by_key(|s| s.config.round);
+                let mut decided: BTreeMap<String, bool> = BTreeMap::new();
+                for stage in sources {
+                    for (id, d) in stage.final_decisions() {
+                        decided.insert(id, d.decision.as_deref() == Some("include"));
+                    }
+                }
+                decided
                     .into_iter()
-                    .filter(|(_, d)| d.decision.as_deref() == Some("include"))
+                    .filter(|(_, included)| *included)
                     .map(|(id, _)| id)
                     // Was inzwischen als Dublette entschieden ist, geht nicht in die Folgestufe.
                     .filter(|id| !Uuid::parse_str(id).is_ok_and(|id| resolutions.is_removed(&id)))
@@ -1452,29 +1532,32 @@ impl Review {
             }
             _ => return Err(invalid("Unbekannter Umfang der Stufe.")),
         };
-        // Volltext-Station: nur beschaffte Einträge, und keiner, der schon in einer früheren Runde war.
-        let ids = if station.requires_fulltext {
-            let fulltexts = self.fulltexts()?;
-            let mut earlier: BTreeSet<Uuid> = BTreeSet::new();
+        // Stationen mit festen Runden legen nichts doppelt vor: Eine weitere Runde bekommt nur, was in
+        // keiner früheren war, etwa die Treffer der Zitationssuche. Stichproben ziehen jedes Mal neu.
+        let mut earlier: BTreeSet<Uuid> = BTreeSet::new();
+        if workflow.published() && !station.free_rounds && !sample_scope {
             for round in &view.rounds {
                 earlier.extend(self.store.assignments(Some(&round.stage_id))?.into_iter().map(|a| a.record_id));
             }
-            let ids: Vec<String> = ids
-                .into_iter()
-                .filter(|id| Uuid::parse_str(id).is_ok_and(|id| fulltexts.is_retrieved(&id) && !earlier.contains(&id)))
-                .collect();
-            if ids.is_empty() {
-                return Err(invalid(match earlier.is_empty() {
-                    true => "Für diese Stufe ist noch kein Volltext beschafft.",
-                    false => "Seit der letzten Runde ist kein weiterer Volltext beschafft worden.",
-                }));
-            }
-            ids
-        } else {
-            ids
+        }
+        let fulltexts = match station.requires_fulltext {
+            true => Some(self.fulltexts()?),
+            false => None,
         };
+        let ids: Vec<String> = ids
+            .into_iter()
+            .filter(|id| {
+                Uuid::parse_str(id)
+                    .is_ok_and(|id| !earlier.contains(&id) && fulltexts.as_ref().is_none_or(|f| f.is_retrieved(&id)))
+            })
+            .collect();
         if ids.is_empty() {
-            return Err(invalid("Für diese Stufe gibt es keine Records."));
+            return Err(invalid(match (station.requires_fulltext, earlier.is_empty()) {
+                (true, true) => "Für diese Stufe ist noch kein Volltext beschafft.",
+                (true, false) => "Seit der letzten Runde ist kein weiterer Volltext beschafft worden.",
+                (false, true) => "Für diese Stufe gibt es keine Records.",
+                (false, false) => "Seit der letzten Runde ist nichts Neues dazugekommen.",
+            }));
         }
         let stage_id = Uuid::new_v4();
         let tx = self.store.conn().unchecked_transaction()?;
@@ -1485,7 +1568,6 @@ impl Review {
                 position: position as i64,
             })?;
         }
-        let sample_scope = params.scope == "sample";
         self.append(
             "StageInstanceOpened",
             Some(stage_id),

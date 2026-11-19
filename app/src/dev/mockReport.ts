@@ -6,6 +6,9 @@ export const mockReport = {
     "exact_duplicates": 58,
     "identified": 442,
     "included": 5,
+    "included_sources": 5,
+    "source_types": [],
+    "other_identified": 0,
     "levels": [
       {
         "assessed": 380,
@@ -27,6 +30,8 @@ export const mockReport = {
           }
         ],
         "retrieval": null,
+        "other_assessed": 0,
+        "other_included": 0,
         "rounds": 1
       },
       {
@@ -64,6 +69,8 @@ export const mockReport = {
           "unavailable": 1,
           "waiting": 1
         },
+        "other_assessed": 0,
+        "other_included": 0,
         "rounds": 1
       }
     ],

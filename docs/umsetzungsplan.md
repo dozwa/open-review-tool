@@ -309,8 +309,8 @@ Stand 19.11.2026: umgesetzt. Festlegungen beim Bau:
   Suchanhang und Methodentext (Markdown). Der Methodentext nennt je Station Regel, Personenzahl, Runden,
   Übereinstimmung mit Intervall und Klärung, dazu übersteuerte Gates und Limitationen (eine Stimme, eine Stimme
   mit Prüfung, unverblindet).
-- Offen für Meilenstein 6: der Zweig „andere Quellen“ im Diagramm. Offen für Meilenstein 7: Eine Stufe, die aus
-  einer Station mit mehreren Runden schöpft, nimmt nur die letzte Runde.
+- Beides mit Meilenstein 6 erledigt: der Zweig „andere Quellen“ im Diagramm und dass eine Stufe, die aus einer
+  Station mit mehreren Runden schöpft, alle Runden nimmt.
 
 - `report.rs`: Zahlen des Flussdiagramms je Quelle und Station, Gründe je Stufe getrennt. Diagramm als SVG aus
   dem Kern, damit es testbar ist.
@@ -323,6 +323,26 @@ Prüfung: Jede Ebene des Diagramms geht rechnerisch auf, geprüft am Ablauftest.
 belegen. Hier lohnt ein echter Durchlauf, bevor das Charting beginnt.
 
 ### 6 Zitationssuche, Bündeln, Quellenart (S)
+
+Stand 19.11.2026: umgesetzt. Festlegungen beim Bau:
+
+- Die Zitationssuche ist eine Suche mit der Herkunft „Zitationssuche“ und kein eigenes Ereignis. Das Gate der
+  Station verlangt eine solche Suche oder einen solchen Import und dass kein Eintrag ohne Runde ist. Ohne
+  Zitationssuche übersteuert die Leitung mit Begründung.
+- Stationen mit festen Runden legen nichts doppelt vor: Eine weitere Runde bekommt nur, was in keiner früheren
+  war. Das gilt für jede Screening-Station einer Vorlage außer Stichproben, nicht nur für den Volltext.
+- Eine Station, die aus einer anderen schöpft, nimmt die Eingeschlossenen aller Runden der Eingangsstation
+  (bisher für Meilenstein 7 vorgemerkt, mit dem zweiten Durchlauf schon hier nötig).
+- Zweig „andere Quellen“: eigener Kasten, der in den Fluss mündet, und je Ebene die Zahl der Geprüften aus
+  anderen Quellen. Keine eigene Spalte bis zum Einschluss wie in PRISMA 2020, weil die Einträge hier dieselben
+  Stufen durchlaufen.
+- `RecordsLinkedToStudy`: Bündel mit ID, Bezeichnung, Einträgen und Haupteintrag; eine leere Liste löst auf.
+  Ein Eintrag gehört zu höchstens einem Bündel, das spätere Ereignis gewinnt.
+- `SourceTypeSet`: Quellenart für einen oder mehrere Einträge. Die Auswahl steht in der Vorlage
+  (`source_types`); für eine Quelle gilt die Art des Haupteintrags. Das Gate der Station „Quellen bündeln“
+  verlangt eine Quellenart für jede eingeschlossene Quelle.
+- Der Bericht zählt am Ende Quellen und nennt die Einträge darin; neue Datei „eingeschlossene-quellen.csv“.
+- Nicht gebaut: Vorschläge für Bündel, Offenlegen der Überschneidung bei eingeschlossenen Evidenzsynthesen.
 
 - Import mit Herkunft „Zitationssuche“; nur neue Einträge durchlaufen die Stationen als weitere Runde. Zweig
   „andere Quellen“ im Diagramm.

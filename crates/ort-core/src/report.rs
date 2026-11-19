@@ -19,14 +19,16 @@ use crate::agreement::{self, Metric};
 use crate::error::{invalid, Result};
 use crate::projection::{MaybeMode, StageState};
 use crate::service::{csv_field, require, stage_criteria, Review, SourceCount, BOOTSTRAP_N, BOOTSTRAP_SEED, ROLES};
+use crate::sources::{self, TypeCount, Unit as SourceUnit};
 use crate::store::RecordRow;
 use crate::workflow::{Station, Workflow};
 
 /// Dateien, die der Bericht ausgibt: Schlüssel und vorgeschlagener Dateiname.
-pub const REPORT_FILES: [(&str, &str); 5] = [
+pub const REPORT_FILES: [(&str, &str); 6] = [
     ("diagram", "flussdiagramm.svg"),
     ("excluded", "ausgeschlossene-volltexte.csv"),
     ("included", "eingeschlossen.ris"),
+    ("sources", "eingeschlossene-quellen.csv"),
     ("search", "suchanhang.md"),
     ("methods", "methoden-auswahl.md"),
 ];
@@ -75,6 +77,10 @@ pub struct Level {
     pub reasons: Vec<ReasonCount>,
     /// Volltext-Ebene: Das Diagramm nennt die Gründe, der Export listet die Ausschlüsse.
     pub fulltext: bool,
+    /// Von den Geprüften und den Eingeschlossenen: Einträge aus anderen Quellen als Datenbanken und
+    /// Registern (Zitationssuche, andere Wege).
+    pub other_assessed: i64,
+    pub other_included: i64,
 }
 
 /// Zahlen des Flussdiagramms.
@@ -85,9 +91,15 @@ pub struct Flow {
     pub exact_duplicates: i64,
     pub resolved_duplicates: i64,
     pub unique: i64,
+    /// Von `identified`: Treffer aus Zitationssuche und anderen Wegen, der Zweig „andere Quellen“.
+    pub other_identified: i64,
     pub levels: Vec<Level>,
     /// Eingeschlossene der letzten Ebene; fehlt, solange es keine Ebene gibt.
     pub included: Option<i64>,
+    /// Dasselbe nach dem Bündeln: Begleitpublikationen derselben Studie zählen als eine Quelle.
+    pub included_sources: Option<i64>,
+    /// Eingeschlossene Quellen je Quellenart; leer, solange keine Quellenart vergeben ist.
+    pub source_types: Vec<TypeCount>,
     /// Ob in keiner Ebene mehr etwas offen ist.
     pub complete: bool,
     pub record_term: String,
@@ -100,6 +112,8 @@ impl Flow {
     /// Rechnet jede Ebene nach und nennt, was nicht aufgeht. Leer heißt: Das Diagramm stimmt.
     pub fn check(&self) -> Vec<String> {
         let mut out = Vec::new();
+        // Obergrenzen statt Gleichungen; sie stehen am Ende der Liste.
+        let mut beyond = Vec::new();
         let mut expect = |what: String, left: i64, right: i64| {
             if left != right {
                 out.push(format!("{what}: {left} ist nicht {right}."));
@@ -109,6 +123,11 @@ impl Flow {
             "Treffer je Quelle und Summe".to_string(),
             self.sources.iter().map(|s| s.n_records).sum(),
             self.identified,
+        );
+        expect(
+            "Treffer aus anderen Quellen".to_string(),
+            self.sources.iter().filter(|s| is_other(&s.origin)).map(|s| s.n_records).sum(),
+            self.other_identified,
         );
         expect(
             "Treffer ohne Dubletten".to_string(),
@@ -134,12 +153,29 @@ impl Flow {
             expect(format!("Verbleib des Eingangs von „{name}“"), level.assessed + aside, level.input);
             expect(format!("Entscheidungen in „{name}“"), level.included + level.excluded + level.open, level.assessed);
             expect(format!("Gründe in „{name}“"), level.reasons.iter().map(|r| r.n).sum(), level.excluded);
+            for (what, part, whole) in [
+                ("Geprüfte", level.other_assessed, level.assessed.min(self.other_identified)),
+                ("Eingeschlossene", level.other_included, level.included.min(level.other_assessed)),
+            ] {
+                if part > whole {
+                    beyond.push(format!("{what} aus anderen Quellen in „{name}“: {part} ist mehr als {whole}."));
+                }
+            }
+        }
+        if let (Some(sources), Some(records)) = (self.included_sources, self.included) {
+            if sources > records {
+                beyond.push(format!("Eingeschlossene Quellen: {sources} ist mehr als {records} Einträge."));
+            }
+            if !self.source_types.is_empty() {
+                expect("Quellen je Quellenart".to_string(), self.source_types.iter().map(|t| t.n).sum(), sources);
+            }
         }
         expect(
             "Eingeschlossene am Ende".to_string(),
             self.included.unwrap_or(0),
             self.levels.last().map_or(0, |l| l.included),
         );
+        out.extend(beyond);
         out
     }
 }
@@ -195,7 +231,22 @@ struct Data {
     stages: Vec<StageState>,
     flow: Flow,
     included: Vec<Uuid>,
+    /// Die Eingeschlossenen als Quellen, Bündel zusammengefasst.
+    units: Vec<SourceUnit>,
     excluded: Vec<ExcludedRow>,
+}
+
+/// Was am Ende der Auswahl eingeschlossen ist. Grundlage für das Bündeln und später das Charting.
+pub(crate) struct Selection {
+    pub included: Vec<Uuid>,
+    /// Name der letzten Ebene.
+    pub level: Option<String>,
+    pub complete: bool,
+}
+
+/// Herkunft außerhalb von Datenbanken und Registern.
+fn is_other(origin: &str) -> bool {
+    matches!(origin, "citation" | "other")
 }
 
 fn stages_of<'a>(workflow: &Workflow, stages: &'a [StageState], station: &Station) -> Vec<&'a StageState> {
@@ -280,6 +331,7 @@ impl Review {
         let summary = self.import_summary()?;
         let (_, _, resolved) = self.duplicate_counts(&resolutions)?;
         let fulltexts = self.fulltexts()?;
+        let other = self.records_of_origin(is_other)?;
 
         let mut levels: Vec<Level> = Vec::new();
         let mut included_of: BTreeMap<String, BTreeSet<Uuid>> = BTreeMap::new();
@@ -369,6 +421,8 @@ impl Review {
                 blinded: 0,
                 reasons: Vec::new(),
                 fulltext: is_fulltext,
+                other_assessed: latest.keys().filter(|id| other.contains(id)).count() as i64,
+                other_included: 0,
             };
             let mut included = BTreeSet::new();
             let mut by_reason: BTreeMap<String, i64> = BTreeMap::new();
@@ -376,6 +430,7 @@ impl Review {
                 match outcome {
                     Outcome::Include => {
                         level.included += 1;
+                        level.other_included += i64::from(other.contains(id));
                         included.insert(*id);
                     }
                     Outcome::Exclude(code) => {
@@ -419,7 +474,19 @@ impl Review {
             && levels.iter().all(|l| {
                 l.open == 0 && l.not_assigned == 0 && l.retrieval.as_ref().is_none_or(|r| r.open == 0 && r.waiting == 0)
             });
+        let studies = self.studies()?;
+        let units = match levels.is_empty() {
+            true => Vec::new(),
+            false => sources::units(&last_included, &studies),
+        };
+        let source_types = match units.iter().any(|u| !u.source_type.is_empty()) {
+            true => sources::count_types(&units, &workflow.template.source_types),
+            false => Vec::new(),
+        };
         let flow = Flow {
+            other_identified: summary.sources.iter().filter(|s| is_other(&s.origin)).map(|s| s.n_records).sum(),
+            included_sources: levels.last().map(|_| units.len() as i64),
+            source_types,
             sources: summary.sources,
             identified: summary.n_records,
             exact_duplicates: summary.n_exact_duplicates,
@@ -433,7 +500,17 @@ impl Review {
             source_term: workflow.template.term("source").to_string(),
             sources_term: workflow.template.term("sources").to_string(),
         };
-        Ok(Data { workflow, stages, flow, included: last_included, excluded: excluded_rows })
+        Ok(Data { workflow, stages, flow, included: last_included, units, excluded: excluded_rows })
+    }
+
+    /// Eingeschlossene der letzten Ebene. Entscheidungen verblindeter Stufen sind nicht dabei.
+    pub(crate) fn selection(&self) -> Result<Selection> {
+        let data = self.report_data()?;
+        Ok(Selection {
+            included: data.included,
+            level: data.flow.levels.last().map(|l| l.label.clone()),
+            complete: data.flow.complete,
+        })
     }
 
     /// Flussdiagramm, Methodentext und Suchanhang auf dem Stand des Logs.
@@ -449,7 +526,7 @@ impl Review {
         })
     }
 
-    /// Eine Datei des Berichts: `diagram`, `excluded`, `included`, `search` oder `methods`.
+    /// Eine Datei des Berichts: `diagram`, `excluded`, `included`, `sources`, `search` oder `methods`.
     pub fn report_file(&self, kind: &str) -> Result<ReportFile> {
         let filename = REPORT_FILES
             .iter()
@@ -470,6 +547,7 @@ impl Review {
                 }
                 to_ris(&records)
             }
+            "sources" => self.sources_csv(&data)?,
             "search" => self.search_appendix()?,
             _ => self.methods_text(&data)?,
         };
@@ -494,6 +572,57 @@ impl Review {
             ];
             out.push_str(&fields.iter().map(|f| csv_field(f)).collect::<Vec<_>>().join(","));
             out.push('\n');
+        }
+        Ok(out)
+    }
+
+    /// Eingeschlossene Quellen: je Eintrag eine Zeile, Einträge desselben Bündels tragen dieselbe Nummer.
+    fn sources_csv(&self, data: &Data) -> Result<String> {
+        let known = &data.workflow.template.source_types;
+        let studies = self.studies()?;
+        let included: BTreeSet<&Uuid> = data.included.iter().collect();
+        let mut out =
+            String::from("source,bundle,source_type,role,included,record_id,title,authors,year,journal,doi\n");
+        for (number, unit) in data.units.iter().enumerate() {
+            let label = unit.study.and_then(|s| studies.list.get(&s)).map(|s| s.label.clone()).unwrap_or_default();
+            let kind = known.iter().find(|k| k.key == unit.source_type).map_or(&unit.source_type, |k| &k.label);
+            for id in &unit.records {
+                let Some(r) = self.store.record(id)? else { continue };
+                let fields = [
+                    (number + 1).to_string(),
+                    label.clone(),
+                    kind.clone(),
+                    if *id == unit.primary { "primary" } else { "companion" }.to_string(),
+                    if included.contains(id) { "yes" } else { "no" }.to_string(),
+                    r.id.to_string(),
+                    r.title,
+                    r.authors,
+                    r.year.map(|y| y.to_string()).unwrap_or_default(),
+                    r.journal,
+                    r.doi,
+                ];
+                out.push_str(&fields.iter().map(|f| csv_field(f)).collect::<Vec<_>>().join(","));
+                out.push('\n');
+            }
+        }
+        Ok(out)
+    }
+
+    /// Einträge, deren Import eine Herkunft nennt, auf die `wanted` zutrifft.
+    fn records_of_origin(&self, wanted: fn(&str) -> bool) -> Result<BTreeSet<Uuid>> {
+        let batches: Vec<String> =
+            self.import_origins()?.into_iter().filter(|(_, o)| wanted(o)).map(|(b, _)| b.to_string()).collect();
+        let mut out = BTreeSet::new();
+        if batches.is_empty() {
+            return Ok(out);
+        }
+        let mut stmt = self.store.conn().prepare("SELECT id, batch_id FROM record")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        for row in rows {
+            let (id, batch) = row?;
+            if batches.contains(&batch) {
+                out.extend(Uuid::parse_str(&id));
+            }
         }
         Ok(out)
     }
@@ -606,6 +735,13 @@ impl Review {
             flow.identified,
             names.join(", ")
         ));
+        if flow.other_identified > 0 {
+            out.push_str(&format!(
+                "Davon stammen {} aus der Zitationssuche oder von anderen Wegen außerhalb von Datenbanken und Registern; \
+                 sie durchliefen dieselben Schritte als weitere Runde. ",
+                flow.other_identified
+            ));
+        }
         out.push_str(&format!(
             "Beim Import wurden {} als exakte Dubletten erkannt (gleiche DOI, sonst gleicher Titel und gleiches Jahr). \
              Mögliche weitere Dubletten wurden paarweise geprüft; {} wurden entfernt. Es blieben {} {records}. \
@@ -654,6 +790,27 @@ impl Review {
                 if n == 1 { "Eintrag wurde".to_string() } else { format!("{records} wurden") },
                 if flow.complete { "" } else { " (vorläufig)" }
             ));
+            let other = flow.levels.last().map_or(0, |l| l.other_included);
+            if flow.other_identified > 0 {
+                out.push_str(&format!(
+                    "Davon {} aus der Zitationssuche oder von anderen Wegen.\n",
+                    if other == 1 { "stammt 1".to_string() } else { format!("stammen {other}") }
+                ));
+            }
+            if let Some(sources) = flow.included_sources.filter(|s| *s != n) {
+                out.push_str(&format!(
+                    "\nMehrere Veröffentlichungen derselben Studie wurden zu einer {} gebündelt, damit nichts doppelt \
+                     zählt. Gezählt werden {}.\n",
+                    flow.source_term,
+                    count(sources, &flow.source_term, &flow.sources_term)
+                ));
+            }
+            if !flow.source_types.is_empty() {
+                out.push_str(&format!("\n{} je Quellenart:\n\n", flow.sources_term));
+                for kind in &flow.source_types {
+                    out.push_str(&format!("- {}: {}\n", kind.label, kind.n));
+                }
+            }
         }
         Ok(out)
     }
@@ -1004,34 +1161,64 @@ fn xml(text: &str) -> String {
     text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
-fn rows(flow: &Flow) -> Vec<(TextBox, Option<TextBox>)> {
-    let records = &flow.records_term;
-    let mut out = Vec::new();
+/// Kasten rechts neben der Hauptspalte.
+enum Side {
+    None,
+    /// Was die Hauptspalte verlässt (entfernt, ausgeschlossen).
+    Out(TextBox),
+    /// Was von der Seite dazukommt und unterhalb der Zeile in den Fluss mündet.
+    In(TextBox),
+}
 
-    let mut by_source: Vec<(String, i64)> = Vec::new();
-    for s in &flow.sources {
-        let name = if s.source.is_empty() { "ohne Angabe".to_string() } else { s.source.clone() };
-        match by_source.iter_mut().find(|(n, _)| *n == name) {
-            Some(entry) => entry.1 += s.n_records,
-            None => by_source.push((name, s.n_records)),
+impl Side {
+    fn text(&self) -> Option<&TextBox> {
+        match self {
+            Side::None => None,
+            Side::Out(text) | Side::In(text) => Some(text),
         }
     }
-    let mut identified = TextBox::new(format!("Identifiziert: {}", count(flow.identified, &flow.record_term, records)));
-    for (name, n) in by_source {
-        identified = identified.line(format!("{name}: {n}"));
+}
+
+fn rows(flow: &Flow) -> Vec<(TextBox, Side)> {
+    let records = &flow.records_term;
+    let mut out = Vec::new();
+    // Je Quelle eine Zeile, getrennt nach Datenbanken und Registern und nach anderen Wegen.
+    let mut by_source: Vec<(bool, String, i64)> = Vec::new();
+    for s in &flow.sources {
+        let name = if s.source.is_empty() { "ohne Angabe".to_string() } else { s.source.clone() };
+        let other = is_other(&s.origin);
+        match by_source.iter_mut().find(|(o, n, _)| *o == other && *n == name) {
+            Some(entry) => entry.2 += s.n_records,
+            None => by_source.push((other, name, s.n_records)),
+        }
     }
+    let listed = |mut text: TextBox, other: bool| {
+        for (_, name, n) in by_source.iter().filter(|(o, _, _)| *o == other) {
+            text = text.line(format!("{name}: {n}"));
+        }
+        text
+    };
+    let branch = flow.other_identified > 0;
+    let total = format!("Identifiziert: {}", count(flow.identified, &flow.record_term, records));
     let removed =
         TextBox::new(format!("Vor der Auswahl entfernt: {}", flow.exact_duplicates + flow.resolved_duplicates))
             .line(format!("Dubletten, beim Import erkannt: {}", flow.exact_duplicates))
             .line(format!("Dubletten, einzeln entschieden: {}", flow.resolved_duplicates));
-    out.push((identified, Some(removed)));
+    if branch {
+        let main = TextBox::new(format!("Datenbanken und Register: {}", flow.identified - flow.other_identified));
+        let side = TextBox::new(format!("Andere Quellen: {}", flow.other_identified));
+        out.push((listed(main, false), Side::In(listed(side, true))));
+        out.push((TextBox::new(total), Side::Out(removed)));
+    } else {
+        out.push((listed(TextBox::new(total), false), Side::Out(removed)));
+    }
 
     for level in &flow.levels {
         if let Some(r) = &level.retrieval {
             let missing = TextBox::new(format!("Nicht beschafft: {}", r.unavailable + r.open))
                 .line(format!("nicht beschaffbar: {}", r.unavailable))
                 .line_if(r.open > 0, format!("Beschaffung offen: {}", r.open));
-            out.push((TextBox::new(format!("Volltext gesucht: {}", r.sought)), Some(missing)));
+            out.push((TextBox::new(format!("Volltext gesucht: {}", r.sought)), Side::Out(missing)));
         }
         let main = TextBox::new(format!("{}: {} geprüft", level.label, level.assessed))
             .line_if(level.rounds > 1, format!("in {} Runden", level.rounds))
@@ -1041,20 +1228,28 @@ fn rows(flow: &Flow) -> Vec<(TextBox, Option<TextBox>)> {
                 format!("beschafft, noch nicht zugeteilt: {}", level.retrieval.as_ref().map_or(0, |r| r.waiting)),
             )
             .line_if(level.open > 0, format!("noch offen: {}", level.open))
-            .line_if(level.blinded > 0, format!("davon in verblindeter Stufe: {}", level.blinded));
+            .line_if(level.blinded > 0, format!("davon in verblindeter Stufe: {}", level.blinded))
+            .line_if(branch, format!("aus anderen Quellen: {}", level.other_assessed));
         let mut excluded = TextBox::new(format!("Ausgeschlossen: {}", level.excluded));
         if level.fulltext {
             for reason in &level.reasons {
                 excluded = excluded.line(format!("{}: {}", reason_label(reason), reason.n));
             }
         }
-        out.push((main, Some(excluded)));
+        out.push((main, Side::Out(excluded)));
     }
 
     if let Some(n) = flow.included {
-        let last = TextBox::new(format!("Eingeschlossen: {}", count(n, &flow.source_term, &flow.sources_term)))
-            .line_if(!flow.complete, "vorläufig, die Auswahl läuft noch".to_string());
-        out.push((last, None));
+        let sources = flow.included_sources.unwrap_or(n);
+        let other = flow.levels.last().map_or(0, |l| l.other_included);
+        let mut last =
+            TextBox::new(format!("Eingeschlossen: {}", count(sources, &flow.source_term, &flow.sources_term)))
+                .line_if(sources != n, format!("{records} darin: {n}"))
+                .line_if(branch, format!("{records} aus anderen Quellen: {other}"));
+        for kind in &flow.source_types {
+            last = last.line(format!("{}: {}", kind.label, kind.n));
+        }
+        out.push((last.line_if(!flow.complete, "vorläufig, die Auswahl läuft noch".to_string()), Side::None));
     }
     out
 }
@@ -1090,20 +1285,32 @@ pub fn diagram_svg(flow: &Flow) -> String {
     let count = rows.len();
     for (i, (main, side)) in rows.iter().enumerate() {
         let main_lines = main.wrapped(MAIN_CHARS);
-        let side_lines = side.as_ref().map(|s| s.wrapped(SIDE_CHARS));
+        let side_lines = side.text().map(|s| s.wrapped(SIDE_CHARS));
         let main_height = height_of(main_lines.len());
         let side_height = side_lines.as_ref().map_or(0, |l| height_of(l.len()));
         let row_height = main_height.max(side_height);
         let main_top = y + (row_height - main_height) / 2;
         draw(&mut body, MARGIN, main_top, MAIN_WIDTH, &main_lines);
         if let Some(lines) = &side_lines {
-            draw(&mut body, side_x, y + (row_height - side_height) / 2, SIDE_WIDTH, lines);
+            let side_top = y + (row_height - side_height) / 2;
+            draw(&mut body, side_x, side_top, SIDE_WIDTH, lines);
             let middle = y + row_height / 2;
-            arrow(&mut body, MARGIN + MAIN_WIDTH, middle, side_x - 2, middle);
+            match side {
+                Side::In(_) => {
+                    // Mündet unterhalb der Zeile in den Pfeil der Hauptspalte.
+                    let (x, join) = (side_x + SIDE_WIDTH / 2, y + row_height + ROW_GAP / 2);
+                    body.push_str(&format!(
+                        "<polyline points=\"{x},{} {x},{join} {},{join}\" fill=\"none\" stroke=\"currentColor\" marker-end=\"url(#pfeil)\"/>\n",
+                        side_top + side_height,
+                        MARGIN + MAIN_WIDTH / 2 + 2
+                    ));
+                }
+                _ => arrow(&mut body, MARGIN + MAIN_WIDTH, middle, side_x - 2, middle),
+            }
         }
         if i + 1 < count {
             let next_main = height_of(rows[i + 1].0.wrapped(MAIN_CHARS).len());
-            let next_side = rows[i + 1].1.as_ref().map_or(0, |s| height_of(s.wrapped(SIDE_CHARS).len()));
+            let next_side = rows[i + 1].1.text().map_or(0, |s| height_of(s.wrapped(SIDE_CHARS).len()));
             let next_top = y + row_height + ROW_GAP + (next_main.max(next_side) - next_main) / 2;
             let x = MARGIN + MAIN_WIDTH / 2;
             arrow(&mut body, x, main_top + main_height, x, next_top - 2);
@@ -1141,6 +1348,8 @@ mod tests {
             blinded: 0,
             reasons: vec![ReasonCount { code: "E1".into(), text: "Falsche <Population> & mehr".into(), n: excluded }],
             fulltext: true,
+            other_assessed: 0,
+            other_included: 0,
         }
     }
 
@@ -1162,6 +1371,9 @@ mod tests {
             unique: 100,
             levels: vec![level("ta", None, 100, 100, 30, 70), level("vt", Some("ta"), 30, 30, 12, 18)],
             included: Some(12),
+            included_sources: Some(12),
+            source_types: Vec::new(),
+            other_identified: 0,
             complete: true,
             record_term: "Eintrag".into(),
             records_term: "Einträge".into(),

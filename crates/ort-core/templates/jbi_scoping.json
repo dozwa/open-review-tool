@@ -16,6 +16,14 @@
     { "key": "context", "label": "Context" },
     { "key": "source_type", "label": "Quellenart" }
   ],
+  "source_types": [
+    { "key": "primary_study", "label": "Primärstudie" },
+    { "key": "review", "label": "Review oder Evidenzsynthese" },
+    { "key": "guideline", "label": "Leitlinie oder Policy-Dokument" },
+    { "key": "grey", "label": "Graue Literatur" },
+    { "key": "opinion", "label": "Meinung, Kommentar oder Editorial" },
+    { "key": "other", "label": "Sonstiges" }
+  ],
   "rules": {
     "decision_rule": { "value": "unanimous", "editable": true },
     "min_reviewers": { "value": 2, "editable": true },
@@ -87,15 +95,17 @@
       "key": "citation_search",
       "kind": "setup",
       "label": "Zitationssuche",
-      "description": "Vorwärts und rückwärts suchen, bis nichts Neues mehr kommt.",
-      "tool": "citation"
+      "description": "Vorwärts und rückwärts suchen, bis nichts Neues mehr kommt. Die Suche wird wie jede andere festgehalten, Treffer mit der Herkunft „Zitationssuche“ eingelesen. Neue Einträge laufen als weitere Runde durch Titel/Abstract und Volltext.",
+      "tool": "citation",
+      "gate": [{ "check": "citation_search_documented" }, { "check": "all_records_assigned" }]
     },
     {
       "key": "bundling",
       "kind": "setup",
       "label": "Quellen bündeln",
-      "description": "Begleitpublikationen derselben Studie zu einer Quelle zusammenfassen.",
-      "tool": "bundling"
+      "description": "Begleitpublikationen derselben Studie zu einer Quelle zusammenfassen und jeder Quelle eine Quellenart geben.",
+      "tool": "bundling",
+      "gate": [{ "check": "source_types_set" }]
     },
     {
       "key": "charting_pilot",

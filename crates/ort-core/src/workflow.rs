@@ -23,17 +23,20 @@ use crate::projection::{order_key, MaybeMode, StageState};
 pub const STATION_KINDS: [&str; 4] = ["setup", "screening", "form", "report"];
 pub const DECISION_RULES: [&str; 3] = ["unanimous", "liberal", "single_verified"];
 pub const CONFLICT_RULES: [&str; 2] = ["discussion", "third_person"];
-const SETUP_CHECKS: [&str; 6] = [
+const SETUP_CHECKS: [&str; 9] = [
     "criteria_published",
     "min_writers",
     "records_imported",
     "search_documented",
     "no_unresolved_duplicates",
     "all_fulltext_status",
+    "citation_search_documented",
+    "all_records_assigned",
+    "source_types_set",
 ];
 const SCREENING_CHECKS: [&str; 3] = ["agreement_min", "all_decided", "no_open_conflicts"];
 /// Werkzeuge für `setup`-Stationen, die diese App-Version schon hat.
-const BUILT_TOOLS: [&str; 4] = ["protocol", "search", "import", "fulltext"];
+const BUILT_TOOLS: [&str; 6] = ["protocol", "search", "import", "fulltext", "citation", "bundling"];
 pub const WORKFLOW_TYPES: [&str; 3] = ["WorkflowVersionPublished", "GateEvaluated", "GateOverridden"];
 
 const BUILTIN: [&str; 2] = [include_str!("../templates/jbi_scoping.json"), include_str!("../templates/free.json")];
@@ -135,6 +138,9 @@ pub struct Template {
     pub terms: BTreeMap<String, String>,
     #[serde(default)]
     pub criteria_schema: Vec<SchemaElement>,
+    /// Quellenarten zur Auswahl beim Bündeln. Ohne Liste ist die Quellenart freier Text.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_types: Vec<SchemaElement>,
     pub rules: Rules,
     pub stations: Vec<Station>,
     #[serde(default)]
@@ -437,6 +443,13 @@ pub struct Facts {
     pub fulltext_needed: i64,
     pub fulltext_retrieved: i64,
     pub fulltext_unavailable: i64,
+    /// Suchen und Importe mit der Herkunft „Zitationssuche“.
+    pub n_citation_searches: i64,
+    /// Einträge ohne Dubletten, die in einer Station mit allen Einträgen noch keiner Runde zugeteilt sind.
+    pub unassigned_records: i64,
+    /// Eingeschlossene Quellen nach dem Bündeln und wie viele davon noch keine Quellenart haben.
+    pub n_sources: i64,
+    pub sources_without_type: i64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -578,6 +591,25 @@ impl Workflow {
                     "{} von {} beschafft, {} nicht beschaffbar",
                     facts.fulltext_retrieved, facts.fulltext_needed, facts.fulltext_unavailable
                 ),
+            ),
+            "citation_search_documented" => (
+                "Zitationssuche festgehalten".to_string(),
+                facts.n_citation_searches > 0,
+                match facts.n_citation_searches {
+                    0 => "noch keine Suche und kein Import mit dieser Herkunft".to_string(),
+                    1 => "1 Suche oder Import".to_string(),
+                    n => format!("{n} Suchen oder Importe"),
+                },
+            ),
+            "all_records_assigned" => (
+                format!("Alle {} einer Runde zugeteilt", self.template.term("records")),
+                facts.unassigned_records == 0,
+                format!("{} ohne Runde", facts.unassigned_records),
+            ),
+            "source_types_set" => (
+                format!("Jede eingeschlossene {} hat eine Quellenart", self.template.term("source")),
+                facts.n_sources > 0 && facts.sources_without_type == 0,
+                format!("{} von {} ohne Quellenart", facts.sources_without_type, facts.n_sources),
             ),
             "no_unresolved_duplicates" => (
                 "Mögliche Dubletten entschieden".to_string(),

@@ -13,6 +13,7 @@ use ort_core::service::{
     ChainReport, Conflict, DuplicateList, ImportSource, NextRecord, OpenStage, PairDecision, RecordDetail,
     RecordFilter, RecordList, ReviewDetail, ReviewListItem, SearchView, Snapshot, StageDetail, StageView, Summary,
 };
+use ort_core::sources::SourceList;
 use ort_core::store::BatchRow;
 use ort_core::workflow::{self, GateResult, TemplateInfo};
 use ort_core::{Identity, PublicIdentity, Review};
@@ -427,6 +428,44 @@ pub async fn stage_export_csv(
 }
 
 // ---------------------------------------------------------------- Bericht
+
+/// Eingeschlossene Quellen mit Bündeln und Quellenart.
+#[tauri::command]
+pub async fn sources(state: State<'_, AppState>, review_id: String) -> Res<SourceList> {
+    open(&state, &review_id)?.sources().map_err(err)
+}
+
+/// Bündelt Einträge zu einer Quelle; mit `study_id` wird ein bestehendes Bündel ersetzt.
+#[tauri::command]
+pub async fn study_link(
+    state: State<'_, AppState>,
+    review_id: String,
+    study_id: Option<String>,
+    label: String,
+    records: Vec<String>,
+    primary: String,
+) -> Res<String> {
+    let study_id = study_id.as_deref().map(uuid).transpose()?;
+    let records = records.iter().map(|id| uuid(id)).collect::<Res<Vec<Uuid>>>()?;
+    let review = open(&state, &review_id)?;
+    review.link_study(study_id, &label, &records, &uuid(&primary)?).map(|id| id.to_string()).map_err(err)
+}
+
+#[tauri::command]
+pub async fn study_dissolve(state: State<'_, AppState>, review_id: String, study_id: String) -> Res<()> {
+    open(&state, &review_id)?.dissolve_study(&uuid(&study_id)?).map_err(err)
+}
+
+#[tauri::command]
+pub async fn source_type_set(
+    state: State<'_, AppState>,
+    review_id: String,
+    records: Vec<String>,
+    source_type: String,
+) -> Res<usize> {
+    let records = records.iter().map(|id| uuid(id)).collect::<Res<Vec<Uuid>>>()?;
+    open(&state, &review_id)?.set_source_type(&records, &source_type).map_err(err)
+}
 
 #[tauri::command]
 pub async fn report(state: State<'_, AppState>, review_id: String) -> Res<Report> {

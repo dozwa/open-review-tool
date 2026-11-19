@@ -60,7 +60,7 @@ pub struct Spec {
     check: fn(&Value) -> Check,
 }
 
-pub static CATALOG: [Spec; 21] = [
+pub static CATALOG: [Spec; 23] = [
     Spec {
         name: "ReviewCreated",
         version: 1,
@@ -228,6 +228,22 @@ pub static CATALOG: [Spec; 21] = [
         writer: Writer::Manage,
         stage: StageRule::None,
         check: zotero_item_mapped,
+    },
+    Spec {
+        name: "RecordsLinkedToStudy",
+        version: 1,
+        chain: Chain::Main,
+        writer: Writer::Manage,
+        stage: StageRule::None,
+        check: records_linked_to_study,
+    },
+    Spec {
+        name: "SourceTypeSet",
+        version: 1,
+        chain: Chain::Main,
+        writer: Writer::Manage,
+        stage: StageRule::None,
+        check: source_type_set,
     },
 ];
 
@@ -572,6 +588,56 @@ fn zotero_item_mapped(p: &Value) -> Check {
     Ok(())
 }
 
+/// Höchstzahl der Einträge in einem Bündel.
+pub const MAX_STUDY_RECORDS: usize = 50;
+/// Längste Bezeichnung eines Bündels und längster Schlüssel einer Quellenart.
+pub const MAX_LABEL: usize = 200;
+
+fn id_list<'a>(p: &'a Value, key: &str) -> std::result::Result<Vec<&'a str>, String> {
+    let list = p.get(key).and_then(Value::as_array).ok_or(format!("Feld „{key}“ fehlt oder ist keine Liste."))?;
+    let mut out = Vec::new();
+    for item in list {
+        let id = item.as_str().filter(|s| Uuid::parse_str(s).is_ok());
+        let id = id.ok_or(format!("Feld „{key}“ enthält etwas, das keine ID ist."))?;
+        if out.contains(&id) {
+            return Err(format!("Feld „{key}“ nennt einen Eintrag doppelt."));
+        }
+        out.push(id);
+    }
+    Ok(out)
+}
+
+/// Ein Bündel nennt mindestens zwei Einträge und einen davon als Haupteintrag. Eine leere Liste löst
+/// das Bündel auf.
+fn records_linked_to_study(p: &Value) -> Check {
+    uuid(p, "study_id")?;
+    if text(p, "label")?.chars().count() > MAX_LABEL {
+        return Err(format!("Die Bezeichnung hat höchstens {MAX_LABEL} Zeichen."));
+    }
+    let records = id_list(p, "records")?;
+    let primary = p.get("primary").and_then(Value::as_str);
+    match (records.len(), primary) {
+        (0, None) => Ok(()),
+        (0, Some(_)) => Err("Ein aufgelöstes Bündel hat keinen Haupteintrag.".into()),
+        (1, _) => Err("Ein Bündel braucht mindestens zwei Einträge.".into()),
+        (n, _) if n > MAX_STUDY_RECORDS => Err(format!("Ein Bündel hat höchstens {MAX_STUDY_RECORDS} Einträge.")),
+        (_, Some(primary)) if records.contains(&primary) => Ok(()),
+        _ => Err("Der Haupteintrag muss einer der Einträge des Bündels sein.".into()),
+    }
+}
+
+/// Quellenart für einen oder mehrere Einträge; ein leerer Text nimmt sie zurück.
+fn source_type_set(p: &Value) -> Check {
+    let records = id_list(p, "records")?;
+    if records.is_empty() || records.len() > MAX_PAIRS {
+        return Err(format!("Ein Ereignis setzt die Quellenart für 1 bis {MAX_PAIRS} Einträge."));
+    }
+    if text(p, "source_type")?.chars().count() > MAX_LABEL {
+        return Err(format!("Die Quellenart hat höchstens {MAX_LABEL} Zeichen."));
+    }
+    Ok(())
+}
+
 fn stage_instance_opened(p: &Value) -> Check {
     filled(p, "name")?;
     if !p.get("blind").is_some_and(Value::is_boolean) {
@@ -802,6 +868,38 @@ mod tests {
             let err = validate(event_type, version, stage, &payload).unwrap_err();
             assert!(err.contains(expected), "{event_type}: {err}");
         }
+    }
+
+    #[test]
+    fn bundle_and_source_type_payloads_are_checked() {
+        let (study, a, b) = (Uuid::new_v4().to_string(), Uuid::new_v4().to_string(), Uuid::new_v4().to_string());
+        let link = |records: Value, primary: Value| {
+            let payload = json!({"study_id": study, "label": "Kohorte", "records": records, "primary": primary});
+            validate("RecordsLinkedToStudy", 1, None, &payload)
+        };
+        assert_eq!(link(json!([a, b]), json!(a)), Ok(()));
+        assert_eq!(link(json!([]), Value::Null), Ok(()), "eine leere Liste löst das Bündel auf");
+        for (records, primary) in [
+            (json!([a]), json!(a)),
+            (json!([a, a]), json!(a)),
+            (json!([a, b]), json!(study)),
+            (json!([a, b]), Value::Null),
+            (json!([]), json!(a)),
+            (json!([a, "keine-id"]), json!(a)),
+        ] {
+            assert!(link(records.clone(), primary).is_err(), "{records}");
+        }
+        let many: Vec<String> = (0..=MAX_STUDY_RECORDS).map(|_| Uuid::new_v4().to_string()).collect();
+        assert!(link(json!(many), json!(many[0])).is_err());
+
+        let kind = |records: Value, source_type: &str| {
+            validate("SourceTypeSet", 1, None, &json!({"records": records, "source_type": source_type}))
+        };
+        assert_eq!(kind(json!([a, b]), "review"), Ok(()));
+        assert_eq!(kind(json!([a]), ""), Ok(()), "ein leerer Text nimmt die Quellenart zurück");
+        assert!(kind(json!([]), "review").is_err());
+        assert!(kind(json!([a]), &"x".repeat(MAX_LABEL + 1)).is_err());
+        assert!(validate("SourceTypeSet", 1, None, &json!({"records": [a]})).is_err());
     }
 
     #[test]
