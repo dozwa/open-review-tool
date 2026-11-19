@@ -168,3 +168,27 @@ fn unblinded_package_contains_all_votes() {
     let after = export_package(&t.owner, &t.r2.me().actor_id).unwrap();
     assert_eq!(after.events.iter().filter(|e| e.event_type == "VoteCast").count(), 2);
 }
+
+#[test]
+fn invalid_payload_is_rejected_one_by_one() {
+    let (t, stage) = screened();
+    // r1 umgeht die App und schreibt ein Votum mit unzulässiger Entscheidung und danach ein gültiges.
+    let record = t.r1.next_record(&stage).unwrap().record.unwrap().id.to_string();
+    t.r1.store().append(t.r1.me(), "VoteCast", Some(stage), json!({"record_id": record, "decision": "ja"})).unwrap();
+    t.r1.cast_vote(&stage, &record, "include", &[], "").unwrap();
+    let report = merge(&t.owner, &wire(&export_return(&t.r1).unwrap())).unwrap();
+    assert_eq!(report.accepted, 2, "die beiden gültigen Voten davor");
+    assert_eq!(report.rejected.len(), 1, "{:?}", report.rejected);
+    assert!(report.rejected[0].contains("unzulässigen Wert"), "{:?}", report.rejected);
+    // Die Kette endet am abgewiesenen Ereignis; das Votum danach kommt nicht an.
+    assert_eq!(t.owner.events().unwrap().iter().filter(|e| e.event_type.starts_with("Vote")).count(), 2);
+}
+
+#[test]
+fn file_from_newer_app_is_rejected_with_a_clear_message() {
+    let (t, _) = screened();
+    let mut value: serde_json::Value = serde_json::from_str(&export_return(&t.r1).unwrap().to_json().unwrap()).unwrap();
+    value["version"] = json!(999);
+    let err = Bundle::from_json(&value.to_string()).unwrap_err();
+    assert!(err.to_string().contains("neueren Version"), "{err}");
+}

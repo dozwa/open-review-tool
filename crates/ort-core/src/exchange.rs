@@ -22,26 +22,20 @@ use ed25519_dalek::VerifyingKey;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::catalog::{self, is_blindable, StageRule, Writer};
 use crate::error::{conflict, forbidden, integrity, invalid, not_found, Error, Result};
-use crate::event::{is_blindable, now_timestamp, parse_public_key, Event, Identity, PublicIdentity, MAIN_STREAM};
+use crate::event::{now_timestamp, parse_public_key, stream_for, Event, Identity, PublicIdentity, MAIN_STREAM};
 use crate::projection::{order_key, ReviewState, StageState};
 use crate::service::{require, Review, MANAGE_ROLES, ROLES, WRITE_ROLES};
 use crate::store::{AssignmentRow, BatchRow, Head, RecordRow, Store};
 
 pub const BUNDLE_FORMAT: &str = "ort-bundle";
 pub const IDENTITY_FORMAT: &str = "ort-identity";
-pub const FORMAT_VERSION: u32 = 1;
-
-const MANAGEMENT_EVENTS: [&str; 7] = [
-    "MemberRoleSet",
-    "CriteriaVersionPublished",
-    "RecordsImported",
-    "StageInstanceOpened",
-    "StageUnblinded",
-    "StageInstanceClosed",
-    "SnapshotTaken",
-];
-const STAGE_WRITE_EVENTS: [&str; 4] = ["VoteCast", "VoteRevised", "RecordFlaggedUndecidable", "ConsensusRecorded"];
+/// Version 2: Ereignisse werden gegen das Register geprüft, neue Typen kommen dazu. Eine ältere App
+/// weist solche Dateien mit einer klaren Meldung ab, statt einzelne Ereignisse zu verwerfen.
+pub const FORMAT_VERSION: u32 = 2;
+/// Die Identitätsdatei ist unverändert und bleibt für ältere Apps lesbar.
+pub const IDENTITY_VERSION: u32 = 1;
 
 // ---------------------------------------------------------------- Identität
 
@@ -56,7 +50,7 @@ struct IdentityFile {
 pub fn identity_file(person: &PublicIdentity) -> Result<String> {
     Ok(serde_json::to_string_pretty(&IdentityFile {
         format: IDENTITY_FORMAT.into(),
-        version: FORMAT_VERSION,
+        version: IDENTITY_VERSION,
         person: person.clone(),
     })?)
 }
@@ -67,7 +61,7 @@ pub fn read_identity_file(text: &str) -> Result<PublicIdentity> {
     if file.format != IDENTITY_FORMAT {
         return Err(invalid("Das ist keine Identitätsdatei des Open Review Tool."));
     }
-    if file.version > FORMAT_VERSION {
+    if file.version > IDENTITY_VERSION {
         return Err(invalid("Die Identitätsdatei stammt aus einer neueren Version der App."));
     }
     parse_public_key(&file.person.public_key)?;
@@ -118,7 +112,7 @@ impl Bundle {
             return Err(invalid("Die Datei ist kein Paket und keine Rückmeldung des Open Review Tool."));
         }
         if value.get("version").and_then(|v| v.as_u64()).unwrap_or(0) > FORMAT_VERSION as u64 {
-            return Err(invalid("Die Datei stammt aus einer neueren Version der App."));
+            return Err(invalid("Diese Datei stammt aus einer neueren Version der App."));
         }
         serde_json::from_value(value).map_err(|e| integrity(format!("Die Datei ist beschädigt: {e}")))
     }
@@ -457,6 +451,7 @@ pub fn merge(review: &Review, bundle: &Bundle) -> Result<MergeReport> {
     Ok(report)
 }
 
+/// Prüft ein einzelnes fremdes Ereignis gegen das Register: Rolle, Kette, Stufe und Payload.
 fn authorize(
     e: &Event,
     roles: &HashMap<Uuid, String>,
@@ -467,16 +462,20 @@ fn authorize(
 ) -> std::result::Result<(), String> {
     let role = roles.get(&e.actor_id).map(String::as_str).unwrap_or("");
     let t = e.event_type.as_str();
-    if t == "ReviewCreated" {
-        return if has_created { Err("Das Review ist hier schon angelegt.".into()) } else { Ok(()) };
+    let spec = catalog::spec(t).ok_or_else(|| format!("Unbekannter Ereignistyp {t}."))?;
+    match spec.writer {
+        Writer::Creator if has_created => return Err("Das Review ist hier schon angelegt.".into()),
+        Writer::Creator => {}
+        Writer::Manage if !MANAGE_ROLES.contains(&role) => return Err("Nur Owner und Admins dürfen das.".into()),
+        Writer::Manage => {}
+        Writer::Write if !WRITE_ROLES.contains(&role) => return Err("Diese Person darf nicht abstimmen.".into()),
+        Writer::Write => {}
     }
-    if MANAGEMENT_EVENTS.contains(&t) {
-        return if MANAGE_ROLES.contains(&role) { Ok(()) } else { Err("Nur Owner und Admins dürfen das.".into()) };
+    catalog::validate_event(e)?;
+    if stream_for(t, e.stage_instance_id.as_ref()).ok().as_deref() != Some(e.stream.as_str()) {
+        return Err("Das Ereignis liegt in der falschen Kette.".into());
     }
-    if STAGE_WRITE_EVENTS.contains(&t) {
-        if !WRITE_ROLES.contains(&role) {
-            return Err("Diese Person darf nicht abstimmen.".into());
-        }
+    if matches!(spec.stage, StageRule::Open | StageRule::OpenUnblinded) {
         let stage = e.stage_instance_id.ok_or("Stufe fehlt.")?;
         if !known_stages.contains(&stage) {
             return Err("Die Stufe ist hier nicht bekannt.".into());
@@ -484,16 +483,69 @@ fn authorize(
         if closed_before.contains(&stage) {
             return Err("Die Stufe war bereits geschlossen.".into());
         }
-        if t == "ConsensusRecorded" && blind_after.contains(&stage) {
+        if spec.stage == StageRule::OpenUnblinded && blind_after.contains(&stage) {
             return Err("Konsens in einer verblindeten Stufe.".into());
         }
-        return Ok(());
     }
-    Err(format!("Unbekannter Ereignistyp {t}."))
+    Ok(())
 }
 
 /// Liest eine Datei und entscheidet, ob sie ein neues Review anlegt oder in ein bestehendes geht.
 pub fn read_bundle_file(path: &Path) -> Result<Bundle> {
     let text = std::fs::read_to_string(path).map_err(Error::Io)?;
     Bundle::from_json(&text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::event::stage_stream;
+    use serde_json::json;
+
+    fn vote(stage: Uuid, actor: Uuid) -> Event {
+        Event {
+            event_id: Uuid::new_v4(),
+            review_id: Uuid::new_v4(),
+            actor_id: actor,
+            stream: stage_stream(&stage),
+            seq: 1,
+            event_type: "VoteCast".into(),
+            schema_version: 1,
+            occurred_at: now_timestamp(),
+            stage_instance_id: Some(stage),
+            payload: json!({"record_id": Uuid::new_v4().to_string(), "decision": "include"}),
+            prev_hash: None,
+            hash: String::new(),
+            signature: String::new(),
+        }
+    }
+
+    #[test]
+    fn authorize_follows_the_catalog() {
+        let (stage, actor) = (Uuid::new_v4(), Uuid::new_v4());
+        let roles = HashMap::from([(actor, "reviewer".to_string())]);
+        let known = BTreeSet::from([stage]);
+        let none = BTreeSet::new();
+        let check = |e: &Event, closed: &BTreeSet<Uuid>, blind: &BTreeSet<Uuid>| {
+            authorize(e, &roles, true, &known, closed, blind)
+        };
+        let good = vote(stage, actor);
+        assert_eq!(check(&good, &none, &none), Ok(()));
+        assert!(check(&good, &known, &none).unwrap_err().contains("geschlossen"));
+        // Votum in der Verwaltungskette: wäre für die Verblindung unsichtbar
+        let wrong_chain = Event { stream: MAIN_STREAM.into(), ..good.clone() };
+        assert!(check(&wrong_chain, &none, &none).unwrap_err().contains("falschen Kette"));
+        let newer = Event { schema_version: 2, ..good.clone() };
+        assert!(check(&newer, &none, &none).unwrap_err().contains("neueren Version"));
+        let unknown_stage = vote(Uuid::new_v4(), actor);
+        assert!(check(&unknown_stage, &none, &none).unwrap_err().contains("nicht bekannt"));
+        // Verwaltung bleibt Owner und Admins vorbehalten, Konsens gibt es erst nach dem Entblinden
+        let opened = Event { event_type: "StageUnblinded".into(), stream: MAIN_STREAM.into(), ..good.clone() };
+        assert!(check(&opened, &none, &none).unwrap_err().contains("Owner und Admins"));
+        let consensus = Event { event_type: "ConsensusRecorded".into(), stream: MAIN_STREAM.into(), ..good.clone() };
+        assert_eq!(check(&consensus, &none, &none), Ok(()));
+        assert!(check(&consensus, &none, &known).unwrap_err().contains("verblindeten"));
+        let viewer = HashMap::from([(actor, "viewer".to_string())]);
+        assert!(authorize(&good, &viewer, true, &known, &none, &none).unwrap_err().contains("nicht abstimmen"));
+    }
 }

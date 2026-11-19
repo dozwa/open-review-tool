@@ -16,6 +16,7 @@ Rust comes from Homebrew's keg-only `rustup`; if `cargo` is not on PATH, use `ex
 cargo test -p ort-core                         # all core tests
 cargo test -p ort-core --test flow             # one test file (eventlog, projections, agreement, importers, exchange, flow)
 cargo test -p ort-core gap_in_chain            # single test by name
+cargo test -p ort-core --release --test bench -- --ignored --nocapture   # timings with 20,000 records
 cargo fmt --all --check                        # rustfmt.toml: max_width 120
 cargo clippy --workspace --all-targets -- -D warnings
 
@@ -36,6 +37,8 @@ Agreement reference values live in `crates/ort-core/tests/fixtures/agreement.jso
 
 - **Chains per person and stream**, not per review: each actor has a `main` stream (management, consensus) and one `stage:<id>` stream per stage for `VoteCast`/`VoteRevised`/`RecordFlaggedUndecidable` (`event::is_blindable`). This lets a package drop a blinded stage's foreign votes as whole chains without gaps. Don't move blindable events into `main` or vice versa.
 - Hash = SHA-256 over canonical JSON (`canonical.rs`, RFC 8785) of the envelope without `hash`/`signature`; signature = Ed25519 over the hash. **Floats are rejected in payloads**; keep payload numbers integral.
+- `catalog.rs` is the single registry of event types: chain (`main` or `stage`), who may write, stage rule, payload check, and `upcast` for older payload versions. A new event type needs one entry there and no other list. `Review::append` validates before appending; `exchange::authorize` validates on merge and rejects single events. Projections read old payloads through `catalog::upcast`, never by changing the stored event.
+- Table changes go into `MIGRATIONS` in `store.rs` (append only, tracked in `PRAGMA user_version`). Bundles carry `FORMAT_VERSION` 2; identity files stay at `IDENTITY_VERSION` 1.
 - `store.rs` is the only write path (`Store::append` signs and chains; `insert` for already-verified foreign events). Triggers abort UPDATE/DELETE on `event`.
 - Ordering across people uses `projection::order_key` (`occurred_at`, `actor_id`, `stream`, `seq`); within a chain always `seq`. `append` keeps `occurred_at` monotonic per actor. "First `StageInstanceOpened` wins" fixes stage rules.
 

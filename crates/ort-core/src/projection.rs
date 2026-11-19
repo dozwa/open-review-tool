@@ -15,6 +15,7 @@ use serde::Serialize;
 use serde_json::Value;
 use uuid::Uuid;
 
+use crate::catalog;
 use crate::event::Event;
 
 pub fn order_key(e: &Event) -> (&str, Uuid, &str, i64) {
@@ -83,7 +84,7 @@ impl ReviewState {
                 _ => {}
             }
         }
-        state.criteria = criteria_key.map(|(_, e)| e.payload.clone());
+        state.criteria = criteria_key.map(|(_, e)| catalog::upcast(e));
         state
     }
 

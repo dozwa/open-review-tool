@@ -13,11 +13,22 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::canonical::to_canonical;
+use crate::catalog;
 use crate::error::{invalid, Result};
-use crate::event::{now_timestamp, sha256_hex, stream_for, Event, Identity, SCHEMA_VERSION};
+use crate::event::{now_timestamp, sha256_hex, stream_for, Event, Identity};
+
+/// Schritte des Tabellenschemas. Die Nummer des letzten ausgeführten Schritts steht in
+/// `PRAGMA user_version`. Neue Schritte nur anhängen, bestehende nie ändern.
+///
+/// Schritt 1 ist das Schema der ersten App-Version. Er ist wiederholbar (`IF NOT EXISTS`), weil
+/// Dateien aus dieser Version noch `user_version` 0 tragen.
+///
+/// Schritt 2: `append` fragt je Ereignis nach der letzten Zeit der Person. Ohne Index liest das alle
+/// ihre Ereignisse; 40.000 Stimmen anzuhängen dauerte damit über zwei Minuten.
+const MIGRATIONS: &[&str] =
+    &[SCHEMA, "CREATE INDEX IF NOT EXISTS event_actor_time_idx ON event (actor_id, occurred_at);"];
 
 const SCHEMA: &str = r#"
-PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS meta (
   key   TEXT PRIMARY KEY,
@@ -118,8 +129,24 @@ impl Store {
     }
 
     fn init(conn: Connection) -> Result<Store> {
-        conn.execute_batch(SCHEMA)?;
+        // Gilt je Verbindung und wirkt nicht innerhalb einer Transaktion, deshalb vor den Schritten.
+        conn.pragma_update(None, "foreign_keys", "ON")?;
+        let done: usize = conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))?.max(0) as usize;
+        if done > MIGRATIONS.len() {
+            return Err(invalid("Diese Review-Datei stammt aus einer neueren Version der App."));
+        }
+        for (index, sql) in MIGRATIONS.iter().enumerate().skip(done) {
+            let tx = conn.unchecked_transaction()?;
+            tx.execute_batch(sql)?;
+            tx.pragma_update(None, "user_version", (index + 1) as i64)?;
+            tx.commit()?;
+        }
         Ok(Store { conn })
+    }
+
+    /// Nummer des letzten ausgeführten Schema-Schritts.
+    pub fn schema_step(&self) -> Result<i64> {
+        Ok(self.conn.query_row("PRAGMA user_version", [], |r| r.get(0))?)
     }
 
     pub fn conn(&self) -> &Connection {
@@ -154,7 +181,8 @@ impl Store {
             .optional()?)
     }
 
-    /// Hängt ein eigenes Ereignis an die passende Kette an und signiert es.
+    /// Hängt ein eigenes Ereignis an die passende Kette an und signiert es. Den Payload prüft die
+    /// Fachlogik vorher (`Review::append`); hier zählt nur, dass der Typ bekannt ist.
     pub fn append(
         &self,
         me: &Identity,
@@ -183,7 +211,7 @@ impl Store {
             stream,
             seq: head.as_ref().map_or(1, |h| h.seq + 1),
             event_type: event_type.to_string(),
-            schema_version: SCHEMA_VERSION,
+            schema_version: catalog::spec(event_type).map_or(1, |s| s.version),
             occurred_at,
             stage_instance_id,
             payload,

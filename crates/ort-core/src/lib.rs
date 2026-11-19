@@ -5,12 +5,14 @@
 //! eine für Voten und Markierungen (`stage:<id>`). Dadurch kann ein Austauschpaket die verblindeten
 //! Voten anderer Personen als ganze Ketten weglassen, ohne Lücken zu reißen.
 //!
-//! Schichten: [`event`] (Umschlag, Hash, Signatur) → [`store`] (einzige Schreibstelle) →
+//! Schichten: [`event`] (Umschlag, Hash, Signatur) und [`catalog`] (Register der Ereignistypen) →
+//! [`store`] (einzige Schreibstelle) →
 //! [`projection`] und [`agreement`] (aus dem Log berechnet) → [`service`] (Fachlogik, Rechte,
 //! Verblindung) → [`exchange`] (Dateien zwischen Personen).
 
 pub mod agreement;
 pub mod canonical;
+pub mod catalog;
 pub mod error;
 pub mod event;
 pub mod exchange;

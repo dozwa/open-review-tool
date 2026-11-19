@@ -9,27 +9,27 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::canonical::to_canonical;
+use crate::catalog::{self, Chain};
 use crate::error::{integrity, invalid, Result};
 
 pub const MAIN_STREAM: &str = "main";
-pub const SCHEMA_VERSION: i64 = 1;
 
 /// Voten und Markierungen liegen in einer eigenen Kette je Person und Stufe, damit ein Paket sie
-/// bei verblindeten Stufen als Ganzes weglassen kann.
-pub fn is_blindable(event_type: &str) -> bool {
-    matches!(event_type, "VoteCast" | "VoteRevised" | "RecordFlaggedUndecidable")
-}
+/// bei verblindeten Stufen als Ganzes weglassen kann. Welche Typen das sind, steht in [`crate::catalog`].
+pub use crate::catalog::is_blindable;
 
 pub fn stage_stream(stage_id: &Uuid) -> String {
     format!("stage:{stage_id}")
 }
 
 pub fn stream_for(event_type: &str, stage_id: Option<&Uuid>) -> Result<String> {
-    if is_blindable(event_type) {
-        let stage = stage_id.ok_or_else(|| invalid(format!("{event_type} braucht eine Stufe.")))?;
-        Ok(stage_stream(stage))
-    } else {
-        Ok(MAIN_STREAM.to_string())
+    let spec = catalog::spec(event_type).ok_or_else(|| invalid(format!("Unbekannter Ereignistyp {event_type}.")))?;
+    match spec.chain {
+        Chain::Stage => {
+            let stage = stage_id.ok_or_else(|| invalid(format!("{event_type} braucht eine Stufe.")))?;
+            Ok(stage_stream(stage))
+        }
+        Chain::Main => Ok(MAIN_STREAM.to_string()),
     }
 }
 
@@ -188,7 +188,7 @@ mod tests {
             stream: MAIN_STREAM.into(),
             seq: 1,
             event_type: "ReviewCreated".into(),
-            schema_version: SCHEMA_VERSION,
+            schema_version: 1,
             occurred_at: now_timestamp(),
             stage_instance_id: None,
             payload: json!({"title": "Test"}),

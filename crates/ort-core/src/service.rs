@@ -15,6 +15,7 @@ use uuid::Uuid;
 
 use crate::agreement::{self, Alpha, CohenPair, Estimate, Metric, Percent};
 use crate::canonical::to_canonical;
+use crate::catalog;
 use crate::error::{conflict, forbidden, invalid, not_found, Result};
 use crate::event::{now_timestamp, parse_public_key, sha256_hex, Event, Identity, PublicIdentity};
 use crate::import;
@@ -298,14 +299,12 @@ impl Review {
         let tx = review.store.conn().unchecked_transaction()?;
         review.store.set_meta("review_id", &review_id.to_string())?;
         let me = &review.me;
-        review.store.append(
-            me,
+        review.append(
             "ReviewCreated",
             None,
             json!({"title": title, "owner": me.actor_id.to_string(), "public_key": me.public_key()}),
         )?;
-        review.store.append(
-            me,
+        review.append(
             "MemberRoleSet",
             None,
             json!({"actor_id": me.actor_id.to_string(), "role": "owner", "public_key": me.public_key()}),
@@ -342,6 +341,13 @@ impl Review {
 
     pub fn state(&self) -> Result<ReviewState> {
         Ok(ReviewState::build(&self.store.events_of_types(&MANAGEMENT_TYPES)?))
+    }
+
+    /// Einziger Weg der Fachlogik ins Log: prüft den Payload gegen das Register und hängt dann an.
+    fn append(&self, event_type: &str, stage_id: Option<Uuid>, payload: Value) -> Result<Event> {
+        let version = catalog::spec(event_type).map_or(1, |s| s.version);
+        catalog::validate(event_type, version, stage_id.as_ref(), &payload).map_err(invalid)?;
+        self.store.append(&self.me, event_type, stage_id, payload)
     }
 
     fn stage_state(&self, stage_id: &Uuid) -> Result<StageState> {
@@ -397,8 +403,7 @@ impl Review {
             }
         }
         let tx = self.store.conn().unchecked_transaction()?;
-        self.store.append(
-            &self.me,
+        self.append(
             "MemberRoleSet",
             None,
             json!({"actor_id": person.actor_id.to_string(), "role": role, "public_key": person.public_key}),
@@ -440,7 +445,7 @@ impl Review {
             "exclusion_reasons": str_list(data.get("exclusion_reasons")),
             "change_note": data.get("change_note").and_then(Value::as_str).unwrap_or_default(),
         });
-        self.store.append(&self.me, "CriteriaVersionPublished", None, payload.clone())?;
+        self.append("CriteriaVersionPublished", None, payload.clone())?;
         Ok(criteria_from(Some(&payload)))
     }
 
@@ -514,8 +519,7 @@ impl Review {
         batch.status = "done".into();
         batch.n_records = ids.len() as i64;
         batch.n_duplicates = n_duplicates;
-        self.store.append(
-            &self.me,
+        self.append(
             "RecordsImported",
             None,
             json!({
@@ -646,8 +650,7 @@ impl Review {
         }
         let criteria = criteria_from(state.criteria.as_ref());
         let sample_scope = params.scope == "sample";
-        self.store.append(
-            &self.me,
+        self.append(
             "StageInstanceOpened",
             Some(stage_id),
             json!({
@@ -670,7 +673,7 @@ impl Review {
         if !stage.blind_active() {
             return Err(conflict("Die Stufe ist nicht verblindet."));
         }
-        self.store.append(&self.me, "StageUnblinded", Some(*stage_id), json!({}))?;
+        self.append("StageUnblinded", Some(*stage_id), json!({}))?;
         Ok(())
     }
 
@@ -684,7 +687,7 @@ impl Review {
         }
         let label = format!("Abschluss {}", stage.config.name);
         let tx = self.store.conn().unchecked_transaction()?;
-        self.store.append(&self.me, "StageInstanceClosed", Some(*stage_id), json!({"label": label}))?;
+        self.append("StageInstanceClosed", Some(*stage_id), json!({"label": label}))?;
         let heads: Vec<Value> = self
             .store
             .heads()?
@@ -693,12 +696,7 @@ impl Review {
             .collect();
         let hash = sha256_hex(to_canonical(&Value::Array(heads.clone()))?.as_bytes());
         let n_heads = heads.len();
-        self.store.append(
-            &self.me,
-            "SnapshotTaken",
-            Some(*stage_id),
-            json!({"label": label, "heads": heads, "hash": hash}),
-        )?;
+        self.append("SnapshotTaken", Some(*stage_id), json!({"label": label, "heads": heads, "hash": hash}))?;
         tx.commit()?;
         Ok(Snapshot { label, hash, n_heads })
     }
@@ -754,7 +752,7 @@ impl Review {
             }
             None => "VoteCast",
         };
-        self.store.append(&self.me, event_type, Some(*stage_id), payload)?;
+        self.append(event_type, Some(*stage_id), payload)?;
         Ok(())
     }
 
@@ -766,12 +764,7 @@ impl Review {
             return Err(conflict("Die Stufe ist geschlossen."));
         }
         let record = self.require_assigned(stage_id, record_id)?.to_string();
-        self.store.append(
-            &self.me,
-            "RecordFlaggedUndecidable",
-            Some(*stage_id),
-            json!({"record_id": record, "note": note}),
-        )?;
+        self.append("RecordFlaggedUndecidable", Some(*stage_id), json!({"record_id": record, "note": note}))?;
         Ok(())
     }
 
@@ -798,8 +791,7 @@ impl Review {
         }
         let record = self.require_assigned(stage_id, record_id)?.to_string();
         let method = if method.is_empty() { "discussion" } else { method };
-        self.store.append(
-            &self.me,
+        self.append(
             "ConsensusRecorded",
             Some(*stage_id),
             json!({"record_id": record, "decision": decision, "method": method, "reasons": reasons, "note": note}),

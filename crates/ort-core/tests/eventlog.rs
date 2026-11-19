@@ -77,3 +77,30 @@ fn review_file_survives_reopen() {
     assert_eq!(again.list_item().unwrap().title, "Datei");
     assert!(again.verify_chain().unwrap().ok);
 }
+
+#[test]
+fn unknown_event_type_cannot_be_appended() {
+    let err = store().append(&person("a"), "Erfunden", None, json!({})).unwrap_err();
+    assert!(err.to_string().contains("Unbekannter Ereignistyp"), "{err}");
+}
+
+#[test]
+fn schema_steps_are_recorded_and_newer_files_are_refused() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("r.sqlite");
+    let me = person("owner");
+    let review = Review::create(&path, me.clone(), "Datei").unwrap();
+    let step = review.store().schema_step().unwrap();
+    assert!(step >= 1);
+    // Eine Datei der ersten App-Version trägt noch Schritt 0 und wird beim Öffnen nachgezogen.
+    review.store().conn().pragma_update(None, "user_version", 0).unwrap();
+    drop(review);
+    let again = Review::open(&path, me.clone()).unwrap();
+    assert_eq!(again.store().schema_step().unwrap(), step);
+    assert!(again.verify_chain().unwrap().ok);
+    // Eine Datei aus einer neueren App wird nicht angefasst.
+    again.store().conn().pragma_update(None, "user_version", step + 1).unwrap();
+    drop(again);
+    let err = Review::open(&path, me).err().unwrap();
+    assert!(err.to_string().contains("neueren Version"), "{err}");
+}
