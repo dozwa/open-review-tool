@@ -7,9 +7,10 @@
 //! Die Payload-Prüfung verlangt nur, was die Projektionen brauchen. Zusätzliche Felder sind erlaubt,
 //! damit ein Typ wachsen kann, ohne dass ältere Ereignisse ungültig werden.
 
-use serde_json::Value;
+use serde_json::{json, Value};
 use uuid::Uuid;
 
+use crate::criteria::valid_code;
 use crate::event::Event;
 use crate::service::ROLES;
 use crate::workflow::{GateResult, Template, CONFLICT_RULES, DECISION_RULES};
@@ -78,7 +79,7 @@ pub static CATALOG: [Spec; 15] = [
     },
     Spec {
         name: "CriteriaVersionPublished",
-        version: 1,
+        version: 2,
         chain: Chain::Main,
         writer: Writer::Manage,
         stage: StageRule::None,
@@ -218,7 +219,7 @@ pub fn validate_event(e: &Event) -> Check {
 pub fn upcast(e: &Event) -> Value {
     let mut payload = e.payload.clone();
     match e.event_type.as_str() {
-        "CriteriaVersionPublished" => upcast_criteria(e.schema_version, &mut payload),
+        "CriteriaVersionPublished" => upcast_criteria(&mut payload),
         "StageInstanceOpened" => upcast_stage(&mut payload),
         _ => {}
     }
@@ -232,16 +233,31 @@ fn upcast_stage(payload: &mut Value) {
     map.entry("round").or_insert_with(|| Value::from(1));
     map.entry("decision_rule").or_insert_with(|| Value::from("unanimous"));
     map.entry("conflict_rule").or_insert_with(|| Value::from("discussion"));
+    map.entry("reason_required").or_insert_with(|| Value::from(false));
 }
 
-/// Version 1 erlaubt fehlende Felder. Sie werden hier aufgefüllt, damit Leser nur eine Form kennen.
-/// Spätere Versionen (strukturierte Kriterien) setzen ihre Umformung hier davor.
-fn upcast_criteria(_from: i64, payload: &mut Value) {
+/// Version 1 kannte Freitext und frei benannte Ausschlussgründe. Der Text wird zu einem Kriterium
+/// ohne Kürzel; jeder alte Grund wird ein Ausschlusskriterium, dessen Kürzel der alte Wortlaut ist,
+/// damit die Gründe in Stimmen alter Stufen weiter passen.
+fn upcast_criteria(payload: &mut Value) {
     let Some(map) = payload.as_object_mut() else { return };
-    for key in ["text", "change_note"] {
+    if !map.get("items").is_some_and(Value::is_array) {
+        let mut items = Vec::new();
+        let text = map.get("text").and_then(Value::as_str).unwrap_or_default().trim().to_string();
+        if !text.is_empty() {
+            items.push(json!({"code": "", "element": "", "kind": "include", "text": text, "note": ""}));
+        }
+        for reason in map.get("exclusion_reasons").and_then(Value::as_array).into_iter().flatten() {
+            if let Some(reason) = reason.as_str() {
+                items.push(json!({"code": reason, "element": "", "kind": "exclude", "text": reason, "note": ""}));
+            }
+        }
+        map.insert("items".into(), Value::Array(items));
+    }
+    for key in ["guidance", "change_note"] {
         map.entry(key).or_insert_with(|| Value::String(String::new()));
     }
-    for key in ["include_keywords", "exclude_keywords", "exclusion_reasons"] {
+    for key in ["include_keywords", "exclude_keywords"] {
         map.entry(key).or_insert_with(|| Value::Array(Vec::new()));
     }
 }
@@ -323,6 +339,27 @@ fn criteria_version_published(p: &Value) -> Check {
     for key in ["include_keywords", "exclude_keywords", "exclusion_reasons"] {
         optional(p, key, text_list)?;
     }
+    optional(p, "guidance", is_text)?;
+    // Version 1 hat keine Liste; sie bleibt gültig und wird beim Lesen umgeformt.
+    let items = match p.get("items") {
+        None | Some(Value::Null) => return Ok(()),
+        Some(Value::Array(items)) => items,
+        Some(_) => return Err("Feld „items“ ist keine Liste.".into()),
+    };
+    let mut codes = std::collections::BTreeSet::new();
+    for item in items {
+        let code = text(item, "code")?;
+        if !valid_code(code) {
+            return Err(format!("Das Kürzel „{code}“ braucht ein bis acht Buchstaben oder Ziffern."));
+        }
+        if !codes.insert(code) {
+            return Err(format!("Das Kürzel „{code}“ kommt mehrfach vor."));
+        }
+        one_of(item, "kind", &["include", "exclude"])?;
+        filled(item, "text").map_err(|e| format!("Kriterium {code}: {e}"))?;
+        optional(item, "element", is_text)?;
+        optional(item, "note", is_text)?;
+    }
     Ok(())
 }
 
@@ -345,6 +382,10 @@ fn stage_instance_opened(p: &Value) -> Check {
     optional(p, "round", |p, key| integer(p, key, 1))?;
     optional(p, "decision_rule", |p, key| one_of(p, key, &DECISION_RULES))?;
     optional(p, "conflict_rule", |p, key| one_of(p, key, &CONFLICT_RULES))?;
+    optional(p, "reason_required", |p, key| match p[key].is_boolean() {
+        true => Ok(()),
+        false => Err(format!("Feld „{key}“ ist kein Wahrheitswert.")),
+    })?;
     optional(p, "verify", |p, key| {
         let v = &p[key];
         one_of(v, "scope", &["all", "sample"]).map_err(|e| format!("Feld „{key}“: {e}"))?;
@@ -390,6 +431,7 @@ fn snapshot_taken(p: &Value) -> Check {
 fn vote(p: &Value) -> Check {
     uuid(p, "record_id")?;
     one_of(p, "decision", &["include", "exclude", "maybe"])?;
+    optional(p, "primary_reason", filled)?;
     optional(p, "reasons", text_list)?;
     optional(p, "note", is_text)
 }
@@ -402,6 +444,7 @@ fn record_flagged(p: &Value) -> Check {
 fn consensus_recorded(p: &Value) -> Check {
     uuid(p, "record_id")?;
     one_of(p, "decision", &["include", "exclude"])?;
+    optional(p, "primary_reason", filled)?;
     optional(p, "reasons", text_list)?;
     optional(p, "note", is_text)
 }
@@ -427,11 +470,45 @@ mod tests {
             "stage_instance_id": null, "prev_hash": null, "hash": "", "signature": "",
         }))
         .unwrap();
-        e.payload = json!({"version": 1, "text": "Nur Erwachsene"});
+        e.payload = json!({"version": 1, "text": "Nur Erwachsene", "exclusion_reasons": ["Falsche Population"]});
+        let before = e.payload.clone();
         let current = upcast(&e);
-        assert_eq!(current["text"], "Nur Erwachsene");
-        assert_eq!(current["exclusion_reasons"], json!([]));
-        assert_eq!(e.payload, json!({"version": 1, "text": "Nur Erwachsene"}));
+        // der alte Text wird ein Kriterium ohne Kürzel, alte Gründe behalten ihren Wortlaut als Kürzel
+        assert_eq!(
+            current["items"][0],
+            json!({"code": "", "element": "", "kind": "include", "text": "Nur Erwachsene", "note": ""})
+        );
+        assert_eq!(
+            (current["items"][1]["code"].as_str(), current["items"][1]["kind"].as_str()),
+            (Some("Falsche Population"), Some("exclude"))
+        );
+        assert_eq!((&current["guidance"], &current["include_keywords"]), (&json!(""), &json!([])));
+        assert_eq!(e.payload, before);
+        // Version 2 bleibt, wie sie ist
+        e.schema_version = 2;
+        e.payload = json!({"version": 2, "items": [{"code": "E1", "kind": "exclude", "text": "Kinder"}]});
+        assert_eq!(upcast(&e)["items"], e.payload["items"]);
+    }
+
+    #[test]
+    fn criteria_items_need_unique_codes_and_text() {
+        let check =
+            |items: Value| validate("CriteriaVersionPublished", 2, None, &json!({"version": 1, "items": items}));
+        assert!(
+            check(json!([{"code": "I1", "element": "population", "kind": "include", "text": "Erwachsene"}])).is_ok()
+        );
+        assert!(check(json!([])).is_ok());
+        let e1 = json!({"code": "E1", "kind": "exclude", "text": "Kinder"});
+        assert!(check(json!([e1, e1])).unwrap_err().contains("mehrfach"));
+        assert!(check(json!([{"code": "E 1", "kind": "exclude", "text": "x"}])).unwrap_err().contains("Kürzel"));
+        assert!(check(json!([{"code": "", "kind": "exclude", "text": "x"}])).unwrap_err().contains("Kürzel"));
+        assert!(check(json!([{"code": "E1", "kind": "vielleicht", "text": "x"}]))
+            .unwrap_err()
+            .contains("unzulässigen"));
+        assert!(check(json!([{"code": "E1", "kind": "exclude", "text": " "}])).unwrap_err().contains("ist leer"));
+        assert!(check(json!("E1")).unwrap_err().contains("keine Liste"));
+        // die alte Form ohne Liste gilt weiter
+        assert!(validate("CriteriaVersionPublished", 1, None, &json!({"version": 1, "text": "frei"})).is_ok());
     }
 
     #[test]
@@ -462,6 +539,8 @@ mod tests {
         assert!(with(json!({"station": "title_abstract", "round": 2, "decision_rule": "liberal"})).is_ok());
         assert!(with(json!({"verify": {"scope": "sample", "percent": 20, "seed": 7}})).is_ok());
         assert!(with(json!({"verify": {"scope": "all"}})).is_ok());
+        assert!(with(json!({"reason_required": true})).is_ok());
+        assert!(with(json!({"reason_required": "ja"})).unwrap_err().contains("Wahrheitswert"));
         assert!(with(json!({"decision_rule": "mehrheit"})).unwrap_err().contains("unzulässigen Wert"));
         assert!(with(json!({"conflict_rule": "münze"})).unwrap_err().contains("unzulässigen Wert"));
         assert!(with(json!({"round": 0})).unwrap_err().contains("kleiner als 1"));
@@ -500,6 +579,13 @@ mod tests {
             ("VoteCast", 1, Some(&stage), json!({"record_id": "r1", "decision": "include"}), "keine gültige ID"),
             ("VoteCast", 1, Some(&stage), json!({"record_id": record, "decision": "ja"}), "unzulässigen Wert"),
             ("VoteCast", 1, Some(&stage), json!({"record_id": record, "decision": "include", "reasons": [1]}), "Liste"),
+            (
+                "VoteCast",
+                1,
+                Some(&stage),
+                json!({"record_id": record, "decision": "exclude", "primary_reason": ""}),
+                "leer",
+            ),
             ("ConsensusRecorded", 1, Some(&stage), json!({"record_id": record, "decision": "maybe"}), "unzulässigen"),
             ("MemberRoleSet", 1, None, json!({"actor_id": record, "role": "chef"}), "unzulässigen Wert"),
             ("StageInstanceOpened", 1, Some(&stage), json!({"name": " ", "blind": true}), "ist leer"),

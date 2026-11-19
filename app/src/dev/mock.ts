@@ -5,20 +5,33 @@
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 
 const me = { actor_id: "a1b2c3d4-0000-4000-8000-000000000001", name: "Dorian Zwanzig", public_key: "x" };
+const criterion = (code: string, kind: string, element: string, text: string, note = "") => ({ code, kind, element, text, note });
 const criteria = {
   version: 2,
   previous_version: 1,
-  text: "Eingeschlossen werden Originalstudien zu digitalen Interventionen bei Menschen mit Migräne (alle Altersgruppen).\nAusgeschlossen: andere Kopfschmerzarten, Editorials, Protokolle ohne Daten.",
+  items: [
+    criterion("I1", "include", "population", "Menschen mit Migräne, alle Altersgruppen"),
+    criterion("I2", "include", "concept", "Digitale Intervention, z. B. App oder Telemedizin", "Auch Wearables, wenn sie Rückmeldung geben"),
+    criterion("I3", "include", "source_type", "Originalstudie, auch qualitativ"),
+    criterion("E1", "exclude", "population", "Falsche Population", "Andere Kopfschmerzarten ohne eigene Auswertung für Migräne"),
+    criterion("E2", "exclude", "concept", "Keine digitale Intervention"),
+    criterion("E3", "exclude", "source_type", "Kein Originalbeitrag", "Editorials, Kommentare, Übersichtsarbeiten"),
+    criterion("E4", "exclude", "source_type", "Protokoll ohne Daten"),
+  ],
+  guidance: "Im Zweifel bei Titel und Abstract einschließen; entschieden wird am Volltext.\nGemischte Stichproben zählen, wenn Migräne getrennt ausgewertet ist.",
   include_keywords: ["migraine", "smartphone", "app", "telemedicine"],
   exclude_keywords: ["editorial", "protocol", "tension-type"],
-  exclusion_reasons: ["Falsche Population", "Keine digitale Intervention", "Kein Originalbeitrag", "Protokoll ohne Daten"],
   change_note: "Qualitative Studien ausdrücklich eingeschlossen",
 };
+const criteriaSchema = [
+  { key: "population", label: "Population" }, { key: "concept", label: "Concept" },
+  { key: "context", label: "Context" }, { key: "source_type", label: "Quellenart" },
+];
 const stage = (id: string, name: string, kind: string, extra: Record<string, unknown>) => ({
   id, review_id: "r1", name, kind, blind: true, min_reviewers: 2, maybe_as: null, scope: "all",
   sample_size: null, seed: null, n_records: 38, opened_at: "2026-11-12T09:00:00Z",
   unblinded: false, closed: false, blind_active: true, station: kind, round: 1,
-  decision_rule: "unanimous", conflict_rule: "discussion", verify: null, ...extra,
+  decision_rule: "unanimous", conflict_rule: "discussion", verify: null, reason_required: false, criteria_version: "2", ...extra,
 });
 const pilotDone = { n_records: 25, unblinded: true, closed: true, blind_active: false, maybe_as: "include" };
 const stages = [
@@ -26,6 +39,8 @@ const stages = [
   stage("s1", "Pilot Titel/Abstract (Runde 2)", "pilot_title_abstract", { ...pilotDone, seed: 77, round: 2 }),
   stage("s2", "Titel/Abstract", "title_abstract", { unblinded: true, blind_active: false, maybe_as: "include" }),
 ];
+// Zum Ansehen der verblindeten Ansicht mit Pflichtgrund: /#/reviews/r1/stages/s3/screen
+const fulltextStage = stage("s3", "Volltext-Screening", "fulltext", { n_records: 12, reason_required: true, criteria_version: "1" });
 
 // Ablauf wie ihn der Kern für die Vorlage „JBI Scoping Review“ liefert, mitten im Titel/Abstract-Screening.
 const rule = <T,>(value: T, editable = true) => ({ value, editable });
@@ -40,7 +55,7 @@ const gate = (agree: number, n: number) => ({
 const station = (key: string, kind: string, label: string, description: string, extra: Record<string, unknown> = {}) => ({
   key, kind, label, description, tool: null, state: "locked", available: kind === "screening", blocking: false,
   blocked_by: [{ key: "title_abstract", label: "Titel/Abstract" }], checks: [], rounds: [], overridden: null, free_rounds: false,
-  defaults: kind === "screening" ? { name: label, round: 1, scope: "all", sample_size: null, source_stage: null, rules } : null,
+  defaults: kind === "screening" ? { name: label, round: 1, scope: "all", sample_size: null, source_stage: null, rules, reason_required: false } : null,
   ...extra,
 });
 const done = { state: "done", available: true, blocking: true, blocked_by: [] };
@@ -63,7 +78,7 @@ const jbiStations = [
       { round: 1, stage_id: "s0", name: "Pilot Titel/Abstract", closed: true, gate: gate(17, 25) },
       { round: 2, stage_id: "s1", name: "Pilot Titel/Abstract (Runde 2)", closed: true, gate: gate(21, 25) },
     ],
-    defaults: { name: "Pilot Titel/Abstract (Runde 3)", round: 3, scope: "sample", sample_size: 25, source_stage: null, rules: { ...rules, decision_rule: rule("unanimous", false) } },
+    defaults: { name: "Pilot Titel/Abstract (Runde 3)", round: 3, scope: "sample", sample_size: 25, source_stage: null, rules: { ...rules, decision_rule: rule("unanimous", false) }, reason_required: false },
   }),
   station("title_abstract", "screening", "Titel/Abstract", "Alle Einträge ohne Dubletten, danach Klärung der Abweichungen.", {
     state: "running", blocking: true, blocked_by: [],
@@ -75,7 +90,7 @@ const jbiStations = [
   }),
   station("fulltext_retrieval", "setup", "Volltexte beschaffen", "Jeder eingeschlossene Eintrag ist beschafft oder mit Grund nicht beschaffbar.", { tool: "fulltext" }),
   station("fulltext", "screening", "Volltext-Screening", "Eingeschlossene aus Titel/Abstract am Volltext prüfen, danach Klärung.", {
-    blocking: true, defaults: { name: "Volltext-Screening", round: 1, scope: "from_stage", sample_size: null, source_stage: "s2", rules },
+    blocking: true, defaults: { name: "Volltext-Screening", round: 1, scope: "from_stage", sample_size: null, source_stage: "s2", rules, reason_required: true },
   }),
   station("citation_search", "setup", "Zitationssuche", "Vorwärts und rückwärts suchen, bis nichts Neues mehr kommt.", { tool: "citation" }),
   station("bundling", "setup", "Quellen bündeln", "Begleitpublikationen derselben Studie zu einer Quelle zusammenfassen.", { tool: "bundling" }),
@@ -86,17 +101,17 @@ const jbiStations = [
 const terms = { record: "Eintrag", records: "Einträge", source: "Quelle", sources: "Quellen", extraction: "Charting" };
 const jbiWorkflow = {
   published: true, version: 1, template_key: "jbi_scoping", template_name: "JBI Scoping Review", review_type: "scoping", terms,
-  stations: jbiStations,
+  criteria_schema: criteriaSchema, stations: jbiStations,
 };
 // Ein Review aus der Zeit vor den Vorlagen: freier Ablauf, nichts gesperrt.
 const freeWorkflow = {
   published: false, version: 0, template_key: "free", template_name: "Freier Ablauf", review_type: "free", terms,
-  stations: [
+  criteria_schema: [], stations: [
     station("protocol", "setup", "Kriterien und Team", "Kriterien festhalten und Personen hinzufügen.", { state: "open", available: true, tool: "protocol", blocked_by: [] }),
     station("import", "setup", "Import", "Treffer einlesen; Dubletten werden erkannt und gezählt.", { state: "open", available: true, tool: "import", blocked_by: [] }),
     station("screening", "screening", "Screening", "Beliebig viele Stufen, auch nebeneinander.", {
       state: "open", blocked_by: [], free_rounds: true,
-      defaults: { name: "Screening", round: 1, scope: "all", sample_size: null, source_stage: null, rules: { ...rules, min_reviewers: rule(1), maybe_as: rule(null), blind: rule(false) } },
+      defaults: { name: "Screening", round: 1, scope: "all", sample_size: null, source_stage: null, rules: { ...rules, min_reviewers: rule(1), maybe_as: rule(null), blind: rule(false) }, reason_required: false },
     }),
   ],
 };
@@ -123,8 +138,30 @@ const records = [
     "A prospective cohort study evaluating telemedicine consultation in adolescents with migraine. Outcomes were school absence and headache days over 24 weeks."),
   record(3, "Wearable biofeedback for patients with tension-type headache: editorial",
     "An editorial commentary on the use of wearable biofeedback devices in patients with tension-type headache. No original data are reported."),
+  record(4, "Digital headache diaries in primary care: a qualitative interview study",
+    "Semi-structured interviews with 24 adults with migraine about keeping a digital headache diary in a smartphone app."),
+  record(5, "Protocol for a trial of app-delivered relaxation training in chronic migraine",
+    "Study protocol. Participants will be randomised to app-delivered relaxation training or waiting list. No results are reported."),
+  record(6, "Acupuncture versus sham for episodic migraine: a multicentre trial",
+    "A multicentre randomised trial comparing acupuncture with sham acupuncture in adults with episodic migraine."),
+  record(7, "Remote monitoring of medication overuse with a smartphone app", ""),
+  record(8, "Web-based cognitive behavioural therapy for children with migraine: pilot study",
+    "A pilot study of a web-based programme for children aged 8 to 12 years with migraine and their parents."),
 ];
-let screened = 0;
+// Stand der Liste: eigene Stimme und, entblindet sichtbar, Stimmenzahl und Status je Eintrag.
+const listState: Record<string, { mine: string | null; primary: string | null; n: number; status: string }> = {
+  "rec-1": { mine: "include", primary: null, n: 2, status: "unanimous" },
+  "rec-2": { mine: "include", primary: null, n: 2, status: "disagreement" },
+  "rec-3": { mine: "exclude", primary: "E3", n: 2, status: "unanimous" },
+  "rec-4": { mine: null, primary: null, n: 1, status: "pending" },
+  "rec-5": { mine: null, primary: null, n: 1, status: "pending" },
+  "rec-6": { mine: null, primary: null, n: 0, status: "pending" },
+  "rec-7": { mine: null, primary: null, n: 1, status: "needs_clarification" },
+  "rec-8": { mine: null, primary: null, n: 0, status: "pending" },
+};
+const stageOf = (id: unknown) => [...stages, fulltextStage].find((x) => x.id === id) ?? stages[1];
+const nextOpen = () => records.find((r) => !listState[r.id].mine) ?? null;
+const doneCount = () => records.filter((r) => listState[r.id].mine).length;
 
 export function installMock() {
   mockWindows("main");
@@ -155,13 +192,57 @@ export function installMock() {
         ],
       };
       case "stage_detail": {
-        const s = stages.find((x) => x.id === a.stageId) ?? stages[1];
-        return { stage: s, role: "owner", progress: { done: 31 + screened, total: s.n_records }, criteria, terms };
+        const s = stageOf(a.stageId);
+        const old = s.criteria_version === "1";
+        return {
+          stage: s, role: "owner", progress: { done: doneCount(), total: records.length },
+          criteria: old ? { ...criteria, version: 1, previous_version: null } : criteria, newer_criteria: old,
+          criteria_schema: criteriaSchema, members, terms,
+        };
       }
-      case "stage_next": return { record: records[screened % records.length], progress: { done: 31 + screened, total: 38 } };
-      case "vote_cast": case "record_flag": screened += 1; return null;
+      case "stage_next": return { record: nextOpen(), progress: { done: doneCount(), total: records.length } };
+      case "stage_records": {
+        const blind = stageOf(a.stageId).blind_active;
+        const f = (a.filter ?? {}) as Record<string, string | number | null>;
+        const text = (r: (typeof records)[number]) => `${r.title}\n${r.abstract}`.toLowerCase();
+        const hits = records.filter((r) => {
+          const st = listState[r.id];
+          if (f.decision === "open" && st.mine) return false;
+          if (f.decision === "conflict" && !["disagreement", "needs_clarification"].includes(st.status)) return false;
+          if (["include", "exclude", "maybe"].includes(String(f.decision)) && st.mine !== f.decision) return false;
+          if (typeof f.votes_min === "number" && st.n < f.votes_min) return false;
+          if (typeof f.votes_max === "number" && st.n > f.votes_max) return false;
+          if (f.keyword && !text(r).includes(String(f.keyword).toLowerCase())) return false;
+          return !f.query || text(r).includes(String(f.query).toLowerCase());
+        });
+        const count = (kind: string) => (keyword: string) => ({ keyword, kind, n: records.filter((r) => text(r).includes(keyword)).length });
+        return {
+          items: hits.map((r) => {
+            const st = listState[r.id];
+            return { id: r.id, title: r.title, year: r.year, my_decision: st.mine, n_votes: blind ? null : st.n, status: blind ? null : st.status, decision: null };
+          }),
+          total: hits.length,
+          keywords: [...criteria.include_keywords.map(count("include")), ...criteria.exclude_keywords.map(count("exclude"))],
+          locked: blind ? ["conflict", "person", "votes"] : [],
+        };
+      }
+      case "stage_record": {
+        const st = listState[String(a.recordId)];
+        return {
+          record: records.find((r) => r.id === a.recordId),
+          my_vote: st?.mine ? { decision: st.mine, primary_reason: st.primary, reasons: [], note: "" } : null,
+        };
+      }
+      case "vote_cast": {
+        const st = listState[String(a.recordId)];
+        if (!st.mine) st.n += 1;
+        st.mine = String(a.decision);
+        st.primary = (a.primaryReason as string | null) ?? null;
+        return null;
+      }
+      case "record_flag": listState[String(a.recordId)].mine = "maybe"; return null;
       case "stage_summary": {
-        const s = stages.find((x) => x.id === a.stageId) ?? stages[1];
+        const s = stageOf(a.stageId);
         const reviewers = [{ name: "Anna Berger", n_votes: 38 }, { name: "Ben Krüger", n_votes: 32 }, { name: "Clara Weiß", n_votes: 15 }, { name: me.name, n_votes: 31 }];
         if (s.blind_active) return { stage: s, progress: { done: 4, total: s.n_records }, reviewers, decisions: null, agreement: null };
         const est = (v: number, lo: number, hi: number) => ({ value: v, ci_low: lo, ci_high: hi, level: 0.95, n_items: 32, n_boot: 1000, seed: 20261117 });
@@ -182,11 +263,11 @@ export function installMock() {
       }
       case "stage_conflicts": return [
         { record: records[1], status: "disagreement", votes: [
-          { name: "Anna Berger", decision: "include", reasons: [], note: "" },
-          { name: "Ben Krüger", decision: "exclude", reasons: ["Falsche Population"], note: "Nur Jugendliche?" },
+          { name: "Anna Berger", decision: "include", primary_reason: null, reasons: [], note: "" },
+          { name: "Ben Krüger", decision: "exclude", primary_reason: "E1", reasons: [], note: "Nur Jugendliche?" },
         ] },
         { record: { ...records[2], abstract: "" }, status: "needs_clarification", votes: [
-          { name: "Clara Weiß", decision: "maybe", reasons: [], note: "Kein Abstract vorhanden, Volltext nötig." },
+          { name: "Clara Weiß", decision: "maybe", primary_reason: null, reasons: [], note: "Kein Abstract vorhanden, Volltext nötig." },
         ] },
       ];
       case "chain_verify": return { n_events: 214, n_bad: 0, problems: [], ok: true };

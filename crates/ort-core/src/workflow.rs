@@ -103,6 +103,9 @@ pub struct Station {
     /// Mehrere Stufen dürfen gleichzeitig offen sein.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub free_rounds: bool,
+    /// Jeder Ausschluss braucht genau einen Hauptgrund (Volltext).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reason_required: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -448,6 +451,7 @@ pub struct StageDefaults {
     pub sample_size: Option<i64>,
     pub source_stage: Option<Uuid>,
     pub rules: Rules,
+    pub reason_required: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -657,6 +661,7 @@ impl Workflow {
                     sample_size: input.and_then(|i| i.sample_size),
                     source_stage,
                     rules: self.template.rules_for(station),
+                    reason_required: station.reason_required,
                 }
             });
             out.push(StationView {

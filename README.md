@@ -6,12 +6,12 @@ Verblindung, Klärung und Snapshots, eine Auswertung der Übereinstimmung mit Ko
 Zusammenarbeit ohne Server über Austauschdateien.
 
 > Status (19.11.2026): Mac-App mit Rust und Tauri 2. Der vollständige Ablauf eines Scoping Reviews wird nach
-> `docs/umsetzungsplan.md` in Meilensteinen gebaut; fertig sind 0 (Fundament) und 1 (Vorlage und Ablauf).
+> `docs/umsetzungsplan.md` in Meilensteinen gebaut; fertig sind 0 (Fundament), 1 (Vorlage und Ablauf) und 2 (Kriterien und Screening-Ansicht).
 > Enthalten: Identität mit Schlüssel im Schlüsselbund, Reviews mit Rollen, Review-Typ als Vorlage mit Stationen,
-> Gates und Runden, Import von RIS und BibTeX, Stufen mit drei Auswahlregeln, verblindetes Screening, Konflikte
-> und Konsens (auch als Dritt-Entscheid), Übereinstimmung, CSV-Export, Pakete und Rückmeldungen.
-> Noch nicht enthalten: strukturierte Kriterien, Suchdokumentation, Volltexte, Zotero, Charting, Bericht,
-> signierte und notarisierte App.
+> Gates und Runden, Kriterien mit Kürzeln und Erläuterungen, Import von RIS und BibTeX, Stufen mit drei
+> Auswahlregeln, verblindetes Screening in drei Spalten mit Filtern, Pflichtgrund im Volltext, Konflikte und
+> Konsens (auch als Dritt-Entscheid), Übereinstimmung, CSV-Export, Pakete und Rückmeldungen.
+> Noch nicht enthalten: Suchdokumentation, Volltexte, Zotero, Charting, Bericht, signierte und notarisierte App.
 
 ## So arbeitet ein Team
 
@@ -25,8 +25,8 @@ Es gibt keinen Server. Jede Person hat die App und eine eigene Kopie des Reviews
 3. **Verteilen:** Für jedes Mitglied speichert die Leitung ein Paket (`.ortpkg`). Bei einer verblindeten Stufe
    enthält das Paket nur die eigenen Stimmen der Person. Was nicht in der Datei steht, kann niemand sehen; die
    Verblindung hängt also nicht an der Oberfläche.
-4. **Screenen:** Das Mitglied liest das Paket ein, screent (Tasten `i`, `e`, `m`) und speichert eine Rückmeldung
-   (`.ortvotes`) mit seinen signierten Entscheidungen.
+4. **Screenen:** Das Mitglied liest das Paket ein, screent (Tasten `i`, `e`, `m`, Ausschlussgrund mit `1` bis `9`)
+   und speichert eine Rückmeldung (`.ortvotes`) mit seinen signierten Entscheidungen.
 5. **Zusammenführen:** Die Leitung liest die Rückmeldungen ein, entblindet, klärt Konflikte, schließt die Stufe mit
    Snapshot und verteilt neue Pakete.
 
@@ -52,7 +52,7 @@ die Schlüsselbund-Sicherung von macOS.
 
 | Pfad | Inhalt |
 | --- | --- |
-| `crates/ort-core/` | Fachkern ohne Oberfläche: Event-Log (`event.rs`, `store.rs`), Register der Ereignistypen (`catalog.rs`), Projektionen, Vorlagen und Ablauf (`workflow.rs`), Übereinstimmung, Import, Fachlogik (`service.rs`), Austausch (`exchange.rs`) |
+| `crates/ort-core/` | Fachkern ohne Oberfläche: Event-Log (`event.rs`, `store.rs`), Register der Ereignistypen (`catalog.rs`), Projektionen, Vorlagen und Ablauf (`workflow.rs`), Kriterien (`criteria.rs`), Übereinstimmung, Import, Fachlogik (`service.rs`), Austausch (`exchange.rs`) |
 | `crates/ort-core/templates/` | Mitgelieferte Vorlagen: „JBI Scoping Review“ und „Freier Ablauf“ |
 | `crates/ort-core/tests/` | Tests für Log, Projektionen, Referenzwerte, Import, Austausch, Vorlagen und Gates und den Ablauf mit vier Personen |
 | `app/src-tauri/` | Tauri-Hülle: Befehle für die Oberfläche, Identität und Schlüsselbund |
@@ -65,7 +65,7 @@ Tauri 2 mit der WebView von macOS, React 18.
 
 ## Wie es geprüft ist
 
-- **Kern:** 77 Tests. Darunter die Referenzwerte der früheren SQL-Tests (Cohen's Kappa gegen scikit-learn,
+- **Kern:** 86 Tests. Darunter die Referenzwerte der früheren SQL-Tests (Cohen's Kappa gegen scikit-learn,
   Fleiss' Kappa am Wikipedia-Beispiel, Krippendorffs Alpha am publizierten Beispiel mit 0,743, PABAK, Prozent,
   sechs `final_decision`-Szenarien, Maybe-Regel). Die Werte erzeugt `crates/ort-core/tests/fixtures/make_agreement_fixtures.py`.
 - **Austausch:** veränderte Datei, nachträglich neu gehashte Datei ohne Signatur, Außenstehende, Lücken in einer
@@ -73,6 +73,9 @@ Tauri 2 mit der WebView von macOS, React 18.
 - **Vorlagen und Gates:** Pilot unter 75 % sperrt Titel/Abstract, eine neue Runde oder ein Übersteuern mit
   Begründung öffnet es; `liberal` und `single_verified` gegen Handrechnung; die Prüfstichprobe lässt sich aus Seed
   und ID nachrechnen; Dritt-Entscheid wird auch beim Einlesen erzwungen; derselbe Durchlauf mit beiden Vorlagen.
+- **Kriterien und Gründe:** Volltext-Ausschluss ohne Hauptgrund oder mit unbekanntem Kürzel wird in der App und
+  beim Einlesen abgewiesen, ebenso ein solcher Konsens; eine Stufe prüft gegen ihre eigene Kriterienversion;
+  Filter nach Konflikt, Person und Stimmenzahl sind verblindet auch bei der Leitung gesperrt.
 - **Ablauf:** Owner, zwei Reviewer und eine Person mit Leserecht mit getrennten Dateien, nur über Pakete und
   Rückmeldungen: verblindetes Screening, Paket ohne fremde Stimmen, Entblinden, Konflikte, Konsens, Revision,
   CSV, Abschluss mit Snapshot, abgewiesene Nachzügler, Folgestufe, Prüfung aller Ketten.
@@ -118,6 +121,10 @@ Nur für Entwicklung und Tests.
   Leiste als „folgt“ und sperren nichts.
 - **Eine Stimme mit Prüfung (`single_verified`):** Die Stufe ist nie verblindet, weil die zweite Person die
   Ausschlüsse sehen muss. Wer was schon bewertet hat, weiß eine Person erst nach dem nächsten Paket.
+- **Gründe:** Ausschlussgründe sind die Kürzel der Ausschlusskriterien. Beim Einlesen werden sie nur in Stufen
+  mit Pflichtgrund geprüft, damit ältere Logs mit frei getippten Gründen einlesbar bleiben. Nennen zwei Personen
+  verschiedene Hauptgründe für denselben Ausschluss, gilt der Eintrag als ausgeschlossen; welcher Grund im
+  Bericht zählt, ist noch offen.
 - **Reihenfolge über Personen hinweg:** nach Zeitstempel; falsch gehende Uhren können die Reihenfolge von Konsens
   oder Rollenwechseln verschieben.
 

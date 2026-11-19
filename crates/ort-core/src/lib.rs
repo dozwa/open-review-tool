@@ -13,6 +13,7 @@
 pub mod agreement;
 pub mod canonical;
 pub mod catalog;
+pub mod criteria;
 pub mod error;
 pub mod event;
 pub mod exchange;

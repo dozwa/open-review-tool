@@ -23,10 +23,11 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::catalog::{self, is_blindable, StageRule, Writer};
+use crate::criteria::{check_reasons, Criteria};
 use crate::error::{conflict, forbidden, integrity, invalid, not_found, Error, Result};
 use crate::event::{now_timestamp, parse_public_key, stream_for, Event, Identity, PublicIdentity, MAIN_STREAM};
-use crate::projection::{order_key, ReviewState, StageState};
-use crate::service::{require, Review, MANAGE_ROLES, ROLES, WRITE_ROLES};
+use crate::projection::{order_key, string_list, ReviewState, StageState};
+use crate::service::{require, stage_criteria, Review, MANAGE_ROLES, ROLES, WRITE_ROLES};
 use crate::store::{AssignmentRow, BatchRow, Head, RecordRow, Store};
 
 pub const BUNDLE_FORMAT: &str = "ort-bundle";
@@ -344,6 +345,11 @@ pub fn merge(review: &Review, bundle: &Bundle) -> Result<MergeReport> {
             .filter(|s| s.config.conflict_rule == "third_person")
             .flat_map(|s| s.votes.keys().map(|(record, actor)| (s.config.id, record.clone(), *actor)))
             .collect(),
+        reason_rules: merged_stages
+            .iter()
+            .filter(|s| s.config.reason_required)
+            .map(|s| (s.config.id, stage_criteria(&merged_state, s)))
+            .collect(),
     };
 
     let mut report = MergeReport::default();
@@ -467,11 +473,14 @@ struct MergeContext<'a> {
     blind_after: BTreeSet<Uuid>,
     /// (Stufe, Eintrag, Person) für Stufen mit Dritt-Entscheid.
     own_votes: BTreeSet<(Uuid, String, Uuid)>,
+    /// Kriterien der Stufen, in denen jeder Ausschluss einen Hauptgrund braucht.
+    reason_rules: BTreeMap<Uuid, Criteria>,
 }
 
 /// Prüft ein einzelnes fremdes Ereignis gegen das Register: Rolle, Kette, Stufe und Payload.
 fn authorize(e: &Event, context: &MergeContext) -> std::result::Result<(), String> {
-    let MergeContext { roles, has_created, known_stages, closed_before, blind_after, own_votes } = context;
+    let MergeContext { roles, has_created, known_stages, closed_before, blind_after, own_votes, reason_rules } =
+        context;
     let has_created = *has_created;
     let role = roles.get(&e.actor_id).map(String::as_str).unwrap_or("");
     let t = e.event_type.as_str();
@@ -502,6 +511,10 @@ fn authorize(e: &Event, context: &MergeContext) -> std::result::Result<(), Strin
         let record = e.payload_str("record_id").unwrap_or_default().to_string();
         if t == "ConsensusRecorded" && own_votes.contains(&(stage, record, e.actor_id)) {
             return Err("Dritt-Entscheid: Diese Person hat zu dem Eintrag selbst abgestimmt.".into());
+        }
+        if let (Some(criteria), Some(decision)) = (reason_rules.get(&stage), e.payload_str("decision")) {
+            let reasons = string_list(e.payload.get("reasons"));
+            check_reasons(criteria, true, decision, e.payload_str("primary_reason"), &reasons)?;
         }
     }
     Ok(())
@@ -551,6 +564,7 @@ mod tests {
                 closed_before: closed.clone(),
                 blind_after: blind.clone(),
                 own_votes: BTreeSet::new(),
+                reason_rules: BTreeMap::new(),
             };
         let roles: &'static HashMap<Uuid, String> = Box::leak(Box::new(roles));
         let check =

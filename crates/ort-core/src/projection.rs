@@ -45,7 +45,10 @@ pub struct ReviewState {
     pub title: String,
     pub owner: Option<Uuid>,
     pub members: BTreeMap<Uuid, Member>,
+    /// Neueste Kriterienversion in der aktuellen Form.
     pub criteria: Option<Value>,
+    /// Alle Kriterienversionen; eine Stufe prüft gegen die, mit der sie geöffnet wurde.
+    pub criteria_versions: BTreeMap<i64, Value>,
     /// Stufen in der Reihenfolge ihrer Eröffnung.
     pub stage_ids: Vec<Uuid>,
 }
@@ -53,7 +56,6 @@ pub struct ReviewState {
 impl ReviewState {
     pub fn build(events: &[Event]) -> ReviewState {
         let mut state = ReviewState::default();
-        let mut criteria_key: Option<(i64, &Event)> = None;
         let mut seen_stages = BTreeSet::new();
         for e in sorted(events) {
             match e.event_type.as_str() {
@@ -73,10 +75,9 @@ impl ReviewState {
                     }
                 }
                 "CriteriaVersionPublished" => {
+                    // sortiert nach Ordnung: bei gleicher Nummer gilt die später veröffentlichte
                     let version = e.payload.get("version").and_then(Value::as_i64).unwrap_or(0);
-                    if criteria_key.is_none_or(|(v, _)| version >= v) {
-                        criteria_key = Some((version, e));
-                    }
+                    state.criteria_versions.insert(version, catalog::upcast(e));
                 }
                 "StageInstanceOpened" => {
                     if let Some(id) = e.stage_instance_id {
@@ -88,7 +89,7 @@ impl ReviewState {
                 _ => {}
             }
         }
-        state.criteria = criteria_key.map(|(_, e)| catalog::upcast(e));
+        state.criteria = state.criteria_versions.values().next_back().cloned();
         state
     }
 
@@ -121,6 +122,8 @@ pub struct StageConfig {
     pub decision_rule: String,
     pub conflict_rule: String,
     pub verify: Option<Verify>,
+    /// Jeder Ausschluss braucht genau einen Hauptgrund aus den Kriterien der Stufe.
+    pub reason_required: bool,
 }
 
 /// Zweite Stimme für Ausschlüsse bei der Regel `single_verified`.
@@ -149,6 +152,7 @@ impl Verify {
 #[derive(Clone, Debug)]
 pub struct VoteInfo {
     pub decision: String,
+    pub primary_reason: Option<String>,
     pub reasons: Vec<String>,
     pub note: String,
     pub seq: i64,
@@ -158,6 +162,7 @@ pub struct VoteInfo {
 pub struct ConsensusInfo {
     pub decision: String,
     pub method: String,
+    pub primary_reason: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -219,6 +224,7 @@ impl StageState {
             decision_rule: s("decision_rule").unwrap_or_else(|| "unanimous".into()),
             conflict_rule: s("conflict_rule").unwrap_or_else(|| "discussion".into()),
             verify: p.get("verify").and_then(|v| serde_json::from_value(v.clone()).ok()),
+            reason_required: p.get("reason_required").and_then(Value::as_bool).unwrap_or(false),
         };
         let mut state = StageState {
             config,
@@ -236,6 +242,7 @@ impl StageState {
                 ("VoteCast" | "VoteRevised", Some(record)) => {
                     let info = VoteInfo {
                         decision: e.payload_str("decision").unwrap_or_default().to_string(),
+                        primary_reason: e.payload_str("primary_reason").map(str::to_string),
                         reasons: string_list(e.payload.get("reasons")),
                         note: e.payload_str("note").unwrap_or_default().to_string(),
                         seq: e.seq,
@@ -252,6 +259,7 @@ impl StageState {
                         ConsensusInfo {
                             decision: e.payload_str("decision").unwrap_or_default().to_string(),
                             method: e.payload_str("method").unwrap_or_default().to_string(),
+                            primary_reason: e.payload_str("primary_reason").map(str::to_string),
                         },
                     );
                 }

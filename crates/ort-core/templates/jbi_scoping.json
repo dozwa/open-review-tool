@@ -75,8 +75,9 @@
       "key": "fulltext",
       "kind": "screening",
       "label": "Volltext-Screening",
-      "description": "Eingeschlossene aus Titel/Abstract am Volltext prüfen, danach Klärung.",
+      "description": "Eingeschlossene aus Titel/Abstract am Volltext prüfen, danach Klärung. Jeder Ausschluss braucht genau einen Hauptgrund.",
       "input": { "scope": "from_station", "station": "title_abstract" },
+      "reason_required": true,
       "gate": [{ "check": "all_decided" }, { "check": "no_open_conflicts" }]
     },
     {

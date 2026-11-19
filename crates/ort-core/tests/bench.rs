@@ -14,7 +14,7 @@ use std::time::Instant;
 
 use common::person;
 use ort_core::exchange::export_package;
-use ort_core::service::OpenStage;
+use ort_core::service::{OpenStage, RecordFilter};
 use ort_core::Review;
 use serde_json::json;
 
@@ -65,8 +65,13 @@ fn large_review() {
     timed("Review-Übersicht (detail)", || owner.detail().unwrap());
     timed("Stufe (stage_detail)", || owner.stage_detail(&stage.id).unwrap());
     timed("Nächster Eintrag (next_record)", || owner.next_record(&stage.id).unwrap());
+    timed("Liste der Screening-Seite (stage_records)", || {
+        owner.stage_records(&stage.id, &RecordFilter::default()).unwrap().total
+    });
+    let search = RecordFilter { query: Some("nummer 1999".into()), ..RecordFilter::default() };
+    timed("Liste mit Suche", || owner.stage_records(&stage.id, &search).unwrap().total);
     let first = records[0].id.to_string();
-    timed("Eine Stimme abgeben (cast_vote)", || owner.cast_vote(&stage.id, &first, "include", &[], "").unwrap());
+    timed("Eine Stimme abgeben (cast_vote)", || owner.cast_vote(&stage.id, &first, "include", None, &[], "").unwrap());
     timed("Paket für eine Person, verblindet", || {
         export_package(&owner, &a.actor_id).unwrap().to_json().unwrap().len()
     });

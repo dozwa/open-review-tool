@@ -53,6 +53,21 @@ pub const BIBTEX: &str = "@article{novak2019,
 }
 ";
 
+/// Kriterien in der Form mit Kürzeln: ein Einschluss- und zwei Ausschlusskriterien.
+pub fn criteria(change_note: &str) -> serde_json::Value {
+    serde_json::json!({
+        "items": [
+            {"code": "I1", "kind": "include", "text": "Erwachsene mit Kopfschmerz", "note": "auch Migräne"},
+            {"code": "E1", "kind": "exclude", "text": "Falsche Population"},
+            {"code": "E2", "kind": "exclude", "text": "Keine Primärstudie"},
+        ],
+        "guidance": "Im Zweifel einschließen.",
+        "include_keywords": "headache, migraine",
+        "exclude_keywords": ["review"],
+        "change_note": change_note,
+    })
+}
+
 pub fn person(name: &str) -> Identity {
     Identity::generate(name).unwrap()
 }

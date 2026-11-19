@@ -2,11 +2,11 @@ import React, { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ask, save } from "@tauri-apps/plugin-dialog";
 
-import { api, canManage, canVote, Conflict, CONFLICT_LABEL, Criteria, errorText, Estimate, gateText, Progress, RecordItem, RULE_LABEL, safeFileName, StageDetail, Summary, term } from "./api";
+import { api, canManage, canVote, Conflict, CONFLICT_LABEL, Criteria, errorText, Estimate, gateText, reasonsOf, RecordItem, RULE_LABEL, safeFileName, StageDetail, Summary, term } from "./api";
 import { stageState } from "./ReviewPage";
-import { Avatar, Banner, DECISION_PARTS, DecisionBar, Empty, Group, Icon, Kbd, PageHeader, Pill, Row, Stat } from "./ui";
+import { Avatar, Banner, DECISION_PARTS, DecisionBar, Empty, Group, Icon, PageHeader, Pill, Row, Stat } from "./ui";
 
-const DECISION_LABEL: Record<string, string> = { include: "Include", exclude: "Exclude", maybe: "Maybe" };
+export const DECISION_LABEL: Record<string, string> = { include: "Include", exclude: "Exclude", maybe: "Maybe" };
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -33,14 +33,20 @@ function Highlighted({ text, criteria }: { text: string; criteria: Criteria }) {
   );
 }
 
-function RecordView({ record, criteria, large = false }: { record: RecordItem; criteria: Criteria; large?: boolean }) {
-  const meta = [record.authors, record.journal, record.year].filter(Boolean).join(" · ");
+/** Ein Eintrag. Ohne `showSource` bleiben Autoren und Zeitschrift ausgeblendet, damit sie das Urteil nicht färben. */
+export function RecordView({ record, criteria, large = false, showSource = true }: {
+  record: RecordItem;
+  criteria: Criteria;
+  large?: boolean;
+  showSource?: boolean;
+}) {
+  const meta = (showSource ? [record.authors, record.journal, record.year] : [record.year]).filter(Boolean).join(" · ");
   return (
     <article className={large ? "record record-large" : "record"}>
       <h2><Highlighted text={record.title || "(ohne Titel)"} criteria={criteria} /></h2>
       <p className="record-meta">
         {meta}
-        {record.doi && (
+        {record.doi && showSource && (
           <> · <button className="link" onClick={() => api.openUrl(`https://doi.org/${record.doi}`)}>doi:{record.doi}</button></>
         )}
       </p>
@@ -51,149 +57,6 @@ function RecordView({ record, criteria, large = false }: { record: RecordItem; c
       )}
       {record.keywords && <div className="chips">{record.keywords.split(";").map((k) => k.trim()).filter(Boolean).map((k) => <span className="chip" key={k}>{k}</span>)}</div>}
     </article>
-  );
-}
-
-// ---------------------------------------------------------------- Screening
-
-export function ScreeningPage() {
-  const { reviewId = "", stageId = "" } = useParams();
-  const [detail, setDetail] = useState<StageDetail | null>(null);
-  const [record, setRecord] = useState<RecordItem | null>(null);
-  const [progress, setProgress] = useState<Progress | null>(null);
-  const [reasons, setReasons] = useState<string[]>([]);
-  const [note, setNote] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [last, setLast] = useState("");
-
-  const loadNext = useCallback(async () => {
-    const next = await api.next(reviewId, stageId);
-    setRecord(next.record);
-    setProgress(next.progress);
-    setReasons([]);
-    setNote("");
-  }, [reviewId, stageId]);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        setDetail(await api.stage(reviewId, stageId));
-        await loadNext();
-      } catch (e) {
-        setError(errorText(e));
-      }
-    })();
-  }, [reviewId, stageId, loadNext]);
-
-  const send = useCallback(
-    async (action: (recordId: string) => Promise<void>, label: string) => {
-      if (!record || busy) return;
-      setBusy(true);
-      setError("");
-      try {
-        await action(record.id);
-        setLast(label);
-        await loadNext();
-      } catch (e) {
-        setError(errorText(e));
-      } finally {
-        setBusy(false);
-      }
-    },
-    [record, busy, loadNext],
-  );
-
-  const vote = useCallback(
-    (decision: string) => send((id) => api.vote(reviewId, stageId, id, decision, reasons, note), DECISION_LABEL[decision]),
-    [send, reviewId, stageId, reasons, note],
-  );
-
-  // Tastatur: i = Include, e = Exclude, m = Maybe, 1–9 = Ausschlussgrund. Nicht, solange in einem Feld getippt wird.
-  useEffect(() => {
-    function onKey(event: KeyboardEvent) {
-      const target = event.target as HTMLElement | null;
-      if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
-      if (event.ctrlKey || event.metaKey || event.altKey) return;
-      const decision = ({ i: "include", e: "exclude", m: "maybe" } as Record<string, string>)[event.key.toLowerCase()];
-      if (decision) {
-        vote(decision);
-        return;
-      }
-      const n = Number(event.key);
-      const reason = detail?.criteria.exclusion_reasons[n - 1];
-      if (n >= 1 && reason) setReasons((r) => (r.includes(reason) ? r.filter((x) => x !== reason) : [...r, reason]));
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [vote, detail]);
-
-  if (!detail) return error ? <Banner kind="error">{error}</Banner> : null;
-  const { stage, criteria } = detail;
-  const pct = progress ? Math.round((progress.done / Math.max(progress.total, 1)) * 100) : 0;
-
-  return (
-    <div className="screening">
-      <div className="screening-top">
-        <Link to={`/reviews/${reviewId}`} className="back-link"><Icon name="back" size={14} /> Review</Link>
-        <div className="screening-title">
-          <strong>{stage.name}</strong>
-          {stage.blind_active && <Pill tone="violet"><Icon name="lock" size={11} /> verblindet</Pill>}
-        </div>
-        <span className="screening-count">{progress ? `${progress.done} / ${progress.total}` : ""}</span>
-      </div>
-      <div className="progress-line"><span style={{ width: `${pct}%` }} /></div>
-
-      {error && <Banner kind="error" onClose={() => setError("")}>{error}</Banner>}
-      {stage.closed && <Empty icon="lock" title="Diese Stufe ist geschlossen" />}
-      {!record && !stage.closed && (
-        <Empty icon="check" title="Alles bewertet">
-          Speichere im Review unter „Austausch“ eine Rückmeldung und schick sie an die Leitung.
-          <div><Link className="button primary" to={`/reviews/${reviewId}`}>Zum Review</Link></div>
-        </Empty>
-      )}
-      {record && !stage.closed && (
-        <>
-          <div className="reading">
-            <RecordView record={record} criteria={criteria} large />
-          </div>
-          <div className="decision-dock">
-            {criteria.exclusion_reasons.length > 0 && (
-              <div className="reasons" role="group" aria-label="Ausschlussgründe">
-                {criteria.exclusion_reasons.map((reason, i) => (
-                  <button
-                    key={reason}
-                    className={`chip toggle ${reasons.includes(reason) ? "on" : ""}`}
-                    aria-pressed={reasons.includes(reason)}
-                    onClick={() => setReasons(reasons.includes(reason) ? reasons.filter((r) => r !== reason) : [...reasons, reason])}
-                  >
-                    {i < 9 && <Kbd>{i + 1}</Kbd>} {reason}
-                  </button>
-                ))}
-              </div>
-            )}
-            <div className="dock-row">
-              <input className="note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Notiz (optional)" aria-label="Notiz" />
-              <button className="ghost" disabled={busy} onClick={() => send((id) => api.flag(reviewId, stageId, id, note), "Zur Klärung")} title="Nicht entscheidbar, zur Klärung geben">
-                <Icon name="flag" size={14} /> Klärung
-              </button>
-            </div>
-            <div className="vote-buttons">
-              <button className="vote vote-include" disabled={busy} onClick={() => vote("include")}>
-                <Icon name="check" /> Include <Kbd>I</Kbd>
-              </button>
-              <button className="vote vote-maybe" disabled={busy} onClick={() => vote("maybe")}>
-                <Icon name="help" /> Maybe <Kbd>M</Kbd>
-              </button>
-              <button className="vote vote-exclude" disabled={busy} onClick={() => vote("exclude")}>
-                <Icon name="x" /> Exclude <Kbd>E</Kbd>
-              </button>
-            </div>
-            {last && <p className="last-vote">Gespeichert: {last}</p>}
-          </div>
-        </>
-      )}
-    </div>
   );
 }
 
@@ -216,6 +79,8 @@ export function StagePage() {
   const [conflicts, setConflicts] = useState<Conflict[]>([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  // Gewählter Hauptgrund je Eintrag für den Konsens „Exclude“
+  const [consensusReason, setConsensusReason] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     try {
@@ -305,6 +170,8 @@ export function StagePage() {
             {stage.verify && <span>{stage.verify.scope === "sample" ? `Prüfung von ${stage.verify.percent} % der Ausschlüsse, Seed ${stage.verify.seed}` : "Prüfung aller Ausschlüsse"}</span>}
             {stage.conflict_rule !== "discussion" && <span>Klärung: {CONFLICT_LABEL[stage.conflict_rule] ?? stage.conflict_rule}</span>}
             {stage.seed !== null && <span>Stichprobe, Seed {stage.seed}</span>}
+            {stage.reason_required && <span>Ausschluss nur mit Hauptgrund</span>}
+            {criteria.version > 0 && <span>Kriterien Version {criteria.version}</span>}
           </>
         }
       >
@@ -386,7 +253,9 @@ export function StagePage() {
                     <Avatar name={v.name} size={22} />
                     <span>
                       <strong>{v.name}</strong> <span className={`decision-text d-${v.decision}`}>{DECISION_LABEL[v.decision] ?? v.decision}</span>
-                      {(v.reasons.length > 0 || v.note) && <small>{[v.reasons.join(", "), v.note].filter(Boolean).join(" · ")}</small>}
+                      {(v.primary_reason || v.reasons.length > 0 || v.note) && (
+                        <small>{[v.primary_reason && `Hauptgrund ${v.primary_reason}`, v.reasons.join(", "), v.note].filter(Boolean).join(" · ")}</small>
+                      )}
                     </span>
                   </div>
                 ))}
@@ -394,8 +263,20 @@ export function StagePage() {
               {canVote(role) && !stage.closed && (
                 <div className="conflict-actions">
                   <span className="muted">Konsens</span>
-                  <button className="vote-include small" onClick={() => run(() => api.consensus(reviewId, stageId, c.record.id, "include"), "Konsens gespeichert.")}><Icon name="check" size={14} /> Include</button>
-                  <button className="vote-exclude small" onClick={() => run(() => api.consensus(reviewId, stageId, c.record.id, "exclude"), "Konsens gespeichert.")}><Icon name="x" size={14} /> Exclude</button>
+                  <button className="vote-include small" onClick={() => run(() => api.consensus(reviewId, stageId, c.record.id, "include", null), "Konsens gespeichert.")}><Icon name="check" size={14} /> Include</button>
+                  {stage.reason_required && (
+                    <select value={consensusReason[c.record.id] ?? ""} onChange={(e) => setConsensusReason({ ...consensusReason, [c.record.id]: e.target.value })} aria-label="Hauptgrund für den Ausschluss">
+                      <option value="">Hauptgrund …</option>
+                      {reasonsOf(criteria).map((r) => <option key={r.code} value={r.code}>{r.code} {r.text}</option>)}
+                    </select>
+                  )}
+                  <button
+                    className="vote-exclude small"
+                    disabled={stage.reason_required && !consensusReason[c.record.id]}
+                    onClick={() => run(() => api.consensus(reviewId, stageId, c.record.id, "exclude", consensusReason[c.record.id] || null), "Konsens gespeichert.")}
+                  >
+                    <Icon name="x" size={14} /> Exclude
+                  </button>
                 </div>
               )}
             </div>

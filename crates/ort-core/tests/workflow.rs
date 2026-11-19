@@ -5,12 +5,12 @@ mod common;
 
 use std::collections::BTreeMap;
 
-use common::{person, send_package, send_return, wire, Team};
+use common::{criteria, person, send_package, send_return, wire, Team};
 use ort_core::error::Error;
 use ort_core::event::sha256_hex;
 use ort_core::exchange::{export_return, merge};
 use ort_core::projection::Verify;
-use ort_core::service::{OpenStage, StageView};
+use ort_core::service::{OpenStage, RecordFilter, StageView};
 use ort_core::workflow::{builtin_template, StationView};
 use ort_core::Review;
 use serde_json::json;
@@ -42,8 +42,13 @@ fn order(t: &Team, stage: &Uuid) -> Vec<String> {
     t.owner.export_csv(stage).map(|csv| csv.lines().skip(1).map(|l| l[..36].to_string()).collect()).unwrap()
 }
 
+/// Dieselbe Reihenfolge, gelesen aus der Liste; geht auch in einer verblindeten Stufe.
+fn order_of(review: &Review, stage: &Uuid) -> Vec<String> {
+    review.stage_records(stage, &RecordFilter::default()).unwrap().items.iter().map(|i| i.id.to_string()).collect()
+}
+
 fn vote(review: &Review, stage: &Uuid, record: &str, decision: &str) {
-    review.cast_vote(stage, record, decision, &[], "").unwrap();
+    review.cast_vote(stage, record, decision, None, &[], "").unwrap();
 }
 
 /// Beide Reviewer stimmen der Reihe nach ab; danach liegen alle Stimmen beim Owner.
@@ -59,7 +64,7 @@ fn vote_all(t: &Team, stage: &Uuid, r1: &[&str], r2: &[&str]) {
 
 fn jbi_team_with_protocol() -> Team {
     let t = Team::with_template(JBI);
-    t.owner.publish_criteria(&json!({"text": "Population, Concept, Context"})).unwrap();
+    t.owner.publish_criteria(&criteria("")).unwrap();
     t
 }
 
@@ -95,7 +100,7 @@ fn protocol_gate_locks_the_pilot() {
     assert!(matches!(err, Error::Conflict(_)), "{err}");
     assert!(err.to_string().contains("Protokoll und Team"), "{err}");
 
-    t.owner.publish_criteria(&json!({"text": "PCC"})).unwrap();
+    t.owner.publish_criteria(&criteria("")).unwrap();
     assert_eq!(states(&t.owner)["pilot_title_abstract"], "open");
     // Ohne Station geht es in einem Review mit Vorlage nicht, und nicht jede Station hat Stufen.
     assert!(t.owner.open_stage(&OpenStage { name: "x".into(), ..params.clone() }).is_ok());
@@ -199,7 +204,7 @@ fn title_abstract_gate_needs_all_decided_and_no_conflicts() {
     assert_eq!(by["no_open_conflicts"], (false, 1, 4));
 
     let records = order(&t, &ta.id);
-    t.owner.record_consensus(&ta.id, &records[1], "include", "", &[], "").unwrap();
+    t.owner.record_consensus(&ta.id, &records[1], "include", "", None, &[], "").unwrap();
     vote(&t.r1, &ta.id, &records[3], "include");
     send_return(&t.r1, &t.owner);
     let closed = t.owner.close_stage(&ta.id).unwrap();
@@ -337,7 +342,7 @@ fn third_person_rule_keeps_voters_from_recording_consensus() {
     vote(&t.r2, &stage.id, &record, "exclude");
     send_return(&t.r2, &t.owner);
 
-    let err = t.r1.record_consensus(&stage.id, &record, "include", "", &[], "").unwrap_err();
+    let err = t.r1.record_consensus(&stage.id, &record, "include", "", None, &[], "").unwrap_err();
     assert!(matches!(err, Error::Forbidden(_)), "{err}");
     // r1 umgeht die App und schreibt den Konsens selbst ins Log: Der Owner weist ihn beim Einlesen ab.
     t.r1.store()
@@ -349,7 +354,7 @@ fn third_person_rule_keeps_voters_from_recording_consensus() {
     assert_eq!(t.owner.final_decisions(&stage.id).unwrap()[&record].status, "disagreement");
 
     // Der Owner hat nicht abgestimmt und darf entscheiden.
-    t.owner.record_consensus(&stage.id, &record, "exclude", "", &[], "").unwrap();
+    t.owner.record_consensus(&stage.id, &record, "exclude", "", None, &[], "").unwrap();
     let event = t.owner.events().unwrap().into_iter().rfind(|e| e.event_type == "ConsensusRecorded").unwrap();
     assert_eq!(event.payload["method"], "third_person");
     assert_eq!(t.owner.final_decisions(&stage.id).unwrap()[&record].decision.as_deref(), Some("exclude"));
@@ -422,6 +427,250 @@ fn reviews_without_a_template_run_freely_as_before() {
     assert!(t.owner.detail().unwrap().workflow.published);
 }
 
+/// Scoping Review bis vor den Volltext: Titel/Abstract ist geschlossen, alle vier Einträge sind eingeschlossen.
+fn team_before_fulltext() -> Team {
+    let t = jbi_team_with_protocol();
+    t.owner.override_gate("pilot_title_abstract", "Pilot entfällt, eingespieltes Team").unwrap();
+    let ta = open(&t, "title_abstract", |_| {});
+    vote_all(&t, &ta.id, &["include"; 4], &["include"; 4]);
+    t.owner.unblind_stage(&ta.id).unwrap();
+    assert!(t.owner.close_stage(&ta.id).unwrap().gate.unwrap().passed);
+    t
+}
+
+fn last_payload(review: &Review, event_type: &str) -> serde_json::Value {
+    review.events().unwrap().into_iter().rfind(|e| e.event_type == event_type).unwrap().payload
+}
+
+#[test]
+fn fulltext_exclusion_needs_exactly_one_primary_reason() {
+    let t = team_before_fulltext();
+    // Die Vorlage verlangt den Grund; abschalten lässt er sich nicht.
+    let mut params = t.owner.stage_defaults("fulltext").unwrap();
+    assert_eq!(params.reason_required, Some(true));
+    params.reason_required = Some(false);
+    assert!(t.owner.open_stage(&params).unwrap_err().to_string().contains("Hauptgrund"));
+    let stage = open(&t, "fulltext", |_| {});
+    assert!(stage.reason_required);
+    let records = order_of(&t.r1, &stage.id);
+    let (first, second) = (records[0].as_str(), records[1].as_str());
+    let reasons = |codes: &[&str]| codes.iter().map(|c| c.to_string()).collect::<Vec<_>>();
+
+    let cases: [(&str, Option<&str>, &[&str], &str); 5] = [
+        ("exclude", None, &["E1"], "genau einen Hauptgrund"),
+        ("exclude", Some("I1"), &[], "kein Ausschlusskriterium"),
+        ("exclude", Some("E9"), &[], "kein Ausschlusskriterium"),
+        ("exclude", Some("E1"), &["Falsche Population"], "kein Ausschlusskriterium"),
+        ("include", Some("E1"), &[], "nur zu einem Ausschluss"),
+    ];
+    for (decision, primary, more, expected) in cases {
+        let err = t.r1.cast_vote(&stage.id, first, decision, primary, &reasons(more), "").unwrap_err();
+        assert!(matches!(err, Error::Invalid(_)), "{err}");
+        assert!(err.to_string().contains(expected), "{err}");
+    }
+    // Der Hauptgrund steht einmal im Ereignis, nicht noch einmal unter den weiteren Gründen.
+    t.r1.cast_vote(&stage.id, first, "exclude", Some("E1"), &reasons(&["E2", "E1", " "]), "").unwrap();
+    let payload = last_payload(&t.r1, "VoteCast");
+    assert_eq!((&payload["primary_reason"], &payload["reasons"]), (&json!("E1"), &json!(["E2"])));
+    t.r1.cast_vote(&stage.id, first, "exclude", Some("E2"), &[], "").unwrap();
+    assert_eq!(last_payload(&t.r1, "VoteRevised")["primary_reason"], "E2");
+    // Einschluss und Maybe brauchen keinen Grund.
+    t.r1.cast_vote(&stage.id, second, "maybe", None, &[], "").unwrap();
+    t.r2.cast_vote(&stage.id, first, "include", None, &[], "").unwrap();
+    for reviewer in [&t.r1, &t.r2] {
+        assert_eq!(send_return(reviewer, &t.owner).rejected, Vec::<String>::new());
+    }
+
+    // Klärung: Der Hauptgrund der Stimme ist sichtbar, und auch der Konsens braucht einen.
+    t.owner.unblind_stage(&stage.id).unwrap();
+    let conflicts = t.owner.conflicts(&stage.id).unwrap();
+    let r1_vote = conflicts[0].votes.iter().find(|v| v.name == "r1").unwrap();
+    assert_eq!(r1_vote.primary_reason.as_deref(), Some("E2"));
+    let err = t.owner.record_consensus(&stage.id, first, "exclude", "", None, &[], "").unwrap_err();
+    assert!(err.to_string().contains("genau einen Hauptgrund"), "{err}");
+    t.owner.record_consensus(&stage.id, first, "exclude", "", Some("E2"), &[], "").unwrap();
+    assert_eq!(last_payload(&t.owner, "ConsensusRecorded")["primary_reason"], "E2");
+    assert_eq!(t.owner.final_decisions(&stage.id).unwrap()[first].decision.as_deref(), Some("exclude"));
+}
+
+#[test]
+fn exclusion_without_primary_reason_is_rejected_on_merge() {
+    let t = team_before_fulltext();
+    let stage = open(&t, "fulltext", |_| {});
+    let record = order_of(&t.r1, &stage.id)[0].clone();
+    // Beide Reviewer umgehen die App: ohne Hauptgrund und mit einem Kürzel, das es nicht gibt.
+    let forged = [
+        (&t.r1, json!({"record_id": record, "decision": "exclude", "reasons": ["E1"]}), "genau einen Hauptgrund"),
+        (
+            &t.r2,
+            json!({"record_id": record, "decision": "exclude", "primary_reason": "X1"}),
+            "kein Ausschlusskriterium",
+        ),
+    ];
+    for (reviewer, payload, expected) in forged {
+        reviewer.store().append(reviewer.me(), "VoteCast", Some(stage.id), payload).unwrap();
+        let report = merge(&t.owner, &wire(&export_return(reviewer).unwrap())).unwrap();
+        assert_eq!(report.accepted, 0, "{:?}", report.rejected);
+        assert!(report.rejected[0].contains(expected), "{:?}", report.rejected);
+    }
+
+    // Dasselbe gilt für einen Konsens. Er liegt in der Verwaltungskette und wird einzeln abgewiesen.
+    t.owner.unblind_stage(&stage.id).unwrap();
+    assert!(t.owner.final_decisions(&stage.id).unwrap().is_empty());
+    send_package(&t.owner, &t.r1);
+    t.r1.store()
+        .append(t.r1.me(), "ConsensusRecorded", Some(stage.id), json!({"record_id": record, "decision": "exclude"}))
+        .unwrap();
+    let report = merge(&t.owner, &wire(&export_return(&t.r1).unwrap())).unwrap();
+    assert!(report.rejected.iter().any(|r| r.contains("ConsensusRecorded") && r.contains("Hauptgrund")), "{report:?}");
+    // Mit Hauptgrund kommt eine Stimme durch die Rückmeldung.
+    let other = order(&t, &stage.id)[1].clone();
+    send_package(&t.owner, &t.viewer);
+    let r2_copy = t.dir.path().join("r2-neu.sqlite");
+    let pkg = wire(&ort_core::exchange::export_package(&t.owner, &t.r2.me().actor_id).unwrap());
+    let fresh = ort_core::exchange::create_from_package(&r2_copy, t.r2.me().clone(), &pkg).unwrap().0;
+    fresh.cast_vote(&stage.id, &other, "exclude", Some("E2"), &[], "").unwrap();
+    let report = merge(&t.owner, &wire(&export_return(&fresh).unwrap())).unwrap();
+    assert_eq!((report.accepted, report.rejected.len()), (1, 0), "{report:?}");
+}
+
+#[test]
+fn a_stage_keeps_the_criteria_it_was_opened_with() {
+    let t = Team::with_template(Some("free"));
+    // Ohne Ausschlusskriterien mit Kürzel gibt es keine Stufe mit Pflichtgrund.
+    let mut params = t.owner.stage_defaults("screening").unwrap();
+    assert_eq!(params.reason_required, Some(false));
+    params.reason_required = Some(true);
+    assert!(t.owner.open_stage(&params).unwrap_err().to_string().contains("Kürzel"));
+
+    t.owner.publish_criteria(&criteria("")).unwrap();
+    let old = open(&t, "screening", |p| p.reason_required = Some(true));
+    let changed = json!({
+        "items": [{"code": "I1", "kind": "include", "text": "Erwachsene"}, {"code": "E7", "kind": "exclude", "text": "Tierstudie"}],
+        "change_note": "Gründe neu gefasst",
+    });
+    assert_eq!(t.owner.publish_criteria(&changed).unwrap().version, 2);
+    let new = open(&t, "screening", |p| {
+        p.name = "Zweite".into();
+        p.reason_required = Some(true);
+    });
+    assert_eq!((old.criteria_version.as_deref(), new.criteria_version.as_deref()), (Some("1"), Some("2")));
+
+    let record = order(&t, &old.id)[0].clone();
+    let err = t.r1.cast_vote(&old.id, &record, "exclude", Some("E7"), &[], "").unwrap_err();
+    assert!(err.to_string().contains("Kriterienversion 1"), "{err}");
+    t.r1.cast_vote(&old.id, &record, "exclude", Some("E2"), &[], "").unwrap();
+    assert!(t.r1.cast_vote(&new.id, &record, "exclude", Some("E2"), &[], "").is_err());
+    t.r1.cast_vote(&new.id, &record, "exclude", Some("E7"), &[], "").unwrap();
+    assert_eq!(send_return(&t.r1, &t.owner).rejected, Vec::<String>::new());
+
+    let detail = t.r1.stage_detail(&old.id).unwrap();
+    assert_eq!((detail.criteria.version, detail.newer_criteria), (1, true));
+    assert_eq!(detail.criteria.reason_codes(), ["E1", "E2"]);
+    let detail = t.r1.stage_detail(&new.id).unwrap();
+    assert_eq!((detail.criteria.version, detail.newer_criteria), (2, false));
+}
+
+#[test]
+fn criteria_elements_come_from_the_template() {
+    let with_element =
+        |element: &str| json!({"items": [{"code": "I1", "element": element, "kind": "include", "text": "Erwachsene"}]});
+    let jbi = Team::with_template(JBI);
+    assert_eq!(jbi.owner.detail().unwrap().workflow.criteria_schema.len(), 4);
+    let err = jbi.owner.publish_criteria(&with_element("wetter")).unwrap_err();
+    assert!(err.to_string().contains("Kriterienschema"), "{err}");
+    let published = jbi.owner.publish_criteria(&with_element("population")).unwrap();
+    assert_eq!(published.items[0].element, "population");
+    // Ungültige Kürzel weist das Register ab, auch wenn die Oberfläche sie durchlässt.
+    let bad = json!({"items": [{"code": "E 1", "kind": "exclude", "text": "x"}], "change_note": "x"});
+    assert!(matches!(jbi.owner.publish_criteria(&bad), Err(Error::Invalid(_))));
+    // Der freie Ablauf hat kein Schema; Kriterien stehen dort ohne Element.
+    let free = Team::with_template(Some("free"));
+    assert!(free.owner.publish_criteria(&with_element("population")).is_err());
+    assert!(free.owner.publish_criteria(&with_element("")).is_ok());
+}
+
+#[test]
+fn list_filters_are_locked_while_the_stage_is_blind() {
+    let t = Team::new();
+    t.owner.publish_criteria(&criteria("")).unwrap();
+    let stage = t.open_stage(|_| {}).id;
+    for member in [&t.r1, &t.r2] {
+        send_package(&t.owner, member);
+    }
+    let records = order_of(&t.r1, &stage);
+    vote(&t.r1, &stage, &records[0], "include");
+    vote(&t.r1, &stage, &records[1], "exclude");
+    vote(&t.r2, &stage, &records[0], "exclude");
+    for reviewer in [&t.r1, &t.r2] {
+        send_return(reviewer, &t.owner);
+    }
+    let r1 = t.r1.me().actor_id;
+    let filter = |change: &dyn Fn(&mut RecordFilter)| {
+        let mut f = RecordFilter::default();
+        change(&mut f);
+        f
+    };
+    let decision = |d: &str| filter(&|f| f.decision = Some(d.to_string()));
+
+    // Verblindet: nur die eigene Stimme, keine Stimmenzahl, kein Status.
+    let all = t.r1.stage_records(&stage, &RecordFilter::default()).unwrap();
+    assert_eq!((all.total, all.items.len()), (4, 4));
+    assert_eq!(all.locked, ["conflict", "person", "votes"]);
+    let mine: Vec<Option<&str>> = all.items.iter().map(|i| i.my_decision.as_deref()).collect();
+    assert_eq!(mine, [Some("include"), Some("exclude"), None, None]);
+    assert!(all.items.iter().all(|i| i.n_votes.is_none() && i.status.is_none() && i.decision.is_none()));
+    let counts: Vec<(&str, &str, usize)> =
+        all.keywords.iter().map(|k| (k.keyword.as_str(), k.kind.as_str(), k.n)).collect();
+    assert_eq!(counts, [("headache", "include", 1), ("migraine", "include", 1), ("review", "exclude", 1)]);
+    assert_eq!(t.r1.stage_records(&stage, &decision("open")).unwrap().total, 2);
+    assert_eq!(t.r1.stage_records(&stage, &decision("exclude")).unwrap().items[0].id.to_string(), records[1]);
+    assert_eq!(t.r1.stage_records(&stage, &filter(&|f| f.keyword = Some("Migraine".into()))).unwrap().total, 1);
+    assert_eq!(t.r1.stage_records(&stage, &filter(&|f| f.query = Some("neurology".into()))).unwrap().total, 1);
+    let page = t.r1.stage_records(&stage, &filter(&|f| (f.offset, f.limit) = (1, Some(2)))).unwrap();
+    assert_eq!((page.total, page.items.len(), page.items[0].id.to_string()), (4, 2, records[1].clone()));
+    assert!(matches!(t.r1.stage_records(&stage, &decision("vielleicht")), Err(Error::Invalid(_))));
+
+    // Die Sperre sitzt im Kern und gilt auch bei der Leitung, die alle Stimmen auf dem Rechner hat.
+    let locked = [
+        decision("conflict"),
+        filter(&|f| f.person = Some(r1)),
+        filter(&|f| f.votes_min = Some(1)),
+        filter(&|f| f.votes_max = Some(0)),
+    ];
+    for f in &locked {
+        let err = t.owner.stage_records(&stage, f).unwrap_err();
+        assert!(matches!(err, Error::Forbidden(_)), "{err}");
+        assert!(err.to_string().contains("verblindet"), "{err}");
+    }
+    let own = t.r1.stage_records(&stage, &filter(&|f| f.person = Some(r1))).unwrap();
+    assert_eq!(own.total, 2, "die eigene Person geht immer");
+
+    t.owner.unblind_stage(&stage).unwrap();
+    let all = t.owner.stage_records(&stage, &RecordFilter::default()).unwrap();
+    assert!(all.locked.is_empty());
+    let rows: Vec<(Option<usize>, Option<&str>)> = all.items.iter().map(|i| (i.n_votes, i.status.as_deref())).collect();
+    assert_eq!(
+        rows,
+        [
+            (Some(2), Some("disagreement")),
+            (Some(1), Some("pending")),
+            (Some(0), Some("pending")),
+            (Some(0), Some("pending"))
+        ]
+    );
+    let totals: Vec<usize> = locked.iter().map(|f| t.owner.stage_records(&stage, f).unwrap().total).collect();
+    assert_eq!(totals, [1, 2, 2, 2], "Konflikt, Stimmen von r1, mindestens eine Stimme, keine Stimme");
+    let r1_excluded = filter(&|f| (f.person, f.decision) = (Some(r1), Some("exclude".into())));
+    assert_eq!(t.owner.stage_records(&stage, &r1_excluded).unwrap().items[0].id.to_string(), records[1]);
+
+    // Ein Eintrag mit der eigenen Stimme, um sie zu ändern.
+    let mine = t.r1.stage_record(&stage, &records[0]).unwrap();
+    assert_eq!(mine.my_vote.map(|v| v.decision).as_deref(), Some("include"));
+    assert!(t.r1.stage_record(&stage, &records[2]).unwrap().my_vote.is_none());
+    assert!(matches!(t.r1.stage_record(&stage, &Uuid::new_v4().to_string()), Err(Error::NotFound(_))));
+}
+
 /// Derselbe Ablauf für jede Vorlage: Stationen der Reihe nach, bis alle abgeschlossen sind, die die
 /// App bearbeiten kann. Im Test steht kein Schlüssel einer Station.
 fn walk(template: &str) {
@@ -433,7 +682,7 @@ fn walk(template: &str) {
         match now.kind.as_str() {
             "setup" => {
                 if now.tool.as_deref() == Some("protocol") {
-                    t.owner.publish_criteria(&json!({"text": "Kriterien"})).unwrap();
+                    t.owner.publish_criteria(&criteria("")).unwrap();
                 }
                 if now.blocking {
                     assert_eq!(station(&t.owner, &now.key).state, "done", "{template}: {}", now.label);

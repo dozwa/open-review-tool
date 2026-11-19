@@ -13,6 +13,7 @@ import {
   gateText,
   importSummary,
   Member,
+  reasonsOf,
   ReviewDetail,
   RULE_LABEL,
   safeFileName,
@@ -23,6 +24,7 @@ import {
   StationCheck,
   term,
 } from "./api";
+import { CriteriaEditor, CriteriaView } from "./Criteria";
 import { ROLE_LABEL, useRefreshSidebar } from "./shared";
 import { Avatar, Banner, Empty, Group, Icon, PageHeader, Pill, Row, Segmented, Stat } from "./ui";
 
@@ -327,6 +329,8 @@ function StageForm({ review, station, defaults, onSubmit, onCancel }: {
   const [maybeAs, setMaybeAs] = useState(rules.maybe_as.value ?? "");
   const [verifyScope, setVerifyScope] = useState<"all" | "sample">("all");
   const [verifyPercent, setVerifyPercent] = useState(20);
+  const [reasonRequired, setReasonRequired] = useState(defaults.reason_required);
+  const hasReasons = reasonsOf(review.criteria).length > 0;
   const single = decisionRule === "single_verified";
   // In der Vorlage festgelegte Eingangsmenge bleibt fest; nur der freie Ablauf lässt die Wahl.
   const scopeFixed = review.workflow.published && !station.free_rounds;
@@ -343,6 +347,7 @@ function StageForm({ review, station, defaults, onSubmit, onCancel }: {
       decision_rule: decisionRule,
       conflict_rule: conflictRule,
       verify: single ? { scope: verifyScope, percent: verifyScope === "sample" ? verifyPercent : null } : null,
+      reason_required: reasonRequired,
     });
   }
 
@@ -438,6 +443,16 @@ function StageForm({ review, station, defaults, onSubmit, onCancel }: {
             <small>Stimmen anderer bleiben bis zum Entblinden unsichtbar</small>
           </label>
           <input id="stage-blind" type="checkbox" className="switch" checked={!single && blind} onChange={(e) => setBlind(e.target.checked)} disabled={single || !rules.blind.editable} />
+        </Row>
+        <Row>
+          <label htmlFor="stage-reason">
+            Ausschluss nur mit Hauptgrund
+            <small>
+              {defaults.reason_required ? "von der Vorlage festgelegt; " : ""}
+              {hasReasons ? "genau ein Kürzel aus den Ausschlusskriterien" : "dafür fehlen Ausschlusskriterien mit Kürzel"}
+            </small>
+          </label>
+          <input id="stage-reason" type="checkbox" className="switch" checked={reasonRequired} onChange={(e) => setReasonRequired(e.target.checked)} disabled={defaults.reason_required} />
         </Row>
       </Group>
       <p className="hint">Die Regeln sind nach dem Öffnen fest. Für andere Regeln öffnest du eine neue Stufe.</p>
@@ -647,62 +662,22 @@ function ImportsTab({ review, run }: { review: ReviewDetail; run: Run }) {
 
 function CriteriaTab({ review, run }: { review: ReviewDetail; run: Run }) {
   const c = review.criteria;
-  const [text, setText] = useState(c.text);
-  const [include, setInclude] = useState(c.include_keywords.join(", "));
-  const [exclude, setExclude] = useState(c.exclude_keywords.join(", "));
-  const [reasons, setReasons] = useState(c.exclusion_reasons.join("\n"));
-  const [changeNote, setChangeNote] = useState("");
-
+  const schema = review.workflow.criteria_schema;
   if (!canManage(review.role)) {
     return (
-      <Group title={`Version ${c.version}`}>
-        <div className="prose">{c.text || <span className="muted">Noch keine Kriterien hinterlegt.</span>}</div>
-        {c.exclusion_reasons.length > 0 && (
-          <div className="chips">{c.exclusion_reasons.map((r) => <span key={r} className="chip">{r}</span>)}</div>
-        )}
+      <Group title={c.version ? `Version ${c.version}` : "Kriterien"} footer={c.change_note ? `Letzte Änderung: ${c.change_note}` : undefined}>
+        <CriteriaView criteria={c} schema={schema} />
       </Group>
     );
   }
-
-  function submit(event: React.FormEvent) {
-    event.preventDefault();
-    run(async () => {
-      await api.publishCriteria(review.id, { text, include_keywords: include, exclude_keywords: exclude, exclusion_reasons: reasons, change_note: changeNote });
-      setChangeNote("");
-    }, "Neue Kriterienversion veröffentlicht.");
-  }
-
+  // Der Schlüssel setzt den Editor nach dem Veröffentlichen auf die neue Version zurück.
   return (
-    <form onSubmit={submit}>
-      <Group
-        title={c.version ? `Version ${c.version}` : "Noch keine Version"}
-        footer={c.change_note ? `Letzte Änderung: ${c.change_note}` : "Jede Änderung wird als neue Version protokolliert. Stufen merken sich, mit welcher Version sie geöffnet wurden."}
-      >
-        <div className="stack-field">
-          <label htmlFor="crit-text">Ein- und Ausschlusskriterien</label>
-          <textarea id="crit-text" rows={5} value={text} onChange={(e) => setText(e.target.value)} placeholder="Population, Konzept, Kontext …" />
-        </div>
-        <div className="stack-field">
-          <label htmlFor="crit-inc">Hervorheben als Include <small>durch Komma getrennt</small></label>
-          <input id="crit-inc" value={include} onChange={(e) => setInclude(e.target.value)} />
-        </div>
-        <div className="stack-field">
-          <label htmlFor="crit-exc">Hervorheben als Exclude <small>durch Komma getrennt</small></label>
-          <input id="crit-exc" value={exclude} onChange={(e) => setExclude(e.target.value)} />
-        </div>
-        <div className="stack-field">
-          <label htmlFor="crit-reasons">Ausschlussgründe <small>einer je Zeile</small></label>
-          <textarea id="crit-reasons" rows={4} value={reasons} onChange={(e) => setReasons(e.target.value)} />
-        </div>
-        <div className="stack-field">
-          <label htmlFor="crit-note">Was hat sich geändert?</label>
-          <input id="crit-note" value={changeNote} onChange={(e) => setChangeNote(e.target.value)} />
-        </div>
-      </Group>
-      <div className="sheet-actions">
-        <button className="primary" type="submit">Als Version {c.version + 1} veröffentlichen</button>
-      </div>
-    </form>
+    <CriteriaEditor
+      key={c.version}
+      criteria={c}
+      schema={schema}
+      onPublish={(data) => run(async () => { await api.publishCriteria(review.id, data); }, "Neue Kriterienversion veröffentlicht.")}
+    />
   );
 }
 

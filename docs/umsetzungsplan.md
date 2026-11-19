@@ -174,6 +174,25 @@ Handrechnung. Derselbe Ablauftest läuft mit beiden Vorlagen.
 
 ### 2 Kriterien und Screening-Ansicht (M)
 
+Stand 19.11.2026: umgesetzt. Festlegungen beim Bau:
+
+- Eine Stufe zeigt und prüft die Kriterienversion, mit der sie geöffnet wurde. Eine neue Version gilt ab der
+  nächsten Stufe oder Runde.
+- Der Pflichtgrund gilt für `exclude`. „Maybe“ braucht keinen Grund, auch wenn die Stufe es als Ausschluss wertet.
+  Neben dem Hauptgrund (`primary_reason`) bleiben weitere Gründe (`reasons`) möglich.
+- Nennen zwei Personen verschiedene Hauptgründe für denselben Ausschluss, bleibt die Entscheidung „ausgeschlossen“.
+  Welcher Grund im Bericht zählt, entscheidet Meilenstein 5.
+- Alte Kriterienversionen: Der Freitext wird ein Kriterium ohne Kürzel; jeder alte freie Ausschlussgrund wird ein
+  Ausschlusskriterium, dessen Kürzel der alte Wortlaut ist. So passen die Gründe in Stimmen alter Stufen weiter.
+- Gründe werden lokal immer gegen die Kürzel geprüft, beim Einlesen nur in Stufen mit Pflichtgrund. Alte Logs mit
+  frei getippten Gründen bleiben damit einlesbar.
+- `reason_required` ist ein Feld von `StageInstanceOpened` (weiter Schema-Version 2) und kommt aus der Station der
+  Vorlage (`fulltext`). Im freien Ablauf lässt es sich je Stufe einschalten. Ohne Ausschlusskriterium mit Kürzel
+  öffnet eine solche Stufe nicht.
+- Der Schlagwort-Filter meint die Schlagwörter der Kriterien, gesucht in Titel und Abstract. Gesperrt sind
+  verblindet die Filter nach Konflikt, nach einer anderen Person und nach der Zahl der Stimmen.
+- Eine neue Kriterienversion braucht ab der zweiten eine Änderungsnotiz.
+
 - Kriterien Schema 2: Liste aus Kürzel, Element, Art (ein/aus), Text, Erläuterung; dazu Erläuterungsdokument und
   Schlagwörter. Alte Versionen erscheinen als ein Kriterium ohne Kürzel.
 - Gründe sind Kürzel. Bei `reason_required` (Volltext) verlangen `cast_vote`, `record_consensus` und das Einlesen

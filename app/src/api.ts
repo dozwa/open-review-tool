@@ -23,14 +23,34 @@ export interface ReviewListItem {
   role: string | null;
 }
 
+/** Ein Kriterium. Das Kürzel eines Ausschlusskriteriums ist zugleich der Ausschlussgrund. */
+export interface Criterion {
+  code: string;
+  element: string;
+  kind: "include" | "exclude";
+  text: string;
+  note: string;
+}
+
 export interface Criteria {
   version: number;
   previous_version: number | null;
-  text: string;
+  items: Criterion[];
+  guidance: string;
   include_keywords: string[];
   exclude_keywords: string[];
-  exclusion_reasons: string[];
   change_note: string;
+}
+
+/** Element des Kriterienschemas der Vorlage, z. B. Population. */
+export interface SchemaElement {
+  key: string;
+  label: string;
+}
+
+/** Ausschlussgründe einer Kriterienversion: Ausschlusskriterien mit Kürzel. */
+export function reasonsOf(criteria: Criteria): Criterion[] {
+  return criteria.items.filter((c) => c.kind === "exclude" && c.code);
 }
 
 export interface Stage {
@@ -54,6 +74,8 @@ export interface Stage {
   decision_rule: string;
   conflict_rule: string;
   verify: Verify | null;
+  reason_required: boolean;
+  criteria_version: string | null;
 }
 
 /** Zweite Stimme für Ausschlüsse bei der Regel „eine Stimme mit Prüfung“. */
@@ -113,6 +135,7 @@ export interface StageDefaults {
   sample_size: number | null;
   source_stage: string | null;
   rules: Rules;
+  reason_required: boolean;
 }
 
 export interface Station {
@@ -139,6 +162,7 @@ export interface Workflow {
   template_name: string;
   review_type: string;
   terms: Record<string, string>;
+  criteria_schema: SchemaElement[];
   stations: Station[];
 }
 
@@ -205,15 +229,61 @@ export interface StageDetail {
   stage: Stage;
   role: string;
   progress: Progress;
+  /** Kriterien, mit denen die Stufe geöffnet wurde. */
   criteria: Criteria;
+  newer_criteria: boolean;
+  criteria_schema: SchemaElement[];
+  members: Member[];
   terms: Record<string, string>;
 }
 
 export interface Vote {
   name: string;
   decision: string;
+  primary_reason: string | null;
   reasons: string[];
   note: string;
+}
+
+/** Filter der Liste auf der Screening-Seite. Gesperrte Filter weist der Kern ab. */
+export interface RecordFilter {
+  decision?: string | null;
+  person?: string | null;
+  votes_min?: number | null;
+  votes_max?: number | null;
+  keyword?: string | null;
+  query?: string | null;
+  offset?: number;
+  limit?: number | null;
+}
+
+export interface ListRow {
+  id: string;
+  title: string;
+  year: number | null;
+  my_decision: string | null;
+  n_votes: number | null;
+  status: string | null;
+  decision: string | null;
+}
+
+export interface RecordList {
+  items: ListRow[];
+  total: number;
+  keywords: { keyword: string; kind: "include" | "exclude"; n: number }[];
+  locked: string[];
+}
+
+export interface MyVote {
+  decision: string;
+  primary_reason: string | null;
+  reasons: string[];
+  note: string;
+}
+
+export interface RecordDetail {
+  record: RecordItem;
+  my_vote: MyVote | null;
 }
 
 export interface Conflict {
@@ -305,6 +375,7 @@ export interface StageParams {
   decision_rule: string | null;
   conflict_rule: string | null;
   verify: Verify | null;
+  reason_required: boolean | null;
 }
 
 export const RULE_LABEL: Record<string, string> = {
@@ -361,12 +432,23 @@ export const api = {
   stage: (reviewId: string, stageId: string) => call<StageDetail>("stage_detail", { reviewId, stageId }),
   next: (reviewId: string, stageId: string) =>
     call<{ record: RecordItem | null; progress: Progress }>("stage_next", { reviewId, stageId }),
-  vote: (reviewId: string, stageId: string, recordId: string, decision: string, reasons: string[], note: string) =>
-    call<void>("vote_cast", { reviewId, stageId, recordId, decision, reasons, note }),
+  records: (reviewId: string, stageId: string, filter: RecordFilter) =>
+    call<RecordList>("stage_records", { reviewId, stageId, filter }),
+  record: (reviewId: string, stageId: string, recordId: string) =>
+    call<RecordDetail>("stage_record", { reviewId, stageId, recordId }),
+  vote: (
+    reviewId: string,
+    stageId: string,
+    recordId: string,
+    decision: string,
+    primaryReason: string | null,
+    reasons: string[],
+    note: string,
+  ) => call<void>("vote_cast", { reviewId, stageId, recordId, decision, primaryReason, reasons, note }),
   flag: (reviewId: string, stageId: string, recordId: string, note: string) =>
     call<void>("record_flag", { reviewId, stageId, recordId, note }),
-  consensus: (reviewId: string, stageId: string, recordId: string, decision: string) =>
-    call<void>("consensus_record", { reviewId, stageId, recordId, decision }),
+  consensus: (reviewId: string, stageId: string, recordId: string, decision: string, primaryReason: string | null) =>
+    call<void>("consensus_record", { reviewId, stageId, recordId, decision, primaryReason }),
   unblind: (reviewId: string, stageId: string) => call<void>("stage_unblind", { reviewId, stageId }),
   close: (reviewId: string, stageId: string) => call<Snapshot>("stage_close", { reviewId, stageId }),
   gate: (reviewId: string, stageId: string) => call<GateResult | null>("stage_gate", { reviewId, stageId }),

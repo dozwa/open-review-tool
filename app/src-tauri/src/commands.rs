@@ -2,10 +2,11 @@
 
 use std::path::{Path, PathBuf};
 
+use ort_core::criteria::Criteria;
 use ort_core::exchange::{self, Bundle, MergeReport};
 use ort_core::service::{
-    ChainReport, Conflict, Criteria, NextRecord, OpenStage, ReviewDetail, ReviewListItem, Snapshot, StageDetail,
-    StageView, Summary,
+    ChainReport, Conflict, NextRecord, OpenStage, RecordDetail, RecordFilter, RecordList, ReviewDetail, ReviewListItem,
+    Snapshot, StageDetail, StageView, Summary,
 };
 use ort_core::store::BatchRow;
 use ort_core::workflow::{self, GateResult, TemplateInfo};
@@ -156,16 +157,40 @@ pub async fn stage_next(state: State<'_, AppState>, review_id: String, stage_id:
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn vote_cast(
     state: State<'_, AppState>,
     review_id: String,
     stage_id: String,
     record_id: String,
     decision: String,
+    primary_reason: Option<String>,
     reasons: Vec<String>,
     note: String,
 ) -> Res<()> {
-    open(&state, &review_id)?.cast_vote(&uuid(&stage_id)?, &record_id, &decision, &reasons, &note).map_err(err)
+    open(&state, &review_id)?
+        .cast_vote(&uuid(&stage_id)?, &record_id, &decision, primary_reason.as_deref(), &reasons, &note)
+        .map_err(err)
+}
+
+#[tauri::command]
+pub async fn stage_records(
+    state: State<'_, AppState>,
+    review_id: String,
+    stage_id: String,
+    filter: RecordFilter,
+) -> Res<RecordList> {
+    open(&state, &review_id)?.stage_records(&uuid(&stage_id)?, &filter).map_err(err)
+}
+
+#[tauri::command]
+pub async fn stage_record(
+    state: State<'_, AppState>,
+    review_id: String,
+    stage_id: String,
+    record_id: String,
+) -> Res<RecordDetail> {
+    open(&state, &review_id)?.stage_record(&uuid(&stage_id)?, &record_id).map_err(err)
 }
 
 #[tauri::command]
@@ -186,9 +211,11 @@ pub async fn consensus_record(
     stage_id: String,
     record_id: String,
     decision: String,
+    primary_reason: Option<String>,
 ) -> Res<()> {
+    // Die Methode bleibt leer: Der Kern setzt sie nach der Klärungsregel der Stufe.
     open(&state, &review_id)?
-        .record_consensus(&uuid(&stage_id)?, &record_id, &decision, "discussion", &[], "")
+        .record_consensus(&uuid(&stage_id)?, &record_id, &decision, "", primary_reason.as_deref(), &[], "")
         .map_err(err)
 }
 

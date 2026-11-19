@@ -17,7 +17,7 @@ fn screened() -> (Team, uuid::Uuid) {
     send_package(&t.owner, &t.r1);
     for decision in ["include", "exclude"] {
         let record = t.r1.next_record(&stage.id).unwrap().record.unwrap();
-        t.r1.cast_vote(&stage.id, &record.id.to_string(), decision, &[], "").unwrap();
+        t.r1.cast_vote(&stage.id, &record.id.to_string(), decision, None, &[], "").unwrap();
     }
     (t, stage.id)
 }
@@ -99,7 +99,7 @@ fn outsider_is_rejected() {
 fn gap_in_chain_is_rejected() {
     let (t, stage) = screened();
     let record = t.r1.next_record(&stage).unwrap().record.unwrap();
-    t.r1.cast_vote(&stage, &record.id.to_string(), "maybe", &[], "").unwrap();
+    t.r1.cast_vote(&stage, &record.id.to_string(), "maybe", None, &[], "").unwrap();
     let mut ret = wire(&export_return(&t.r1).unwrap());
     let second_vote = votes_of(&ret)[1];
     ret.events.remove(second_vote);
@@ -175,7 +175,7 @@ fn invalid_payload_is_rejected_one_by_one() {
     // r1 umgeht die App und schreibt ein Votum mit unzulässiger Entscheidung und danach ein gültiges.
     let record = t.r1.next_record(&stage).unwrap().record.unwrap().id.to_string();
     t.r1.store().append(t.r1.me(), "VoteCast", Some(stage), json!({"record_id": record, "decision": "ja"})).unwrap();
-    t.r1.cast_vote(&stage, &record, "include", &[], "").unwrap();
+    t.r1.cast_vote(&stage, &record, "include", None, &[], "").unwrap();
     let report = merge(&t.owner, &wire(&export_return(&t.r1).unwrap())).unwrap();
     assert_eq!(report.accepted, 2, "die beiden gültigen Voten davor");
     assert_eq!(report.rejected.len(), 1, "{:?}", report.rejected);

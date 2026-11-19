@@ -449,6 +449,14 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
+    /// Einträge einer Stufe in der Reihenfolge der Zuweisung.
+    pub fn stage_records(&self, stage_id: &Uuid) -> Result<Vec<RecordRow>> {
+        self.records_where(
+            "JOIN stage_assignment a ON a.record_id = record.id WHERE a.stage_instance_id = ?1 ORDER BY a.position",
+            &[&stage_id.to_string()],
+        )
+    }
+
     pub fn record(&self, id: &Uuid) -> Result<Option<RecordRow>> {
         Ok(self.records_where("WHERE id = ?1", &[&id.to_string()])?.pop())
     }

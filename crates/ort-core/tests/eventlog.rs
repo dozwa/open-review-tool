@@ -50,7 +50,8 @@ fn events_are_immutable() {
 fn tampering_is_detected() {
     let review = Review::create_in_memory(person("owner"), "Kern").unwrap();
     for i in 0..3 {
-        review.publish_criteria(&json!({"text": format!("v{i}")})).unwrap();
+        let items = json!([{"code": "I1", "kind": "include", "text": format!("v{i}")}]);
+        review.publish_criteria(&json!({"items": items, "change_note": "Test"})).unwrap();
     }
     assert!(review.verify_chain().unwrap().ok);
     let c = review.store().conn();

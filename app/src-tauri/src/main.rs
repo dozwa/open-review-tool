@@ -48,6 +48,8 @@ fn main() {
             commands::stage_open,
             commands::stage_detail,
             commands::stage_next,
+            commands::stage_records,
+            commands::stage_record,
             commands::vote_cast,
             commands::record_flag,
             commands::consensus_record,

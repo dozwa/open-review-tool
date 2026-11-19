@@ -3,7 +3,7 @@
 
 mod common;
 
-use common::{person, send_package, send_return, Team};
+use common::{criteria, person, send_package, send_return, Team};
 use ort_core::error::Error;
 use ort_core::event::is_blindable;
 use ort_core::exchange::export_package;
@@ -31,16 +31,16 @@ fn review_detail_records_and_rights() {
 #[test]
 fn criteria_versions() {
     let t = Team::new();
-    let c = t
-        .owner
-        .publish_criteria(&json!({
-            "text": "PCC ...", "include_keywords": "headache, migraine", "exclude_keywords": ["animal"],
-            "exclusion_reasons": ["Falsche Population", "Keine Primärstudie"]}))
-        .unwrap();
+    let c = t.owner.publish_criteria(&criteria("")).unwrap();
     assert_eq!(c.version, 1);
     assert_eq!(c.include_keywords, ["headache", "migraine"]);
-    assert_eq!(t.owner.publish_criteria(&json!({"text": "v2"})).unwrap().version, 2);
-    assert!(matches!(t.r1.publish_criteria(&json!({"text": "x"})), Err(Error::Forbidden(_))));
+    assert_eq!(c.reason_codes(), ["E1", "E2"]);
+    assert_eq!((c.items[0].code.as_str(), c.items[0].note.as_str()), ("I1", "auch Migräne"));
+    // Eine neue Version braucht eine Notiz zur Änderung und mindestens ein Kriterium.
+    assert!(matches!(t.owner.publish_criteria(&criteria(" ")), Err(Error::Invalid(_))));
+    assert!(matches!(t.owner.publish_criteria(&json!({"items": [], "change_note": "x"})), Err(Error::Invalid(_))));
+    assert_eq!(t.owner.publish_criteria(&criteria("E2 geschärft")).unwrap().version, 2);
+    assert!(matches!(t.r1.publish_criteria(&criteria("x")), Err(Error::Forbidden(_))));
     send_package(&t.owner, &t.r1);
     let c = t.r1.current_criteria().unwrap();
     assert_eq!((c.version, c.previous_version), (2, Some(1)));
@@ -49,6 +49,7 @@ fn criteria_versions() {
 #[test]
 fn blind_screening_conflict_consensus_close() {
     let t = Team::new();
+    t.owner.publish_criteria(&criteria("")).unwrap();
     let stage = t.open_stage(|_| {});
     let sid = stage.id;
     assert_eq!(stage.n_records, 4);
@@ -65,8 +66,8 @@ fn blind_screening_conflict_consensus_close() {
         for decision in plan {
             let next = reviewer.next_record(&sid).unwrap();
             let record = next.record.expect("noch ein Record offen");
-            let reasons = if decision == "exclude" { vec!["Falsche Population".to_string()] } else { vec![] };
-            reviewer.cast_vote(&sid, &record.id.to_string(), decision, &reasons, "").unwrap();
+            let reasons = if decision == "exclude" { vec!["E1".to_string()] } else { vec![] };
+            reviewer.cast_vote(&sid, &record.id.to_string(), decision, None, &reasons, "").unwrap();
             order.push(record.id.to_string());
         }
         let done = reviewer.next_record(&sid).unwrap();
@@ -78,7 +79,7 @@ fn blind_screening_conflict_consensus_close() {
     let [a, b, _c, d] = [&seen[0][0], &seen[0][1], &seen[0][2], &seen[0][3]];
 
     // Viewer dürfen nicht abstimmen.
-    assert!(matches!(t.viewer.cast_vote(&sid, a, "include", &[], ""), Err(Error::Forbidden(_))));
+    assert!(matches!(t.viewer.cast_vote(&sid, a, "include", None, &[], ""), Err(Error::Forbidden(_))));
 
     send_return(&t.r1, &t.owner);
     let report = send_return(&t.r2, &t.owner);
@@ -103,7 +104,7 @@ fn blind_screening_conflict_consensus_close() {
     assert!(t.r1.events().unwrap().iter().all(|e| !(is_blindable(&e.event_type) && e.actor_id == r2_id)));
 
     // Konsens ist verblindet nicht möglich, Entblinden nur durch Owner oder Admin.
-    assert!(matches!(t.r1.record_consensus(&sid, a, "include", "", &[], ""), Err(Error::Forbidden(_))));
+    assert!(matches!(t.r1.record_consensus(&sid, a, "include", "", None, &[], ""), Err(Error::Forbidden(_))));
     assert!(matches!(t.r1.unblind_stage(&sid), Err(Error::Forbidden(_))));
     t.owner.unblind_stage(&sid).unwrap();
     send_package(&t.owner, &t.r1);
@@ -118,7 +119,7 @@ fn blind_screening_conflict_consensus_close() {
     let conflict_a = conflicts.iter().find(|c| &c.record.id.to_string() == a).unwrap();
     let votes: Vec<(&str, &str)> = conflict_a.votes.iter().map(|v| (v.name.as_str(), v.decision.as_str())).collect();
     assert_eq!(votes, [("r1", "include"), ("r2", "exclude")]);
-    assert_eq!(conflict_a.votes[1].reasons, ["Falsche Population"]);
+    assert_eq!(conflict_a.votes[1].reasons, ["E1"]);
 
     let summary = t.r1.summary(&sid).unwrap();
     let dec = summary.decisions.unwrap();
@@ -136,8 +137,8 @@ fn blind_screening_conflict_consensus_close() {
     assert_eq!(names, ["r1", "r2"], "Paare tragen Namen, keine IDs");
 
     // Konsens für A durch r2, Revision der eigenen Stimme für D durch r1.
-    t.r2.record_consensus(&sid, a, "include", "discussion", &[], "").unwrap();
-    t.r1.cast_vote(&sid, d, "include", &[], "").unwrap();
+    t.r2.record_consensus(&sid, a, "include", "discussion", None, &[], "").unwrap();
+    t.r1.cast_vote(&sid, d, "include", None, &[], "").unwrap();
     assert_eq!(t.r1.events().unwrap().iter().filter(|e| e.event_type == "VoteRevised").count(), 1);
     send_return(&t.r1, &t.owner);
     send_return(&t.r2, &t.owner);
@@ -154,12 +155,12 @@ fn blind_screening_conflict_consensus_close() {
     let snap = t.owner.close_stage(&sid).unwrap();
     assert_eq!(snap.hash.len(), 64);
     // r2 hat den Abschluss noch nicht erhalten und stimmt nach: der Owner weist das ab.
-    t.r2.cast_vote(&sid, b, "include", &[], "zu spät").unwrap();
+    t.r2.cast_vote(&sid, b, "include", None, &[], "zu spät").unwrap();
     let late = send_return(&t.r2, &t.owner);
     assert_eq!(late.accepted, 0);
     assert!(late.rejected[0].contains("geschlossen"), "{:?}", late.rejected);
     send_package(&t.owner, &t.r1);
-    assert!(matches!(t.r1.cast_vote(&sid, b, "include", &[], ""), Err(Error::Conflict(_))));
+    assert!(matches!(t.r1.cast_vote(&sid, b, "include", None, &[], ""), Err(Error::Conflict(_))));
 
     // Folgestufe: nur die eingeschlossenen Records.
     let fulltext = t.open_stage(|p| {
@@ -167,8 +168,25 @@ fn blind_screening_conflict_consensus_close() {
         p.kind = "fulltext".into();
         p.scope = "from_stage".into();
         p.source_stage = Some(sid);
+        p.reason_required = Some(true);
     });
     assert_eq!(fulltext.n_records, 3);
+
+    // Im Volltext braucht jeder Ausschluss genau einen Hauptgrund, in der App und beim Einlesen.
+    assert!(fulltext.reason_required);
+    for member in [&t.r1, &t.r2] {
+        send_package(&t.owner, member);
+    }
+    let ft = t.r1.next_record(&fulltext.id).unwrap().record.unwrap().id.to_string();
+    let err = t.r1.cast_vote(&fulltext.id, &ft, "exclude", None, &["E1".to_string()], "").unwrap_err();
+    assert!(matches!(err, Error::Invalid(_)) && err.to_string().contains("Hauptgrund"), "{err}");
+    t.r1.cast_vote(&fulltext.id, &ft, "exclude", Some("E2"), &[], "").unwrap();
+    assert!(!send_return(&t.r1, &t.owner).rejected.iter().any(|r| r.contains("Hauptgrund")));
+    let forged = json!({"record_id": ft, "decision": "exclude"});
+    t.r2.store().append(t.r2.me(), "VoteCast", Some(fulltext.id), forged).unwrap();
+    assert!(send_return(&t.r2, &t.owner).rejected.iter().any(|r| r.contains("Hauptgrund")));
+    let votes = t.owner.store().stage_events(&fulltext.id).unwrap();
+    assert_eq!(votes.iter().filter(|e| e.event_type == "VoteCast").count(), 1);
 
     // Alle Ketten sind unversehrt, beim Owner und bei den anderen.
     send_package(&t.owner, &t.viewer);

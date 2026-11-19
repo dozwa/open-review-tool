@@ -111,7 +111,8 @@ fn vote_like(
     share: f64,
     rng: &mut ChaCha8Rng,
 ) {
-    let reasons = ["Falsche Population", "Keine digitale Intervention", "Kein Originalbeitrag", "Protokoll ohne Daten"];
+    let criteria = review.current_criteria().unwrap();
+    let reasons = criteria.reason_codes();
     let total = review.get_stage(stage).unwrap().n_records as f64;
     let mut done = 0.0;
     while done < total * share {
@@ -124,11 +125,12 @@ fn vote_like(
         let right = rng.gen_bool(accuracy);
         let include = truth(&record.title) == right;
         if rng.gen_bool(0.07) {
-            review.cast_vote(stage, &id, "maybe", &[], "Unsicher, bitte besprechen.").unwrap();
+            review.cast_vote(stage, &id, "maybe", None, &[], "Unsicher, bitte besprechen.").unwrap();
         } else if include {
-            review.cast_vote(stage, &id, "include", &[], "").unwrap();
+            review.cast_vote(stage, &id, "include", None, &[], "").unwrap();
         } else {
-            review.cast_vote(stage, &id, "exclude", &[reasons[rng.gen_range(0..4)].to_string()], "").unwrap();
+            let reason = reasons[rng.gen_range(0..reasons.len())].to_string();
+            review.cast_vote(stage, &id, "exclude", None, &[reason], "").unwrap();
         }
         done += 1.0;
     }
@@ -172,19 +174,29 @@ fn main() {
         owner.set_member(&p.public(), "reviewer").unwrap();
     }
     owner.set_member(&viewer.public(), "viewer").unwrap();
+    let migraine = |qualitative: &str, keywords: &str, change_note: &str| {
+        json!({
+            "items": [
+                {"code": "I1", "kind": "include", "text": "Menschen mit Migräne, alle Altersgruppen"},
+                {"code": "I2", "kind": "include", "text": "Digitale Intervention, z. B. App oder Telemedizin"},
+                {"code": "I3", "kind": "include", "text": format!("Originalstudie{qualitative}")},
+                {"code": "E1", "kind": "exclude", "text": "Falsche Population", "note": "Andere Kopfschmerzarten ohne eigene Auswertung für Migräne"},
+                {"code": "E2", "kind": "exclude", "text": "Keine digitale Intervention"},
+                {"code": "E3", "kind": "exclude", "text": "Kein Originalbeitrag", "note": "Editorials, Kommentare, Übersichtsarbeiten"},
+                {"code": "E4", "kind": "exclude", "text": "Protokoll ohne Daten"},
+            ],
+            "guidance": "Im Zweifel bei Titel und Abstract einschließen; entschieden wird am Volltext.",
+            "include_keywords": keywords, "exclude_keywords": "editorial, protocol, tension-type",
+            "change_note": change_note,
+        })
+    };
+    owner.publish_criteria(&migraine("", "migraine, app, telemedicine, digital", "Erste Fassung")).unwrap();
     owner
-        .publish_criteria(&json!({
-            "text": "Eingeschlossen werden Originalstudien zu digitalen Interventionen bei Menschen mit Migräne (alle Altersgruppen).\nAusgeschlossen: andere Kopfschmerzarten, Editorials, Protokolle ohne Daten.",
-            "include_keywords": "migraine, app, telemedicine, digital", "exclude_keywords": "editorial, protocol, tension-type",
-            "exclusion_reasons": "Falsche Population\nKeine digitale Intervention\nKein Originalbeitrag\nProtokoll ohne Daten",
-            "change_note": "Erste Fassung"}))
-        .unwrap();
-    owner
-        .publish_criteria(&json!({
-            "text": "Eingeschlossen werden Originalstudien zu digitalen Interventionen bei Menschen mit Migräne (alle Altersgruppen), auch qualitative Studien.\nAusgeschlossen: andere Kopfschmerzarten, Editorials, Protokolle ohne Daten, Übersichtsarbeiten.",
-            "include_keywords": "migraine, app, telemedicine, digital, qualitative", "exclude_keywords": "editorial, protocol, tension-type",
-            "exclusion_reasons": "Falsche Population\nKeine digitale Intervention\nKein Originalbeitrag\nProtokoll ohne Daten",
-            "change_note": "Qualitative Studien ausdrücklich eingeschlossen"}))
+        .publish_criteria(&migraine(
+            ", auch qualitativ",
+            "migraine, app, telemedicine, digital, qualitative",
+            "Qualitative Studien ausdrücklich eingeschlossen",
+        ))
         .unwrap();
     let list = studies(&mut rng, 46);
     let truth_table: Vec<(String, bool)> = list.iter().map(|s| (s.title.clone(), s.include)).collect();
@@ -240,6 +252,7 @@ fn main() {
                 &c.record.id.to_string(),
                 decision,
                 "discussion",
+                None,
                 &[],
                 "Im Pilot-Treffen besprochen.",
             )
@@ -258,7 +271,7 @@ fn main() {
     sync_out(&owner, &members);
     for c in members[2].conflicts(&ta.id).unwrap().into_iter().take(2) {
         members[2]
-            .record_consensus(&ta.id, &c.record.id.to_string(), "include", "third_reviewer", &[], "Drittmeinung")
+            .record_consensus(&ta.id, &c.record.id.to_string(), "include", "third_reviewer", None, &[], "Drittmeinung")
             .unwrap();
     }
     collect(&owner, &members[2..3]);
@@ -268,9 +281,17 @@ fn main() {
     second.set_member(&people[0].public(), "reviewer").unwrap();
     second.set_member(&people[1].public(), "reviewer").unwrap();
     second
-        .publish_criteria(&json!({"text": "Studien zu KI-Systemen, die in der Notaufnahme die Dringlichkeit einschätzen, verglichen mit Triage durch Pflegekräfte.",
-            "include_keywords": "triage, emergency department, machine learning", "exclude_keywords": "prehospital, simulation",
-            "exclusion_reasons": "Kein Notaufnahme-Setting\nKein Vergleich mit Standardtriage\nNur Simulationsdaten"}))
+        .publish_criteria(&json!({
+            "items": [
+                {"code": "I1", "kind": "include", "text": "KI-System schätzt in der Notaufnahme die Dringlichkeit ein"},
+                {"code": "I2", "kind": "include", "text": "Vergleich mit Triage durch Pflegekräfte"},
+                {"code": "E1", "kind": "exclude", "text": "Kein Notaufnahme-Setting"},
+                {"code": "E2", "kind": "exclude", "text": "Kein Vergleich mit Standardtriage"},
+                {"code": "E3", "kind": "exclude", "text": "Nur Simulationsdaten"},
+            ],
+            "include_keywords": "triage, emergency department, machine learning",
+            "exclude_keywords": "prehospital, simulation",
+        }))
         .unwrap();
     let mut ris = String::new();
     for i in 0..18 {

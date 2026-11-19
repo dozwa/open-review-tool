@@ -16,12 +16,13 @@ use uuid::Uuid;
 use crate::agreement::{self, Alpha, CohenPair, Estimate, Metric, Percent};
 use crate::canonical::to_canonical;
 use crate::catalog;
+use crate::criteria::{check_reasons, Criteria};
 use crate::error::{conflict, forbidden, invalid, not_found, Result};
 use crate::event::{now_timestamp, parse_public_key, sha256_hex, Event, Identity, PublicIdentity};
 use crate::import;
-use crate::projection::{string_list, FinalDecision, MaybeMode, ReviewState, StageState, Verify};
+use crate::projection::{FinalDecision, MaybeMode, ReviewState, StageState, Verify};
 use crate::store::{AssignmentRow, BatchRow, RecordRow, Store};
-use crate::workflow::{self, Facts, GateResult, StationView, Template, Workflow, WORKFLOW_TYPES};
+use crate::workflow::{self, Facts, GateResult, SchemaElement, StationView, Template, Workflow, WORKFLOW_TYPES};
 
 pub const ROLES: [&str; 4] = ["owner", "admin", "reviewer", "viewer"];
 pub const MANAGE_ROLES: [&str; 2] = ["owner", "admin"];
@@ -49,17 +50,6 @@ pub struct MemberView {
     pub is_me: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct Criteria {
-    pub version: i64,
-    pub previous_version: Option<i64>,
-    pub text: String,
-    pub include_keywords: Vec<String>,
-    pub exclude_keywords: Vec<String>,
-    pub exclusion_reasons: Vec<String>,
-    pub change_note: String,
-}
-
 #[derive(Clone, Debug, Serialize)]
 pub struct StageView {
     pub id: Uuid,
@@ -84,6 +74,7 @@ pub struct StageView {
     pub decision_rule: String,
     pub conflict_rule: String,
     pub verify: Option<Verify>,
+    pub reason_required: bool,
 }
 
 /// Ablauf des Reviews für die Oberfläche: Vorlage, Begriffe und Stationen mit Zustand.
@@ -96,6 +87,8 @@ pub struct WorkflowView {
     pub template_name: String,
     pub review_type: String,
     pub terms: BTreeMap<String, String>,
+    /// Elemente, denen Kriterien zugeordnet werden, z. B. Population, Concept, Context.
+    pub criteria_schema: Vec<SchemaElement>,
     pub stations: Vec<StationView>,
 }
 
@@ -157,10 +150,79 @@ pub struct StageDetail {
     pub stage: StageView,
     pub role: String,
     pub progress: Progress,
+    /// Kriterien, mit denen die Stufe geöffnet wurde.
     pub criteria: Criteria,
+    /// Es gibt eine neuere Kriterienversion; sie gilt ab der nächsten Stufe.
+    pub newer_criteria: bool,
+    pub criteria_schema: Vec<SchemaElement>,
+    pub members: Vec<MemberView>,
     /// Begriffe der Vorlage, z. B. „Einträge“ oder „Quellen“.
     pub terms: BTreeMap<String, String>,
 }
+
+/// Filter der Liste auf der Screening-Seite. Leere Felder filtern nicht.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct RecordFilter {
+    /// `open`, `include`, `exclude`, `maybe` (Stimme der Person) oder `conflict`.
+    pub decision: Option<String>,
+    /// Wessen Stimme der Filter meint; ohne Angabe die eigene. Ohne `decision` bleiben die Einträge,
+    /// zu denen diese Person abgestimmt hat.
+    pub person: Option<Uuid>,
+    pub votes_min: Option<usize>,
+    pub votes_max: Option<usize>,
+    /// Schlagwort der Kriterien, gesucht in Titel und Abstract.
+    pub keyword: Option<String>,
+    pub query: Option<String>,
+    pub offset: usize,
+    pub limit: Option<usize>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct ListRow {
+    pub id: Uuid,
+    pub title: String,
+    pub year: Option<i64>,
+    pub my_decision: Option<String>,
+    /// Stimmenzahl, Status und Entscheidung gibt es erst nach dem Entblinden.
+    pub n_votes: Option<usize>,
+    pub status: Option<String>,
+    pub decision: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct KeywordCount {
+    pub keyword: String,
+    /// `include` oder `exclude`.
+    pub kind: String,
+    pub n: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct RecordList {
+    pub items: Vec<ListRow>,
+    /// Treffer des Filters, auch jenseits von `limit`.
+    pub total: usize,
+    pub keywords: Vec<KeywordCount>,
+    /// Filter, die in dieser Stufe gerade gesperrt sind: `conflict`, `person`, `votes`.
+    pub locked: Vec<&'static str>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct MyVote {
+    pub decision: String,
+    pub primary_reason: Option<String>,
+    pub reasons: Vec<String>,
+    pub note: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct RecordDetail {
+    pub record: RecordItem,
+    pub my_vote: Option<MyVote>,
+}
+
+pub const LIST_LIMIT: usize = 200;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct NextRecord {
@@ -172,6 +234,7 @@ pub struct NextRecord {
 pub struct ConflictVote {
     pub name: String,
     pub decision: String,
+    pub primary_reason: Option<String>,
     pub reasons: Vec<String>,
     pub note: String,
 }
@@ -254,6 +317,8 @@ pub struct OpenStage {
     pub conflict_rule: Option<String>,
     /// Nur bei `single_verified`; ohne Angabe werden alle Ausschlüsse geprüft.
     pub verify: Option<Verify>,
+    /// Ausschluss nur mit Hauptgrund. Ohne Angabe gilt die Station der Vorlage.
+    pub reason_required: Option<bool>,
 }
 
 impl Default for OpenStage {
@@ -272,6 +337,7 @@ impl Default for OpenStage {
             decision_rule: None,
             conflict_rule: None,
             verify: None,
+            reason_required: None,
         }
     }
 }
@@ -301,6 +367,18 @@ pub(crate) fn require<'a>(state: &'a ReviewState, me: &Uuid, allowed: &[&str]) -
     } else {
         Err(forbidden("Dafür fehlt dir die Berechtigung."))
     }
+}
+
+/// Gründe ohne Leerzeichen und Leereinträge. Der Hauptgrund steht nicht noch einmal in der Liste.
+fn clean_reasons<'a>(primary_reason: Option<&'a str>, reasons: &[String]) -> (Option<&'a str>, Vec<String>) {
+    let primary = primary_reason.map(str::trim).filter(|r| !r.is_empty());
+    let mut out: Vec<String> = Vec::new();
+    for reason in reasons.iter().map(|r| r.trim()).filter(|r| !r.is_empty() && Some(*r) != primary) {
+        if !out.iter().any(|r| r == reason) {
+            out.push(reason.to_string());
+        }
+    }
+    (primary, out)
 }
 
 fn parse_record_id(record_id: &str) -> Result<Uuid> {
@@ -428,7 +506,7 @@ impl Review {
         let n_records: i64 =
             self.store.conn().query_row("SELECT count(*) FROM record WHERE duplicate_of IS NULL", [], |r| r.get(0))?;
         Ok(Facts {
-            criteria_published: criteria_from(state.criteria.as_ref()).version > 0,
+            criteria_published: Criteria::from_payload(state.criteria.as_ref()).version > 0,
             n_writers: state.members.values().filter(|m| WRITE_ROLES.contains(&m.role.as_str())).count() as i64,
             n_records,
         })
@@ -463,6 +541,7 @@ impl Review {
             decision_rule: Some(d.rules.decision_rule.value),
             conflict_rule: Some(d.rules.conflict_rule.value),
             verify: None,
+            reason_required: Some(d.reason_required),
         })
     }
 
@@ -600,24 +679,44 @@ impl Review {
     // ------------------------------------------------------------ Kriterien
 
     pub fn current_criteria(&self) -> Result<Criteria> {
-        Ok(criteria_from(self.state()?.criteria.as_ref()))
+        Ok(Criteria::from_payload(self.state()?.criteria.as_ref()))
     }
 
     pub fn publish_criteria(&self, data: &Value) -> Result<Criteria> {
         let state = self.state()?;
         require(&state, &self.me.actor_id, &MANAGE_ROLES)?;
-        let previous = criteria_from(state.criteria.as_ref());
+        let previous = Criteria::from_payload(state.criteria.as_ref());
+        let text = |v: &Value, key: &str| v.get(key).and_then(Value::as_str).unwrap_or_default().trim().to_string();
+        let schema = self.workflow()?.template.criteria_schema;
+        let mut items = Vec::new();
+        for item in data.get("items").and_then(Value::as_array).into_iter().flatten() {
+            let element = text(item, "element");
+            if !element.is_empty() && !schema.iter().any(|s| s.key == element) {
+                return Err(invalid(format!("Das Element „{element}“ gibt es im Kriterienschema der Vorlage nicht.")));
+            }
+            items.push(json!({
+                "code": text(item, "code"), "element": element, "kind": text(item, "kind"),
+                "text": text(item, "text"), "note": text(item, "note"),
+            }));
+        }
+        if items.is_empty() {
+            return Err(invalid("Mindestens ein Kriterium ist nötig."));
+        }
+        let change_note = text(data, "change_note");
+        if previous.version > 0 && change_note.is_empty() {
+            return Err(invalid("Was hat sich an den Kriterien geändert? Die Angabe fehlt."));
+        }
         let payload = json!({
             "version": previous.version + 1,
             "previous_version": if previous.version > 0 { Some(previous.version) } else { None },
-            "text": data.get("text").and_then(Value::as_str).unwrap_or_default(),
+            "items": items,
+            "guidance": text(data, "guidance"),
             "include_keywords": str_list(data.get("include_keywords")),
             "exclude_keywords": str_list(data.get("exclude_keywords")),
-            "exclusion_reasons": str_list(data.get("exclusion_reasons")),
-            "change_note": data.get("change_note").and_then(Value::as_str).unwrap_or_default(),
+            "change_note": change_note,
         });
         self.append("CriteriaVersionPublished", None, payload.clone())?;
-        Ok(criteria_from(Some(&payload)))
+        Ok(Criteria::from_payload(Some(&payload)))
     }
 
     // ------------------------------------------------------------ Import
@@ -745,7 +844,7 @@ impl Review {
             members: self.members()?,
             n_records: count("SELECT count(*) FROM record")?,
             n_duplicates: count("SELECT count(*) FROM record WHERE duplicate_of IS NOT NULL")?,
-            criteria: criteria_from(state.criteria.as_ref()),
+            criteria: Criteria::from_payload(state.criteria.as_ref()),
             stages: self.list_stages()?,
             imports: self.store.batches()?,
             workflow: self.workflow_view(&state)?,
@@ -762,6 +861,7 @@ impl Review {
             template_name: workflow.template.name,
             review_type: workflow.template.review_type,
             terms: workflow.template.terms,
+            criteria_schema: workflow.template.criteria_schema,
             stations,
         })
     }
@@ -857,6 +957,19 @@ impl Review {
         } else {
             None
         };
+        let criteria = Criteria::from_payload(state.criteria.as_ref());
+        let reason_required = params.reason_required.unwrap_or(station.reason_required);
+        if station.reason_required && !reason_required {
+            return Err(invalid(format!(
+                "Die Vorlage verlangt in der Station „{}“ für jeden Ausschluss einen Hauptgrund.",
+                station.label
+            )));
+        }
+        if reason_required && criteria.reason_codes().is_empty() {
+            return Err(invalid(
+                "In dieser Stufe braucht jeder Ausschluss einen Hauptgrund. Dafür fehlen Ausschlusskriterien mit Kürzel.",
+            ));
+        }
         let source_stage = params.source_stage.or(view.defaults.as_ref().and_then(|d| d.source_stage));
 
         let mut seed = params.seed;
@@ -903,7 +1016,6 @@ impl Review {
                 position: position as i64,
             })?;
         }
-        let criteria = criteria_from(state.criteria.as_ref());
         let sample_scope = params.scope == "sample";
         self.append(
             "StageInstanceOpened",
@@ -916,7 +1028,7 @@ impl Review {
                 "source_stage": if params.scope == "from_stage" { source_stage.map(|s| s.to_string()) } else { None },
                 "n_records": ids.len(), "record_ids_sha256": self.store.assignment_digest(&stage_id)?,
                 "station": key, "round": round, "decision_rule": decision_rule, "conflict_rule": conflict_rule,
-                "verify": verify,
+                "verify": verify, "reason_required": reason_required,
             }),
         )?;
         tx.commit()?;
@@ -994,6 +1106,7 @@ impl Review {
         stage_id: &Uuid,
         record_id: &str,
         decision: &str,
+        primary_reason: Option<&str>,
         reasons: &[String],
         note: &str,
     ) -> Result<()> {
@@ -1008,8 +1121,19 @@ impl Review {
         }
         let record = self.require_assigned(stage_id, record_id)?.to_string();
         let previous = self.my_votes(&stage).get(&record).cloned();
-        let reasons: Vec<String> = reasons.iter().map(|r| r.trim().to_string()).filter(|r| !r.is_empty()).collect();
+        let (primary_reason, reasons) = clean_reasons(primary_reason, reasons);
+        check_reasons(
+            &stage_criteria(&state, &stage),
+            stage.config.reason_required,
+            decision,
+            primary_reason,
+            &reasons,
+        )
+        .map_err(invalid)?;
         let mut payload = json!({"record_id": record, "decision": decision, "reasons": reasons, "note": note});
+        if let Some(code) = primary_reason {
+            payload["primary_reason"] = json!(code);
+        }
         let event_type = match previous {
             Some(previous) => {
                 payload["previous"] = json!(previous);
@@ -1033,12 +1157,14 @@ impl Review {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn record_consensus(
         &self,
         stage_id: &Uuid,
         record_id: &str,
         decision: &str,
         method: &str,
+        primary_reason: Option<&str>,
         reasons: &[String],
         note: &str,
     ) -> Result<()> {
@@ -1066,11 +1192,21 @@ impl Review {
             "" => "discussion",
             other => other,
         };
-        self.append(
-            "ConsensusRecorded",
-            Some(*stage_id),
-            json!({"record_id": record, "decision": decision, "method": method, "reasons": reasons, "note": note}),
-        )?;
+        let (primary_reason, reasons) = clean_reasons(primary_reason, reasons);
+        check_reasons(
+            &stage_criteria(&state, &stage),
+            stage.config.reason_required,
+            decision,
+            primary_reason,
+            &reasons,
+        )
+        .map_err(invalid)?;
+        let mut payload =
+            json!({"record_id": record, "decision": decision, "method": method, "reasons": reasons, "note": note});
+        if let Some(code) = primary_reason {
+            payload["primary_reason"] = json!(code);
+        }
+        self.append("ConsensusRecorded", Some(*stage_id), payload)?;
         Ok(())
     }
 
@@ -1099,12 +1235,17 @@ impl Review {
         let state = self.state()?;
         let role = require(&state, &self.me.actor_id, &ROLES)?.to_string();
         let stage = self.stage_state(stage_id)?;
+        let criteria = stage_criteria(&state, &stage);
+        let template = self.workflow()?.template;
         Ok(StageDetail {
             progress: self.progress(&stage)?,
             stage: stage_view(&stage),
             role,
-            criteria: criteria_from(state.criteria.as_ref()),
-            terms: self.workflow()?.template.terms,
+            newer_criteria: Criteria::from_payload(state.criteria.as_ref()).version > criteria.version,
+            criteria,
+            criteria_schema: template.criteria_schema,
+            members: self.members()?,
+            terms: template.terms,
         })
     }
 
@@ -1123,6 +1264,108 @@ impl Review {
             record: next.map(|a| self.record_item(&a.record_id.to_string())).transpose()?,
             progress: self.progress(&stage)?,
         })
+    }
+
+    /// Einträge der Stufe für die Liste der Screening-Seite. Solange die Stufe verblindet ist, sind
+    /// die Filter nach Konflikt, nach einer anderen Person und nach der Zahl der Stimmen gesperrt.
+    pub fn stage_records(&self, stage_id: &Uuid, filter: &RecordFilter) -> Result<RecordList> {
+        let state = self.state()?;
+        require(&state, &self.me.actor_id, &ROLES)?;
+        let stage = self.stage_state(stage_id)?;
+        let blind = stage.blind_active();
+        let me = self.me.actor_id;
+        let person = filter.person.unwrap_or(me);
+        let wanted = filter.decision.as_deref().filter(|d| !d.is_empty());
+        if !matches!(wanted, None | Some("open" | "include" | "exclude" | "maybe" | "conflict")) {
+            return Err(invalid("Unbekannter Filter für die Entscheidung."));
+        }
+        if blind {
+            let locked = if wanted == Some("conflict") {
+                Some("Konflikte")
+            } else if person != me {
+                Some("Stimmen anderer Personen")
+            } else if filter.votes_min.is_some() || filter.votes_max.is_some() {
+                Some("Die Zahl der Stimmen")
+            } else {
+                None
+            };
+            if let Some(what) = locked {
+                return Err(forbidden(format!(
+                    "Die Stufe ist verblindet. {what} sind erst nach dem Entblinden sichtbar."
+                )));
+            }
+        }
+        let finals = if blind { BTreeMap::new() } else { stage.final_decisions() };
+        let mut n_votes: BTreeMap<&str, usize> = BTreeMap::new();
+        for (record, _) in stage.votes.keys() {
+            *n_votes.entry(record.as_str()).or_default() += 1;
+        }
+        let criteria = stage_criteria(&state, &stage);
+        let mut keywords: Vec<KeywordCount> = Vec::new();
+        for (kind, list) in [("include", &criteria.include_keywords), ("exclude", &criteria.exclude_keywords)] {
+            for keyword in list {
+                keywords.push(KeywordCount { keyword: keyword.clone(), kind: kind.to_string(), n: 0 });
+            }
+        }
+        let needles: Vec<String> = keywords.iter().map(|k| k.keyword.to_lowercase()).collect();
+        let keyword = filter.keyword.as_deref().map(str::trim).filter(|k| !k.is_empty()).map(str::to_lowercase);
+        let query = filter.query.as_deref().map(str::trim).filter(|q| !q.is_empty()).map(str::to_lowercase);
+        let limit = filter.limit.unwrap_or(LIST_LIMIT);
+        let mut items = Vec::new();
+        let mut total = 0;
+        for r in self.store.stage_records(stage_id)? {
+            let id = r.id.to_string();
+            let text = format!("{}\n{}", r.title, r.abstract_text).to_lowercase();
+            for (count, needle) in keywords.iter_mut().zip(&needles) {
+                if text.contains(needle.as_str()) {
+                    count.n += 1;
+                }
+            }
+            let votes = n_votes.get(id.as_str()).copied().unwrap_or(0);
+            let status = finals.get(&id).map(|f| f.status);
+            let vote_of = |actor: Uuid| stage.votes.get(&(id.clone(), actor)).map(|v| v.decision.as_str());
+            let matches = match wanted {
+                None => filter.person.is_none_or(|p| vote_of(p).is_some()),
+                Some("open") => vote_of(person).is_none(),
+                Some("conflict") => matches!(status, Some("disagreement" | "needs_clarification")),
+                Some(decision) => vote_of(person) == Some(decision),
+            } && filter.votes_min.is_none_or(|n| votes >= n)
+                && filter.votes_max.is_none_or(|n| votes <= n)
+                && keyword.as_ref().is_none_or(|k| text.contains(k.as_str()))
+                && query.as_ref().is_none_or(|q| text.contains(q.as_str()));
+            if !matches {
+                continue;
+            }
+            total += 1;
+            if total > filter.offset && items.len() < limit {
+                items.push(ListRow {
+                    id: r.id,
+                    my_decision: vote_of(me).map(str::to_string),
+                    n_votes: (!blind).then_some(votes),
+                    status: if blind { None } else { Some(status.unwrap_or("pending").to_string()) },
+                    decision: finals.get(&id).and_then(|f| f.decision.clone()),
+                    title: r.title,
+                    year: r.year,
+                });
+            }
+        }
+        let locked = if blind { vec!["conflict", "person", "votes"] } else { Vec::new() };
+        Ok(RecordList { items, total, keywords, locked })
+    }
+
+    /// Ein Eintrag der Stufe mit der eigenen Stimme, etwa um sie zu ändern.
+    pub fn stage_record(&self, stage_id: &Uuid, record_id: &str) -> Result<RecordDetail> {
+        let state = self.state()?;
+        require(&state, &self.me.actor_id, &ROLES)?;
+        let stage = self.stage_state(stage_id)?;
+        let record = self.require_assigned(stage_id, record_id)?.to_string();
+        let my_vote = stage.votes.get(&(record.clone(), self.me.actor_id)).map(|v| MyVote {
+            decision: v.decision.clone(),
+            primary_reason: v.primary_reason.clone(),
+            reasons: v.reasons.clone(),
+            note: v.note.clone(),
+        });
+        Ok(RecordDetail { record: self.record_item(&record)?, my_vote })
     }
 
     // ------------------------------------------------------------ Auswertung
@@ -1146,6 +1389,7 @@ impl Review {
                     votes.push(ConflictVote {
                         name: self.name_of(actor)?,
                         decision: v.decision.clone(),
+                        primary_reason: v.primary_reason.clone(),
                         reasons: v.reasons.clone(),
                         note: v.note.clone(),
                     });
@@ -1301,17 +1545,11 @@ fn csv_field(value: &str) -> String {
     }
 }
 
-fn criteria_from(payload: Option<&Value>) -> Criteria {
-    let p = payload.cloned().unwrap_or(Value::Null);
-    Criteria {
-        version: p.get("version").and_then(Value::as_i64).unwrap_or(0),
-        previous_version: p.get("previous_version").and_then(Value::as_i64),
-        text: p.get("text").and_then(Value::as_str).unwrap_or_default().to_string(),
-        include_keywords: string_list(p.get("include_keywords")),
-        exclude_keywords: string_list(p.get("exclude_keywords")),
-        exclusion_reasons: string_list(p.get("exclusion_reasons")),
-        change_note: p.get("change_note").and_then(Value::as_str).unwrap_or_default().to_string(),
-    }
+/// Kriterien, mit denen die Stufe geöffnet wurde. Fehlt die Version im Log, gelten die neuesten.
+pub(crate) fn stage_criteria(state: &ReviewState, stage: &StageState) -> Criteria {
+    let version = stage.config.criteria_version.as_deref().and_then(|v| v.parse::<i64>().ok());
+    let payload = version.and_then(|v| state.criteria_versions.get(&v)).or(state.criteria.as_ref());
+    Criteria::from_payload(payload)
 }
 
 fn stage_view(s: &StageState) -> StageView {
@@ -1339,5 +1577,6 @@ fn stage_view(s: &StageState) -> StageView {
         decision_rule: c.decision_rule.clone(),
         conflict_rule: c.conflict_rule.clone(),
         verify: c.verify.clone(),
+        reason_required: c.reason_required,
     }
 }
