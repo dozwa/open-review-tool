@@ -175,6 +175,8 @@
   "Das Kürzel „{}“ kommt mehrfach vor.": "The code “{}” occurs more than once.",
   "Das Review ist hier schon angelegt.": "The review has already been created here.",
   "Das Review lief ohne feste Vorlage.": "The review ran without a fixed template.",
+  "Das Tastenkürzel „{}“ geht nicht.": "The shortcut “{}” cannot be used.",
+  "Das Tastenkürzel „{}“ ist doppelt vergeben.": "The shortcut “{}” is already in use.",
   "Dateifehler: {}": "File error: {}",
   "Datenbank": "database",
   "Datenbanken und Register: {}": "Databases and registers: {}",

@@ -1,10 +1,13 @@
 // Fokusmodus für die Arbeit an der Literatur (Screening, Eingabe im Formular): Die Seitenleiste und alles,
 // was nicht zum Lesen und Entscheiden gehört, verschwindet, und das Fenster geht in den Vollbildmodus.
-// Der Modus gilt, solange die Seite offen ist; `F` schaltet um, `Esc` beendet ihn.
+// Der Modus gilt, solange die Seite offen ist; das Kürzel aus den Einstellungen (anfangs `F`) schaltet um,
+// `Esc` beendet ihn.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { t } from "./i18n";
+import { useSettings } from "./settings";
+import { hits, shortcutLabel } from "./shortcuts";
 import { Icon } from "./ui";
 
 const native = () => document.documentElement.classList.contains("native");
@@ -28,6 +31,7 @@ export function useFocusMode(): [boolean, (on: boolean) => void] {
   const [on, setOn] = useState(false);
   // War das Fenster schon vorher im Vollbild, bleibt es das auch nach dem Fokusmodus.
   const wasFullscreen = useRef(false);
+  const shortcut = useSettings().shortcuts.focus;
 
   const set = useCallback((next: boolean) => {
     setOn(next);
@@ -43,10 +47,11 @@ export function useFocusMode(): [boolean, (on: boolean) => void] {
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      const target = event.target as HTMLElement | null;
-      const typing = target !== null && (["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName) || target.isContentEditable);
       if (event.key === "Escape" && on) set(false);
-      else if (event.key.toLowerCase() === "f" && !typing && !event.ctrlKey && !event.metaKey && !event.altKey) set(!on);
+      else if (hits(event, shortcut)) {
+        event.preventDefault();
+        set(!on);
+      }
     }
     // Im Browser beendet Esc das Vollbild selbst; der Fokusmodus endet dann mit.
     const onLeave = () => {
@@ -61,7 +66,7 @@ export function useFocusMode(): [boolean, (on: boolean) => void] {
       window.removeEventListener("keydown", onKey);
       document.removeEventListener("fullscreenchange", onLeave);
     };
-  }, [on, set]);
+  }, [on, set, shortcut]);
 
   // Beim Verlassen der Seite endet der Modus.
   const active = useRef(false);
@@ -74,8 +79,10 @@ export function useFocusMode(): [boolean, (on: boolean) => void] {
 }
 
 export function FocusButton({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
+  const shortcut = useSettings().shortcuts.focus;
+  const start = t("Fokusmodus: nur der Text, im Vollbild");
   return (
-    <button className="ghost focus-button" aria-pressed={on} onClick={() => onChange(!on)} title={on ? t("Fokusmodus beenden (Esc)") : t("Fokusmodus: nur der Text, im Vollbild (F)")}>
+    <button className="ghost focus-button" aria-pressed={on} onClick={() => onChange(!on)} title={on ? t("Fokusmodus beenden (Esc)") : shortcut ? `${start} (${shortcutLabel(shortcut)})` : start}>
       <Icon name={on ? "x" : "eye"} size={14} /> {on ? t("Fokus beenden") : t("Fokus")}
     </button>
   );

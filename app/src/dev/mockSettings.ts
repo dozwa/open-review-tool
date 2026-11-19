@@ -10,7 +10,7 @@ const folders = new Map<string, string | null>([["r1", "/Users/beispiel/Reviews/
 export function readMockSettings(): { settings: Settings; stored: boolean } {
   try {
     const text = localStorage.getItem(KEY);
-    if (text) return { settings: { ...DEFAULTS, ...JSON.parse(text) }, stored: true };
+    if (text) return { settings: { ...DEFAULTS, ...JSON.parse(text) }, stored: true }; // Felder, die es beim Speichern noch nicht gab, nehmen den Standard
   } catch {
     // Ohne Speicher gelten die Standardwerte.
   }

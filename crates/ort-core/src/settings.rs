@@ -49,6 +49,72 @@ impl Default for Screening {
     }
 }
 
+/// Tastenkürzel der Arbeit an der Literatur. Ein Kürzel ist eine Taste, davor beliebig viele der Zusatztasten
+/// in fester Reihenfolge, mit „+“ verbunden (`M`, `Alt+M`, `Ctrl+Shift+ArrowDown`). Leer heißt: kein Kürzel.
+/// Die Ziffern 1 bis 9 allein wählen den Ausschlussgrund und sind deshalb nicht frei.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Shortcuts {
+    pub include: String,
+    pub maybe: String,
+    pub exclude: String,
+    /// Nächster und voriger Eintrag der Liste.
+    pub next: String,
+    pub previous: String,
+    /// Fokusmodus ein und aus.
+    pub focus: String,
+}
+
+impl Default for Shortcuts {
+    fn default() -> Self {
+        Self {
+            include: "I".into(),
+            maybe: "M".into(),
+            exclude: "E".into(),
+            next: "J".into(),
+            previous: "K".into(),
+            focus: "F".into(),
+        }
+    }
+}
+
+/// Zusatztasten in der Reihenfolge, in der sie in einem Kürzel stehen.
+pub const MODIFIERS: [&str; 4] = ["Ctrl", "Alt", "Shift", "Meta"];
+/// Tasten, die fest belegt sind oder ein Feld verlassen würden.
+const RESERVED_KEYS: [&str; 6] = ["Escape", "Tab", "Enter", "Space", "Backspace", "Delete"];
+
+impl Shortcuts {
+    fn all(&self) -> [&String; 6] {
+        [&self.include, &self.maybe, &self.exclude, &self.next, &self.previous, &self.focus]
+    }
+
+    pub fn check(&self) -> Result<()> {
+        for (i, shortcut) in self.all().into_iter().enumerate() {
+            if shortcut.is_empty() {
+                continue;
+            }
+            let mut parts: Vec<&str> = shortcut.split('+').collect();
+            let key = parts.pop().unwrap_or_default();
+            // Die Zusatztasten stehen in fester Reihenfolge, jede höchstens einmal.
+            let positions: Vec<usize> =
+                parts.iter().filter_map(|part| MODIFIERS.iter().position(|m| m == part)).collect();
+            let ordered = positions.len() == parts.len() && positions.windows(2).all(|pair| pair[0] < pair[1]);
+            let plain = parts.iter().all(|part| *part == "Shift");
+            let digit = key.len() == 1 && key.chars().all(|c| c.is_ascii_digit());
+            let reserved = plain && (digit || RESERVED_KEYS.contains(&key));
+            let named = key.chars().count() > 1 && key.chars().all(|c| c.is_ascii_alphanumeric());
+            let single = key.chars().count() == 1 && !key.chars().any(|c| c.is_whitespace() || c.is_lowercase());
+            if !ordered || reserved || !(named || single) || MODIFIERS.contains(&key) {
+                return Err(invalid(tr!("Das Tastenkürzel „{}“ geht nicht.", shortcut)));
+            }
+            if self.all()[..i].contains(&shortcut) {
+                return Err(invalid(tr!("Das Tastenkürzel „{}“ ist doppelt vergeben.", shortcut)));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Einstellungen des Programms. Leere Texte heißen „keine eigene Wahl“: Sprache des Systems, Ausgabe in
 /// der Sprache der Oberfläche, Dialoge im zuletzt benutzten Ordner.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -63,6 +129,7 @@ pub struct Settings {
     pub font_size: String,
     pub density: String,
     pub screening: Screening,
+    pub shortcuts: Shortcuts,
     /// Ordner, in dem Dialoge für Berichte, Tabellen und andere Exporte beginnen.
     pub export_dir: String,
     /// Ordner, in dem Dialoge für Pakete und Rückmeldungen beginnen.
@@ -81,6 +148,7 @@ impl Default for Settings {
             font_size: "normal".into(),
             density: "normal".into(),
             screening: Screening::default(),
+            shortcuts: Shortcuts::default(),
             export_dir: String::new(),
             package_dir: String::new(),
         }
@@ -150,6 +218,7 @@ impl Settings {
         one_of(&self.palette, &PALETTES, tr!("Entscheidungsfarben"))?;
         one_of(&self.font_size, &FONT_SIZES, tr!("Schriftgröße"))?;
         one_of(&self.density, &DENSITIES, tr!("Dichte"))?;
+        self.shortcuts.check()?;
         check_dir(&self.export_dir)?;
         check_dir(&self.package_dir)
     }
@@ -182,6 +251,9 @@ impl Settings {
             if check_dir(dir).is_err() {
                 dir.clear();
             }
+        }
+        if settings.shortcuts.check().is_err() {
+            settings.shortcuts = standard.shortcuts;
         }
         settings.version = VERSION;
         settings
@@ -239,6 +311,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn shortcuts_allow_combinations_and_reject_clashes() {
+        let with = |include: &str, maybe: &str| Shortcuts {
+            include: include.into(),
+            maybe: maybe.into(),
+            ..Shortcuts::default()
+        };
+        for good in ["Alt+M", "Ctrl+Alt+Shift+Meta+ArrowDown", "Shift+Y", "Alt+1", "F5", ",", ""] {
+            with(good, "M").check().unwrap_or_else(|e| panic!("{good}: {e}"));
+        }
+        // Falsche Reihenfolge, doppelte oder fehlende Taste, feste Tasten, Kleinbuchstaben.
+        for bad in ["Alt+Ctrl+M", "Alt+Alt+M", "Alt+", "Alt", "Hyper+M", "1", "Shift+3", "Escape", "Enter", "m", "A B"]
+        {
+            assert!(with(bad, "M").check().is_err(), "{bad}");
+        }
+        assert!(with("Alt+M", "Alt+M").check().is_err());
+        // Ohne Kürzel dürfen mehrere Aktionen sein.
+        with("", "").check().unwrap();
+        let settings = Settings { shortcuts: with("J", "M"), ..Settings::default() };
+        assert!(settings.check().is_err());
+    }
+
+    #[test]
     fn project_value_overrides_program_value() {
         let program = Settings {
             output_language: "en".into(),
@@ -289,6 +383,10 @@ mod tests {
         assert_eq!(loaded.export_dir, "");
         assert_eq!(loaded.version, VERSION);
         assert!(!loaded.screening.show_list && loaded.screening.show_criteria);
+
+        // Ein Kürzel, das nicht geht, setzt alle Kürzel auf den Standard zurück.
+        std::fs::write(dir.path().join(FILE), r#"{"shortcuts": {"include": "Alt+", "maybe": "Alt+M"}}"#).unwrap();
+        assert_eq!(Settings::load(dir.path()).shortcuts, Shortcuts::default());
 
         // Eine kaputte Datei sperrt niemanden aus.
         std::fs::write(dir.path().join(FILE), "{kaputt").unwrap();

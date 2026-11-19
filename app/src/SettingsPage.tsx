@@ -1,15 +1,16 @@
 // Einstellungen: die Seite des Programms und der Bereich „Einstellungen“ eines Reviews. Beide gelten nur
 // auf diesem Rechner; jede Änderung wird sofort gespeichert.
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 
 import { api, errorText, Person, ReviewDetail } from "./api";
 import { LANGUAGES, setLanguage, t } from "./i18n";
 import {
-  ACCENTS, DEFAULTS, forgetProjectSettings, PROJECT_COLORS, saveProjectSettings, saveSettings, ScreeningLayout, Settings, storageInfo,
+  ACCENTS, DEFAULTS, forgetProjectSettings, PROJECT_COLORS, saveProjectSettings, saveSettings, ScreeningLayout, Settings, Shortcuts, storageInfo,
   useProjectSettings, useSettings,
 } from "./settings";
+import { allowed, SHORTCUT_ACTIONS, ShortcutAction, shortcutLabel, shortcutOf } from "./shortcuts";
 import { useRefreshSidebar } from "./shared";
 import { Avatar, Banner, Group, Icon, PageHeader, Pill, Row, Segmented } from "./ui";
 
@@ -121,6 +122,67 @@ function Location({ label, hint, path, onReveal }: { label: string; hint: string
   );
 }
 
+const SHORTCUT_LABEL: Record<ShortcutAction, string> = {
+  include: "Include", maybe: "Maybe", exclude: "Exclude",
+  next: t("Nächster Eintrag"), previous: t("Voriger Eintrag"), focus: t("Fokusmodus ein und aus"),
+};
+
+/** Ein Tastenkürzel: Klick, dann die neue Taste oder Kombination drücken. Esc bricht ab. */
+function ShortcutInput({ label, value, onChange }: { label: string; value: string; onChange: (shortcut: string) => void }) {
+  const [recording, setRecording] = useState(false);
+  useEffect(() => {
+    if (!recording) return;
+    // Solange aufgenommen wird, gehört jeder Tastendruck der Aufnahme und erreicht sonst nichts.
+    const onKey = (event: KeyboardEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.key === "Escape") return setRecording(false);
+      const shortcut = shortcutOf(event);
+      if (!shortcut) return; // nur eine Zusatztaste: die eigentliche Taste kommt noch
+      setRecording(false);
+      // Sonst löst das Loslassen der Leertaste den Knopf gleich noch einmal aus.
+      (document.activeElement as HTMLElement | null)?.blur();
+      onChange(shortcut);
+    };
+    const stop = () => setRecording(false);
+    window.addEventListener("keydown", onKey, true);
+    window.addEventListener("mousedown", stop);
+    window.addEventListener("blur", stop);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("mousedown", stop);
+      window.removeEventListener("blur", stop);
+    };
+  }, [recording, onChange]);
+  return (
+    <>
+      <button className={`shortcut${recording ? " recording" : ""}`} aria-label={t("Tastenkürzel für {action} ändern", { action: label })} onClick={() => setRecording(!recording)}>
+        {recording ? t("Taste drücken …") : value ? <kbd>{shortcutLabel(value)}</kbd> : <span className="muted">{t("Kein Kürzel")}</span>}
+      </button>
+      <button className="small" disabled={!value || recording} onClick={() => onChange("")}>{t("Entfernen")}</button>
+    </>
+  );
+}
+
+/** Die Tastenkürzel. Ein Kürzel kann nur einer Aktion gehören. */
+function ShortcutRows({ value, onChange, onError }: { value: Shortcuts; onChange: (next: Shortcuts) => void; onError: (text: string) => void }) {
+  function set(action: ShortcutAction, shortcut: string) {
+    const taken = shortcut ? SHORTCUT_ACTIONS.find((other) => other !== action && value[other] === shortcut) : undefined;
+    if (taken) return onError(t("„{shortcut}“ gehört schon zu „{action}“.", { shortcut: shortcutLabel(shortcut), action: SHORTCUT_LABEL[taken] }));
+    if (shortcut && !allowed(shortcut)) return onError(t("„{shortcut}“ ist fest belegt. Mit ⌃, ⌥ oder ⌘ davor geht die Taste.", { shortcut: shortcutLabel(shortcut) }));
+    onChange({ ...value, [action]: shortcut });
+  }
+  return (
+    <>
+      {SHORTCUT_ACTIONS.map((action) => (
+        <Setting key={action} label={SHORTCUT_LABEL[action]}>
+          <ShortcutInput label={SHORTCUT_LABEL[action]} value={value[action]} onChange={(shortcut) => set(action, shortcut)} />
+        </Setting>
+      ))}
+    </>
+  );
+}
+
 const Reset = ({ onClick }: { onClick: () => void }) => <button className="link" onClick={onClick}>{t("Zurücksetzen")}</button>;
 
 export function SettingsPage({ me, onIdentity }: { me: Person; onIdentity: () => void }) {
@@ -213,6 +275,14 @@ export function SettingsPage({ me, onIdentity }: { me: Person; onIdentity: () =>
 
       <Group title={t("Screening-Seite")} action={<Reset onClick={() => change({ screening: DEFAULTS.screening })} />}>
         <ScreeningRows value={settings.screening} onChange={(screening) => change({ screening })} />
+      </Group>
+
+      <Group
+        title={t("Tastenkürzel")}
+        action={<Reset onClick={() => change({ shortcuts: DEFAULTS.shortcuts })} />}
+        footer={t("Zum Ändern auf ein Kürzel klicken und die neue Taste oder Kombination drücken, etwa ⌥M. Die Tasten 1 bis 9 wählen den Ausschlussgrund und Esc beendet den Fokusmodus; beide sind fest. Beim Tippen in einem Feld gelten nur Kürzel mit ⌃ oder ⌘.")}
+      >
+        <ShortcutRows value={settings.shortcuts} onChange={(shortcuts) => change({ shortcuts })} onError={setError} />
       </Group>
 
       <Group

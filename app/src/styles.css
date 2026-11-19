@@ -954,3 +954,12 @@ button.small { height: 26px; padding: 0 10px; }
 :root[data-focus="on"] .screening { height: calc(100vh / var(--zoom) - 12px); }
 :root[data-focus="on"] .screening:not(.form-entry) .screening-columns { grid-template-columns: minmax(0, 1fr) 286px; }
 :root[data-focus="on"] .screening.no-criteria:not(.form-entry) .screening-columns { grid-template-columns: minmax(0, 1fr); }
+
+/* Stufen eines Reviews: eingerückt unter „Ablauf“. */
+.nav-sub { padding-left: 24px; font-size: 12.5px; }
+.nav-sub .icon { color: var(--ink-3); }
+
+/* Tastenkürzel in den Einstellungen: Klick nimmt die nächste Taste oder Kombination auf. */
+.shortcut { min-width: 96px; height: 26px; padding: 0 8px; justify-content: center; }
+.shortcut kbd { font: 500 13px/1 inherit; font-family: inherit; letter-spacing: 0.5px; background: none; opacity: 1; }
+.shortcut.recording { border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); color: var(--ink-2); font-size: 12px; }

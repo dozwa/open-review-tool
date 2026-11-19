@@ -1,5 +1,6 @@
 import { createContext, useContext } from "react";
 
+import type { Stage } from "./api";
 import { capital, t } from "./i18n";
 
 export const ROLE_LABEL: Record<string, string> = { owner: "Owner", admin: "Admin", reviewer: "Reviewer", viewer: "Viewer" };
@@ -28,6 +29,6 @@ export const REVIEW_TABS = [
 export type ReviewTab = (typeof REVIEW_TABS)[number]["value"];
 export const isReviewTab = (value: string | null): value is ReviewTab => REVIEW_TABS.some((tab) => tab.value === value);
 
-/** Begriffe aus der Vorlage des offenen Reviews, damit die Seitenleiste sie zeigen kann. */
-export const TermsContext = createContext<(reviewId: string, terms: Record<string, string>) => void>(() => {});
+/** Begriffe aus der Vorlage und Stufen des offenen Reviews, damit die Seitenleiste sie zeigen kann. */
+export const TermsContext = createContext<(reviewId: string, terms: Record<string, string>, stages: Stage[]) => void>(() => {});
 export const useShareTerms = () => useContext(TermsContext);

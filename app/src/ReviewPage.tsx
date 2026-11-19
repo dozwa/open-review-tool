@@ -70,7 +70,7 @@ export function ReviewPage() {
     try {
       const loaded = await api.review(reviewId);
       setReview(loaded);
-      shareTerms(reviewId, loaded.workflow.terms);
+      shareTerms(reviewId, loaded.workflow.terms, loaded.stages);
     } catch (e) {
       setError(errorText(e));
     }

@@ -11,7 +11,8 @@ import { DECISION_LABEL, RecordView } from "./StagePages";
 import { HelpButton } from "./Guidance";
 import { FocusButton, useFocusMode } from "./focus";
 import { formatNumber, t, tn, tx } from "./i18n";
-import { useScreeningLayout } from "./settings";
+import { useScreeningLayout, useSettings } from "./settings";
+import { hits, shortcutLabel, typing } from "./shortcuts";
 import { Banner, Empty, Icon, Kbd, Pill, Segmented } from "./ui";
 
 const PAGE = 200;
@@ -62,6 +63,7 @@ function Screening() {
   const [focus, setFocus] = useFocusMode();
   // Aufbau der Seite aus den Einstellungen (Projekt vor Programm); die Schalter hier ändern sie.
   const [layout, setLayout] = useScreeningLayout(reviewId);
+  const keys = useSettings().shortcuts;
   const showSource = layout.show_source;
   const showCriteria = layout.show_criteria;
   const setShowSource = (show_source: boolean) => setLayout({ show_source });
@@ -184,33 +186,33 @@ function Screening() {
     else setReasons((current) => (current.includes(code) ? current.filter((r) => r !== code) : [...current, code]));
   }, [required]);
 
-  // Tastatur: i, e, m entscheiden; 1–9 wählen den Grund; j und k blättern in der Liste. Nicht beim Tippen in einem Feld.
+  // Tastatur: Entscheiden und Blättern mit den Kürzeln aus den Einstellungen (anfangs i, e, m und j, k);
+  // 1–9 wählen den Grund. Beim Tippen in einem Feld gelten nur Kürzel mit Strg oder Befehlstaste.
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      const target = event.target as HTMLElement | null;
-      if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
-      if (event.ctrlKey || event.metaKey || event.altKey || !detail) return;
-      const key = event.key.toLowerCase();
-      const choice = ({ i: "include", e: "exclude", m: "maybe" } as Record<string, string>)[key];
-      if (choice && canVote(detail.role) && !detail.stage.closed) {
-        vote(choice);
+      if (!detail) return;
+      const choice = hits(event, keys.include) ? "include" : hits(event, keys.exclude) ? "exclude" : hits(event, keys.maybe) ? "maybe" : null;
+      if (choice) {
+        event.preventDefault();
+        if (canVote(detail.role) && !detail.stage.closed) vote(choice);
         return;
       }
-      const reason = reasonList[Number(event.key) - 1];
-      if (reason) {
-        toggleReason(reason.code);
-        return;
-      }
-      if (key === "j" || key === "k") {
+      const forward = hits(event, keys.next);
+      if (forward || hits(event, keys.previous)) {
+        event.preventDefault();
         const rows = list?.items ?? [];
         const at = rows.findIndex((r) => r.id === record?.id);
-        const row = rows[key === "j" ? at + 1 : Math.max(at - 1, 0)];
+        const row = rows[forward ? at + 1 : Math.max(at - 1, 0)];
         if (row) select(row.id);
+        return;
       }
+      if (typing(event) || event.ctrlKey || event.metaKey || event.altKey) return;
+      const reason = reasonList[Number(event.key) - 1];
+      if (reason) toggleReason(reason.code);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [vote, toggleReason, detail, reasonList, list, record, select]);
+  }, [vote, toggleReason, detail, reasonList, list, record, select, keys]);
 
   if (!detail) return error ? <Banner kind="error">{error}</Banner> : null;
   const { stage, criteria } = detail;
@@ -369,13 +371,13 @@ function Screening() {
                   </div>
                   <div className="vote-buttons">
                     <button className="vote vote-include" disabled={busy} onClick={() => vote("include")}>
-                      <Icon name="check" /> Include <Kbd>I</Kbd>
+                      <Icon name="check" /> Include {keys.include && <Kbd>{shortcutLabel(keys.include)}</Kbd>}
                     </button>
                     <button className="vote vote-maybe" disabled={busy} onClick={() => vote("maybe")}>
-                      <Icon name="help" /> Maybe <Kbd>M</Kbd>
+                      <Icon name="help" /> Maybe {keys.maybe && <Kbd>{shortcutLabel(keys.maybe)}</Kbd>}
                     </button>
                     <button className="vote vote-exclude" disabled={busy || (required && !primary)} onClick={() => vote("exclude")}>
-                      <Icon name="x" /> Exclude <Kbd>E</Kbd>
+                      <Icon name="x" /> Exclude {keys.exclude && <Kbd>{shortcutLabel(keys.exclude)}</Kbd>}
                     </button>
                   </div>
                   {last && <p className="last-vote">{t("Gespeichert: {label}", { label: last })}</p>}

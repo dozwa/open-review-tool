@@ -79,7 +79,7 @@ Tauri 2 mit der WebView von macOS, React 18.
 
 ## Wie es geprüft ist
 
-- **Kern:** 152 Tests, dazu 2 für das Lesen der Zotero-Antworten in der App. Darunter die Referenzwerte der früheren SQL-Tests (Cohen's Kappa gegen scikit-learn,
+- **Kern:** 153 Tests, dazu 2 für das Lesen der Zotero-Antworten in der App. Darunter die Referenzwerte der früheren SQL-Tests (Cohen's Kappa gegen scikit-learn,
   Fleiss' Kappa am Wikipedia-Beispiel, Krippendorffs Alpha am publizierten Beispiel mit 0,743, PABAK, Prozent,
   sechs `final_decision`-Szenarien, Maybe-Regel). Die Werte erzeugt `crates/ort-core/tests/fixtures/make_agreement_fixtures.py`.
 - **Austausch:** veränderte Datei, nachträglich neu gehashte Datei ohne Signatur, Außenstehende, Lücken in einer
@@ -223,7 +223,10 @@ Nur für Entwicklung und Tests.
   im Datenordner der App. Ein Review (Bereich „Einstellungen“) hat eine Kennfarbe und kann Ausgabesprache,
   Ordner und Screening-Aufbau überschreiben; das liegt in der Review-Datei. Wo die Reviews liegen, wird gezeigt,
   lässt sich aber nicht ändern.
-- **Fokusmodus:** Beim Screening und bei der Eingabe im Formular blendet „Fokus“ (Taste F) Seitenleiste, Liste
+- **Tastenkürzel:** Die Tasten für Include, Maybe, Exclude, das Blättern in der Liste und den Fokusmodus lassen
+  sich in den Einstellungen ändern, auch als Kombination (etwa ⌥M). Die Ziffern 1 bis 9 für den Ausschlussgrund
+  und Esc sind fest. Beim Tippen in einem Feld gelten nur Kürzel mit ⌃ oder ⌘.
+- **Fokusmodus:** Beim Screening und bei der Eingabe im Formular blendet „Fokus“ (anfangs Taste F) Seitenleiste, Liste
   und Nebensächliches aus und schaltet das Fenster in den Vollbildmodus; Esc beendet ihn.
 - **Leitlinien:** Zu jeder Vorlage außer dem freien Ablauf liegt eine Zusammenfassung ihrer Leitlinie in der App
   (`crates/ort-core/guidance/<sprache>/`), in eigenen Worten, mit Quelle, Abrufdatum und Adresse je Abschnitt. Es ist keine

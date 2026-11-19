@@ -14,6 +14,15 @@ export interface ScreeningLayout {
   highlight: boolean;
 }
 
+export interface Shortcuts {
+  include: string;
+  maybe: string;
+  exclude: string;
+  next: string;
+  previous: string;
+  focus: string;
+}
+
 export interface Settings {
   version: number;
   /** Leer: Sprache des Systems. */
@@ -26,6 +35,8 @@ export interface Settings {
   font_size: "small" | "normal" | "large";
   density: "compact" | "normal";
   screening: ScreeningLayout;
+  /** Tastenkürzel wie `M` oder `Alt+M`; leer heißt ohne. */
+  shortcuts: Shortcuts;
   /** Leer: Der Dialog beginnt im zuletzt benutzten Ordner. */
   export_dir: string;
   package_dir: string;
@@ -67,6 +78,7 @@ export const DEFAULTS: Settings = {
   font_size: "normal",
   density: "normal",
   screening: { show_list: true, show_criteria: true, show_source: false, highlight: true },
+  shortcuts: { include: "I", maybe: "M", exclude: "E", next: "J", previous: "K", focus: "F" },
   export_dir: "",
   package_dir: "",
 };

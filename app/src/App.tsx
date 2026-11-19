@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { HashRouter, Link, NavLink, Route, Routes, useLocation, useMatch, useNavigate } from "react-router-dom";
 import { open, save } from "@tauri-apps/plugin-dialog";
 
-import { api, BUNDLE_FILTER, errorText, importSummary, Person, ReviewListItem, safeFileName } from "./api";
+import { api, BUNDLE_FILTER, canVote, errorText, importSummary, Person, ReviewListItem, safeFileName, Stage } from "./api";
 import { FormEntryPage, FormStagePage } from "./FormStage";
 import { capital, language, t } from "./i18n";
 import { NewReviewPage } from "./NewReview";
@@ -77,10 +77,11 @@ function Setup({ onDone }: { onDone: (me: Person) => void }) {
   );
 }
 
-function Sidebar({ me, reviews, terms, onImport, onNew }: {
+function Sidebar({ me, reviews, terms, stages, onImport, onNew }: {
   me: Person;
   reviews: ReviewListItem[] | null;
   terms: Record<string, string>;
+  stages: Stage[];
   onImport: () => void;
   onNew: () => void;
 }) {
@@ -92,8 +93,15 @@ function Sidebar({ me, reviews, terms, onImport, onNew }: {
   useEffect(() => setShowList(false), [reviewId]);
   const current = reviewId ? reviews?.find((r) => r.id === reviewId) : undefined;
   const wanted = new URLSearchParams(location.search).get("tab");
-  // Auf den Seiten einer Stufe bleibt „Ablauf“ markiert, denn von dort kommt man.
-  const activeTab = onReviewPage && isReviewTab(wanted) ? wanted : "overview";
+  // Auf den Seiten einer Stufe ist die Stufe markiert, kein Bereich.
+  const stageId = useMatch("/reviews/:reviewId/:kind/:stageId/*")?.params.stageId;
+  const activeTab = onReviewPage ? (isReviewTab(wanted) ? wanted : "overview") : null;
+  // Wer abstimmen darf, landet in einer offenen Stufe gleich bei der Arbeit, sonst bei der Auswertung.
+  const stageLink = (stage: Stage) => {
+    if (stage.form_id) return `/reviews/${reviewId}/forms/${stage.id}`;
+    const work = !stage.closed && current?.role && canVote(current.role);
+    return `/reviews/${reviewId}/stages/${stage.id}${work ? "/screen" : ""}`;
+  };
 
   return (
     <aside className="sidebar">
@@ -108,8 +116,8 @@ function Sidebar({ me, reviews, terms, onImport, onNew }: {
             {current?.role && <small>{ROLE_LABEL[current.role] ?? current.role}</small>}
           </div>
           {REVIEW_TABS.map((tab) => (
+            <React.Fragment key={tab.value}>
             <Link
-              key={tab.value}
               to={tab.value === "overview" ? `/reviews/${reviewId}` : `/reviews/${reviewId}?tab=${tab.value}`}
               className={`nav-item${activeTab === tab.value ? " active" : ""}`}
               aria-current={activeTab === tab.value ? "page" : undefined}
@@ -117,6 +125,20 @@ function Sidebar({ me, reviews, terms, onImport, onNew }: {
               <Icon name={tab.icon} />
               <span className="nav-label">{tab.value === "sources" ? (terms.sources && capital(terms.sources)) || tab.label : tab.label}</span>
             </Link>
+            {/* Die Stufen gehören zum Ablauf und stehen deshalb eingerückt darunter. */}
+            {tab.value === "overview" && stages.map((stage) => (
+                <Link
+                  key={stage.id}
+                  to={stageLink(stage)}
+                  className={`nav-item nav-sub${stageId === stage.id ? " active" : ""}`}
+                  aria-current={stageId === stage.id ? "page" : undefined}
+                  title={stage.closed ? `${stage.name} (${t("geschlossen")})` : stage.name}
+                >
+                  <Icon name={stage.closed ? "check" : stage.form_id ? "list" : "play"} size={13} />
+                  <span className="nav-label">{stage.name}</span>
+                </Link>
+              ))}
+            </React.Fragment>
           ))}
         </nav>
       ) : (
@@ -214,9 +236,21 @@ function Shell({ me }: { me: Person }) {
   const [notice, setNoticeAt] = useState({ text: "", at: "" });
   const setNotice = (text: string, at = here) => setNoticeAt({ text, at });
   const [error, setError] = useState("");
-  const [terms, setTerms] = useState<{ reviewId: string; terms: Record<string, string> }>({ reviewId: "", terms: {} });
-  const shareTerms = useCallback((reviewId: string, next: Record<string, string>) => setTerms({ reviewId, terms: next }), []);
+  // Begriffe und Stufen des offenen Reviews für die Seitenleiste. Die Seite des Reviews meldet sie nach jedem
+  // Laden; auf den Seiten einer Stufe lädt die Hülle sie selbst.
+  const [shared, setShared] = useState<{ reviewId: string; terms: Record<string, string>; stages: Stage[] }>({ reviewId: "", terms: {}, stages: [] });
+  const shareTerms = useCallback((reviewId: string, terms: Record<string, string>, stages: Stage[]) => setShared({ reviewId, terms, stages }), []);
   const openReview = useMatch("/reviews/:reviewId/*")?.params.reviewId;
+  const onReviewPage = useMatch("/reviews/:reviewId") !== null;
+  useEffect(() => {
+    if (!openReview || onReviewPage) return;
+    let live = true;
+    api.review(openReview).then((detail) => live && setShared({ reviewId: openReview, terms: detail.workflow.terms, stages: detail.stages })).catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [openReview, onReviewPage, location.pathname]);
+  const known = shared.reviewId === openReview;
 
   const refresh = useCallback(() => {
     api.reviews().then(setReviews).catch((e) => setError(errorText(e)));
@@ -252,7 +286,7 @@ function Shell({ me }: { me: Person }) {
     <RefreshContext.Provider value={refresh}>
       <TermsContext.Provider value={shareTerms}>
       <div className="shell">
-        <Sidebar me={me} reviews={reviews} terms={terms.reviewId === openReview ? terms.terms : {}} onImport={actions.importBundle} onNew={newReview} />
+        <Sidebar me={me} reviews={reviews} terms={known ? shared.terms : {}} stages={known ? shared.stages : []} onImport={actions.importBundle} onNew={newReview} />
         <div className="content">
           <div className="content-drag" data-tauri-drag-region />
           <main>
