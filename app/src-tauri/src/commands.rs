@@ -8,6 +8,7 @@ use ort_core::service::{
     StageView, Summary,
 };
 use ort_core::store::BatchRow;
+use ort_core::workflow::{self, GateResult, TemplateInfo};
 use ort_core::{Identity, PublicIdentity, Review};
 use serde::Serialize;
 use serde_json::Value;
@@ -82,11 +83,17 @@ pub async fn reviews_list(state: State<'_, AppState>) -> Res<Vec<ReviewListItem>
     Ok(out)
 }
 
+/// Mitgelieferte Vorlagen für die Auswahl des Review-Typs beim Anlegen.
 #[tauri::command]
-pub async fn review_create(state: State<'_, AppState>, title: String) -> Res<ReviewListItem> {
+pub async fn templates_list() -> Res<Vec<TemplateInfo>> {
+    Ok(workflow::template_infos())
+}
+
+#[tauri::command]
+pub async fn review_create(state: State<'_, AppState>, title: String, template: Option<String>) -> Res<ReviewListItem> {
     // Die Datei heißt nach der Review-ID; die entsteht erst beim Anlegen, also vorläufiger Name.
     let tmp = state.data_dir.join("reviews").join(format!("neu-{}.tmp", Uuid::new_v4()));
-    let review = Review::create(&tmp, me(&state)?, &title).map_err(err)?;
+    let review = Review::create_with(&tmp, me(&state)?, &title, template.as_deref()).map_err(err)?;
     let item = review.list_item().map_err(err)?;
     drop(review);
     std::fs::rename(&tmp, review_path(&state, &item.id)).map_err(err)?;
@@ -193,6 +200,17 @@ pub async fn stage_unblind(state: State<'_, AppState>, review_id: String, stage_
 #[tauri::command]
 pub async fn stage_close(state: State<'_, AppState>, review_id: String, stage_id: String) -> Res<Snapshot> {
     open(&state, &review_id)?.close_stage(&uuid(&stage_id)?).map_err(err)
+}
+
+/// Was das Gate beim Schließen ergäbe; `None`, wenn die Station keines hat.
+#[tauri::command]
+pub async fn stage_gate(state: State<'_, AppState>, review_id: String, stage_id: String) -> Res<Option<GateResult>> {
+    open(&state, &review_id)?.gate_preview(&uuid(&stage_id)?).map_err(err)
+}
+
+#[tauri::command]
+pub async fn gate_override(state: State<'_, AppState>, review_id: String, station: String, reason: String) -> Res<()> {
+    open(&state, &review_id)?.override_gate(&station, &reason).map_err(err)
 }
 
 #[tauri::command]

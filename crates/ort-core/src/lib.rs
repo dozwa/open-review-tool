@@ -7,8 +7,8 @@
 //!
 //! Schichten: [`event`] (Umschlag, Hash, Signatur) und [`catalog`] (Register der Ereignistypen) →
 //! [`store`] (einzige Schreibstelle) →
-//! [`projection`] und [`agreement`] (aus dem Log berechnet) → [`service`] (Fachlogik, Rechte,
-//! Verblindung) → [`exchange`] (Dateien zwischen Personen).
+//! [`projection`], [`workflow`] und [`agreement`] (aus dem Log berechnet) → [`service`] (Fachlogik,
+//! Rechte, Verblindung) → [`exchange`] (Dateien zwischen Personen).
 
 pub mod agreement;
 pub mod canonical;
@@ -20,6 +20,7 @@ pub mod import;
 pub mod projection;
 pub mod service;
 pub mod store;
+pub mod workflow;
 
 pub use error::{Error, Result};
 pub use event::{Event, Identity, PublicIdentity};

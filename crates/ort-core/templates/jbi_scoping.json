@@ -1,0 +1,117 @@
+{
+  "key": "jbi_scoping",
+  "name": "JBI Scoping Review",
+  "review_type": "scoping",
+  "description": "Ablauf nach dem JBI Manual, Kapitel 10: Pilot mit mindestens 75 % Übereinstimmung, zwei unabhängige Stimmen, Klärung, Volltext, Charting und Bericht nach PRISMA-ScR.",
+  "terms": {
+    "record": "Eintrag",
+    "records": "Einträge",
+    "source": "Quelle",
+    "sources": "Quellen",
+    "extraction": "Charting"
+  },
+  "criteria_schema": [
+    { "key": "population", "label": "Population" },
+    { "key": "concept", "label": "Concept" },
+    { "key": "context", "label": "Context" },
+    { "key": "source_type", "label": "Quellenart" }
+  ],
+  "rules": {
+    "decision_rule": { "value": "unanimous", "editable": true },
+    "min_reviewers": { "value": 2, "editable": true },
+    "maybe_as": { "value": "include", "editable": true },
+    "conflict_rule": { "value": "discussion", "editable": true },
+    "blind": { "value": true, "editable": true }
+  },
+  "stations": [
+    {
+      "key": "protocol",
+      "kind": "setup",
+      "label": "Protokoll und Team",
+      "description": "Kriterien veröffentlichen und das Team zusammenstellen.",
+      "tool": "protocol",
+      "gate": [{ "check": "criteria_published" }, { "check": "min_writers", "n": 2 }]
+    },
+    {
+      "key": "search",
+      "kind": "setup",
+      "label": "Suche",
+      "description": "Je Quelle eine Suchversion mit Suchstring, Datum und Grenzen festhalten.",
+      "tool": "search"
+    },
+    {
+      "key": "import",
+      "kind": "setup",
+      "label": "Import und Dubletten",
+      "description": "Treffer einlesen; Dubletten werden erkannt und gezählt.",
+      "tool": "import",
+      "gate": [{ "check": "records_imported" }]
+    },
+    {
+      "key": "pilot_title_abstract",
+      "kind": "screening",
+      "label": "Pilot Titel/Abstract",
+      "description": "Das ganze Team bewertet eine Zufallsstichprobe. Weiter geht es ab 75 % Übereinstimmung; sonst Kriterien überarbeiten und eine neue Runde öffnen.",
+      "input": { "scope": "sample", "sample_size": 25 },
+      "rules": { "decision_rule": { "value": "unanimous", "editable": false } },
+      "gate": [{ "check": "agreement_min", "percent": 75 }]
+    },
+    {
+      "key": "title_abstract",
+      "kind": "screening",
+      "label": "Titel/Abstract",
+      "description": "Alle Einträge ohne Dubletten, danach Klärung der Abweichungen.",
+      "input": { "scope": "all" },
+      "gate": [{ "check": "all_decided" }, { "check": "no_open_conflicts" }]
+    },
+    {
+      "key": "fulltext_retrieval",
+      "kind": "setup",
+      "label": "Volltexte beschaffen",
+      "description": "Jeder eingeschlossene Eintrag ist beschafft oder mit Grund nicht beschaffbar.",
+      "tool": "fulltext"
+    },
+    {
+      "key": "fulltext",
+      "kind": "screening",
+      "label": "Volltext-Screening",
+      "description": "Eingeschlossene aus Titel/Abstract am Volltext prüfen, danach Klärung.",
+      "input": { "scope": "from_station", "station": "title_abstract" },
+      "gate": [{ "check": "all_decided" }, { "check": "no_open_conflicts" }]
+    },
+    {
+      "key": "citation_search",
+      "kind": "setup",
+      "label": "Zitationssuche",
+      "description": "Vorwärts und rückwärts suchen, bis nichts Neues mehr kommt.",
+      "tool": "citation"
+    },
+    {
+      "key": "bundling",
+      "kind": "setup",
+      "label": "Quellen bündeln",
+      "description": "Begleitpublikationen derselben Studie zu einer Quelle zusammenfassen.",
+      "tool": "bundling"
+    },
+    {
+      "key": "charting_pilot",
+      "kind": "form",
+      "label": "Charting-Pilot",
+      "description": "Je Quellenart zwei bis drei Quellen unabhängig extrahieren und das Formular abstimmen."
+    },
+    {
+      "key": "charting",
+      "kind": "form",
+      "label": "Charting",
+      "description": "Alle Quellen mit dem abgestimmten Formular extrahieren und abgleichen."
+    },
+    {
+      "key": "report",
+      "kind": "report",
+      "label": "Auswertung und Bericht",
+      "description": "Flussdiagramm, Tabellen und Methodentext."
+    }
+  ],
+  "forms": [],
+  "report": { "checklist": "PRISMA-ScR", "diagram": "prisma_scr" }
+}

@@ -4,19 +4,23 @@
 //! - gültiges Votum = neuestes `VoteCast`/`VoteRevised` je Person, Record und Stufe
 //! - es gilt das erste `StageInstanceOpened` einer Stufe (Regeln sind danach fest)
 //! - `final_decision`: Konsens schlägt alles; sonst Markierung „nicht entscheidbar“ → Klärung;
-//!   sonst einstimmig ab `min_reviewers`; verschiedene Voten → Widerspruch; sonst wartend.
+//!   sonst entscheidet die Auswahlregel der Stufe:
+//!   - `unanimous`: einstimmig ab `min_reviewers`; verschiedene Voten → Widerspruch; sonst wartend
+//!   - `liberal`: eine Einschluss-Stimme genügt; ein Ausschluss braucht zwei gleiche Stimmen
+//!   - `single_verified`: eine Stimme entscheidet; Ausschlüsse brauchen eine zweite Stimme, alle
+//!     oder die aus einer Stichprobe, die sich aus Seed und Eintrags-ID nachrechnen lässt
 //!
 //! Ordnung über Personen hinweg: (`occurred_at`, `actor_id`, `stream`, `seq`). Innerhalb einer
 //! Kette gilt immer `seq`.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
 use crate::catalog;
-use crate::event::Event;
+use crate::event::{sha256_hex, Event};
 
 pub fn order_key(e: &Event) -> (&str, Uuid, &str, i64) {
     (e.occurred_at.as_str(), e.actor_id, e.stream.as_str(), e.seq)
@@ -111,6 +115,35 @@ pub struct StageConfig {
     pub record_ids_sha256: Option<String>,
     pub opened_at: String,
     pub opened_by: Uuid,
+    /// Station der Vorlage; fehlt bei Stufen aus der Zeit vor den Vorlagen.
+    pub station: Option<String>,
+    pub round: i64,
+    pub decision_rule: String,
+    pub conflict_rule: String,
+    pub verify: Option<Verify>,
+}
+
+/// Zweite Stimme für Ausschlüsse bei der Regel `single_verified`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Verify {
+    /// `all` oder `sample`.
+    pub scope: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub percent: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed: Option<i64>,
+}
+
+impl Verify {
+    /// Ob ein Eintrag zur Prüfmenge gehört. Hängt nur an Seed und ID und ist damit für alle gleich.
+    pub fn covers(&self, record_id: &str) -> bool {
+        if self.scope != "sample" {
+            return true;
+        }
+        let digest = sha256_hex(format!("{}:{record_id}", self.seed.unwrap_or(0)).as_bytes());
+        let bucket = u32::from_str_radix(&digest[..8], 16).unwrap_or(0) % 100;
+        i64::from(bucket) < self.percent.unwrap_or(100)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -161,7 +194,7 @@ impl StageState {
         let events: Vec<&Event> =
             sorted(events).into_iter().filter(|e| e.stage_instance_id.as_ref() == Some(stage_id)).collect();
         let opened = events.iter().find(|e| e.event_type == "StageInstanceOpened")?;
-        let p = &opened.payload;
+        let p = &catalog::upcast(opened);
         let s = |k: &str| p.get(k).and_then(Value::as_str).map(str::to_string);
         let i = |k: &str| p.get(k).and_then(Value::as_i64);
         let config = StageConfig {
@@ -181,6 +214,11 @@ impl StageState {
             record_ids_sha256: s("record_ids_sha256"),
             opened_at: opened.occurred_at.clone(),
             opened_by: opened.actor_id,
+            station: s("station"),
+            round: i("round").unwrap_or(1),
+            decision_rule: s("decision_rule").unwrap_or_else(|| "unanimous".into()),
+            conflict_rule: s("conflict_rule").unwrap_or_else(|| "discussion".into()),
+            verify: p.get("verify").and_then(|v| serde_json::from_value(v.clone()).ok()),
         };
         let mut state = StageState {
             config,
@@ -256,6 +294,7 @@ impl StageState {
         let keys: BTreeSet<String> =
             by_record.keys().chain(self.consensus.keys()).chain(self.flags.keys()).cloned().collect();
         let min = self.config.min_reviewers.max(0) as usize;
+        let rule = self.config.decision_rule.as_str();
         keys.into_iter()
             .map(|record| {
                 let votes = by_record.get(&record).cloned().unwrap_or_default();
@@ -265,16 +304,57 @@ impl StageState {
                     (Some(c.decision.clone()), "consensus")
                 } else if self.flags.contains_key(&record) {
                     (None, "needs_clarification")
+                } else if rule == "liberal" && votes.iter().any(|v| v == "include") {
+                    (Some("include".to_string()), "liberal")
                 } else if distinct.len() > 1 {
                     (None, "disagreement")
-                } else if n_votes < min {
-                    (None, "pending")
                 } else {
-                    (distinct.into_iter().next().cloned(), "unanimous")
+                    let value = distinct.into_iter().next().cloned();
+                    let excluded = value.as_deref() == Some("exclude");
+                    let needed = match rule {
+                        "liberal" => min.max(2),
+                        "single_verified" if excluded && self.needs_second_vote(&record) => 2,
+                        "single_verified" => 1,
+                        _ => min,
+                    };
+                    if n_votes < needed {
+                        (None, "pending")
+                    } else if rule == "single_verified" && n_votes == 1 {
+                        (value, "single")
+                    } else {
+                        (value, "unanimous")
+                    }
                 };
                 (record, FinalDecision { n_votes, decision, status })
             })
             .collect()
+    }
+
+    /// Bei `single_verified`: ob ein Ausschluss dieses Eintrags eine zweite Stimme braucht.
+    pub fn needs_second_vote(&self, record_id: &str) -> bool {
+        self.config.verify.as_ref().is_none_or(|v| v.covers(record_id))
+    }
+
+    /// Ob die Person zu diesem Eintrag noch abstimmen soll. Grundlage sind die Stimmen, die auf
+    /// diesem Rechner vorliegen; in einer verblindeten Stufe sind das nur die eigenen.
+    pub fn wants_vote_from(&self, record_id: &str, actor: &Uuid) -> bool {
+        let votes: Vec<(&Uuid, &VoteInfo)> =
+            self.votes.iter().filter(|((r, _), _)| r == record_id).map(|((_, a), v)| (a, v)).collect();
+        if votes.iter().any(|(a, _)| *a == actor) {
+            return false;
+        }
+        let mapped = |v: &VoteInfo| match (&self.config.maybe_as, v.decision.as_str()) {
+            (Some(to), "maybe") => to.clone(),
+            _ => v.decision.clone(),
+        };
+        match self.config.decision_rule.as_str() {
+            "liberal" => !votes.iter().any(|(_, v)| mapped(v) == "include"),
+            "single_verified" => {
+                votes.is_empty()
+                    || (votes.len() == 1 && mapped(votes[0].1) == "exclude" && self.needs_second_vote(record_id))
+            }
+            _ => true,
+        }
     }
 }
 

@@ -1,0 +1,47 @@
+{
+  "key": "free",
+  "name": "Freier Ablauf",
+  "review_type": "free",
+  "description": "Ohne feste Reihenfolge und ohne Abschlussregeln: Stufen lassen sich jederzeit öffnen, eine Stimme je Eintrag genügt. Für Literaturübersichten und zum Ausprobieren.",
+  "terms": {
+    "record": "Eintrag",
+    "records": "Einträge",
+    "source": "Quelle",
+    "sources": "Quellen",
+    "extraction": "Extraktion"
+  },
+  "criteria_schema": [],
+  "rules": {
+    "decision_rule": { "value": "unanimous", "editable": true },
+    "min_reviewers": { "value": 1, "editable": true },
+    "maybe_as": { "value": null, "editable": true },
+    "conflict_rule": { "value": "discussion", "editable": true },
+    "blind": { "value": false, "editable": true }
+  },
+  "stations": [
+    {
+      "key": "protocol",
+      "kind": "setup",
+      "label": "Kriterien und Team",
+      "description": "Kriterien festhalten und Personen hinzufügen.",
+      "tool": "protocol"
+    },
+    {
+      "key": "import",
+      "kind": "setup",
+      "label": "Import",
+      "description": "Treffer einlesen; Dubletten werden erkannt und gezählt.",
+      "tool": "import"
+    },
+    {
+      "key": "screening",
+      "kind": "screening",
+      "label": "Screening",
+      "description": "Beliebig viele Stufen, auch nebeneinander.",
+      "input": { "scope": "all" },
+      "free_rounds": true
+    }
+  ],
+  "forms": [],
+  "report": {}
+}

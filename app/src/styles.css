@@ -308,6 +308,90 @@ main { max-width: 900px; margin: 0 auto; padding: 44px 36px 64px; }
   border-radius: 50%; background: var(--surface-2); color: var(--ink-2); font-size: 11.5px; font-weight: 700;
 }
 
+/* ---------------------------------------------------------------- Ablauf: Stationen der Vorlage */
+
+.station-bar { list-style: none; margin: 0 0 18px; padding: 0 0 4px; display: flex; overflow-x: auto; }
+.station-step { flex: 1 0 74px; position: relative; text-align: center; }
+.station-step a { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; color: inherit; text-decoration: none; }
+.station-step::before {
+  content: ""; position: absolute; top: 11px; left: -50%; width: 100%; height: 2px; background: var(--surface-2);
+}
+.station-step:first-child::before { display: none; }
+.station-step.s-done::before, .station-step.s-running::before { background: var(--c-inc); }
+.station-dot {
+  position: relative; display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 24px; height: 24px; border-radius: 50%; font-size: 11.5px; font-weight: 700;
+  background: var(--surface-2); color: var(--ink-2); box-shadow: 0 0 0 3px var(--content);
+}
+.s-done > header .station-dot, .s-done .station-dot { background: var(--c-inc); color: #fff; }
+.s-running .station-dot { background: var(--c-may); color: #2b1d00; }
+.s-open .station-dot { background: var(--c-blue); color: #fff; }
+.s-later .station-dot { background: var(--surface-2); color: var(--ink-3); }
+.station-name { font-size: 11px; line-height: 1.25; color: var(--ink-2); padding: 0 3px; }
+.s-open .station-name, .s-running .station-name { color: var(--ink); font-weight: 600; }
+.s-later .station-name { color: var(--ink-3); }
+
+.stats.compact { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.next-step {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 0 0 18px; padding: 10px 14px; border-radius: 10px;
+  background: color-mix(in srgb, var(--c-blue) 10%, transparent);
+}
+.next-step .icon { color: var(--c-blue); }
+
+.stations { display: flex; flex-direction: column; gap: 12px; }
+.station {
+  display: flex; flex-direction: column; gap: 8px; padding: 16px; border-radius: 12px;
+  background: var(--content); border: 0.5px solid var(--line);
+}
+.station.s-open, .station.s-running { border-color: var(--line-strong); box-shadow: var(--shadow); }
+.station.s-locked, .station.s-later { background: none; }
+.station.s-later > p, .station.s-later h3 { color: var(--ink-3); }
+.station > header { display: flex; align-items: center; gap: 10px; }
+.station > header h3 { flex: 1; font-size: 15px; font-weight: 600; }
+.station > header .station-dot { box-shadow: none; }
+.station > .muted { line-height: 1.5; }
+.station-note { display: flex; align-items: flex-start; gap: 6px; color: var(--ink-2); line-height: 1.5; }
+.station-note .icon { margin-top: 3px; }
+.station-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.station-actions:empty { display: none; }
+.station .stage-grid { margin-top: 2px; }
+.station .sheet { margin-top: 6px; }
+
+.checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.checks li { display: flex; align-items: center; gap: 8px; }
+.checks small { color: var(--ink-2); }
+.check-mark {
+  display: inline-flex; align-items: center; justify-content: center; flex: none; width: 16px; height: 16px;
+  border-radius: 50%; border: 1.5px solid var(--line-strong); color: #fff;
+}
+.check-ok .check-mark { background: var(--c-inc); border-color: var(--c-inc); }
+.check-bad .check-mark { background: var(--c-exc); border-color: var(--c-exc); }
+.gate-line { display: flex; align-items: flex-start; gap: 6px; font-size: 12px; line-height: 1.45; }
+.gate-line .icon { margin-top: 2px; }
+.gate-line.ok .icon { color: var(--c-inc); }
+.gate-line.bad .icon { color: var(--c-exc); }
+.override { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 10px; background: var(--surface); }
+.override label { color: var(--ink-2); }
+
+/* ---------------------------------------------------------------- Neues Review */
+
+.wizard { max-width: 680px; }
+.wizard-steps { list-style: none; margin: 0 0 20px; padding: 0; display: flex; gap: 18px; }
+.wizard-steps li { display: flex; align-items: center; gap: 8px; color: var(--ink-3); font-weight: 500; }
+.wizard-steps .step-num { margin: 0; }
+.wizard-steps li.current { color: var(--ink); font-weight: 600; }
+.wizard-steps li.current .step-num { background: var(--accent); color: var(--accent-ink); }
+.wizard-steps li.done .step-num { background: var(--c-inc); color: #fff; }
+.template-option { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; cursor: pointer; }
+.template-option + .template-option { border-top: 0.5px solid var(--line); }
+.template-option.selected { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.template-option input { margin-top: 3px; }
+.template-option > span { display: flex; flex-direction: column; gap: 2px; }
+.template-option small { color: var(--ink-2); line-height: 1.45; }
+.template-flow { display: flex; flex-wrap: wrap; gap: 2px 0; margin: -10px 4px 18px; color: var(--ink-2); font-size: 12px; line-height: 1.6; }
+.flow-arrow { margin: 0 6px; color: var(--ink-3); }
+.wizard .row .inline-actions { margin-top: 0; align-items: center; flex-wrap: nowrap; }
+
 /* ---------------------------------------------------------------- Stufen, Austausch */
 
 .stage-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; }

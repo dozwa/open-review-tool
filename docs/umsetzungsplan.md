@@ -142,6 +142,20 @@ Prüfung: alle 47 Tests unverändert grün; ein Ereignis mit ungültigem Payload
 
 ### 1 Vorlage und Ablauf (L)
 
+Stand 19.11.2026: umgesetzt. Festlegungen beim Bau:
+
+- Die Klärungsregel steht wie die Auswahlregel in `StageInstanceOpened` (`conflict_rule`), damit jede Stufe für
+  sich prüfbar bleibt. Die Vorlage liefert die Vorgabe und legt fest, ob sie änderbar ist.
+- Eine Station mit Gate sperrt alle späteren Stationen. Schließen einer Stufe ist auch mit nicht erfülltem Gate
+  möglich; das Ergebnis steht als `GateEvaluated` im Log. Übersteuern ist ein eigener Schritt (`GateOverridden`)
+  und gilt für die Runde, in der es geschrieben wurde.
+- Gates von `setup`-Stationen (`criteria_published`, `min_writers`, `records_imported`) werden laufend aus dem
+  Stand berechnet und nicht als Ereignis festgehalten.
+- `single_verified` schließt Verblindung aus. Die Prüfmenge ergibt sich aus SHA-256 über „Seed:Eintrags-ID“.
+- Stationen, die erst spätere Meilensteine bringen, stehen schon in der Vorlage, haben aber noch kein Gate. Wenn
+  sie eines bekommen, ist das für bestehende Reviews eine neue Vorlagenversion.
+- `StageInstanceOpened` hat Schema-Version 2; eine App vom Stand Meilenstein 0 weist solche Stufen ab.
+
 - Vorlagenformat, Vorlage „JBI Scoping Review“ und eine zweite, minimale Vorlage „Freier Ablauf“ (eine Stimme,
   keine Gates). Die zweite Vorlage beweist, dass nichts fest verdrahtet ist, und dient bestehenden Reviews.
 - `workflow.rs`: Projektion der Stationen mit Zustand (gesperrt, offen, läuft, abgeschlossen), Runden und Gates.

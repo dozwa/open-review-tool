@@ -4,9 +4,10 @@ import { HashRouter, NavLink, Route, Routes, useNavigate } from "react-router-do
 import { open, save } from "@tauri-apps/plugin-dialog";
 
 import { api, BUNDLE_FILTER, errorText, importSummary, Person, ReviewListItem, safeFileName } from "./api";
+import { NewReviewPage } from "./NewReview";
 import { ReviewPage } from "./ReviewPage";
 import { ScreeningPage, StagePage } from "./StagePages";
-import { RefreshContext, ROLE_LABEL, useRefreshSidebar } from "./shared";
+import { RefreshContext, ROLE_LABEL } from "./shared";
 import { Avatar, Banner, Icon } from "./ui";
 import "./styles.css";
 
@@ -119,27 +120,9 @@ function Sidebar({ me, reviews, onImport, onIdentity, onNew }: {
 }
 
 function Home({ me, onImport, onIdentity }: { me: Person; onImport: () => void; onIdentity: () => void }) {
-  const navigate = useNavigate();
-  const refresh = useRefreshSidebar();
-  const [title, setTitle] = useState("");
-  const [error, setError] = useState("");
-
-  async function create(event: React.FormEvent) {
-    event.preventDefault();
-    setError("");
-    try {
-      const review = await api.createReview(title);
-      setTitle("");
-      refresh();
-      navigate(`/reviews/${review.id}`);
-    } catch (e) {
-      setError(errorText(e));
-    }
-  }
-
   const steps = [
     ["Identität teilen", "Jede Person schickt ihre Identitätsdatei an die Leitung."],
-    ["Review anlegen", "Die Leitung importiert die Treffer und öffnet eine Stufe."],
+    ["Review anlegen", "Die Leitung wählt den Review-Typ, importiert die Treffer und öffnet eine Stufe."],
     ["Pakete verteilen", "Jedes Mitglied bekommt ein Paket – verblindet nur mit den eigenen Stimmen."],
     ["Screenen", "Mit i, e und m geht es schnell. Danach eine Rückmeldung speichern."],
     ["Zusammenführen", "Die Leitung liest Rückmeldungen ein, klärt Konflikte und schließt ab."],
@@ -151,17 +134,15 @@ function Home({ me, onImport, onIdentity }: { me: Person; onImport: () => void; 
         <h1>Hallo {me.name.split(" ")[0]}</h1>
         <p className="subtitle">Alle Entscheidungen werden signiert und lückenlos protokolliert. Zusammengearbeitet wird über Dateien.</p>
       </div>
-      {error && <Banner kind="error">{error}</Banner>}
       <div className="action-cards">
-        <form className="action-card" onSubmit={create}>
+        <div className="action-card">
           <div className="action-icon"><Icon name="plus" size={20} /></div>
           <h2>Neues Review</h2>
-          <p>Du leitest das Review, importierst Treffer und lädst dein Team ein.</p>
-          <div className="inline-form">
-            <input id="new-review-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Titel des Reviews" required />
-            <button className="primary" type="submit">Anlegen</button>
+          <p>Du leitest das Review: Typ wählen, Treffer importieren, Team einladen.</p>
+          <div className="inline-actions">
+            <NavLink className="button primary" to="/neu">Review anlegen …</NavLink>
           </div>
-        </form>
+        </div>
         <div className="action-card">
           <div className="action-icon"><Icon name="download" size={20} /></div>
           <h2>Bei einem Review mitmachen</h2>
@@ -212,8 +193,7 @@ function Shell({ me }: { me: Person }) {
   );
 
   function newReview() {
-    navigate("/");
-    setTimeout(() => document.getElementById("new-review-title")?.focus(), 50);
+    navigate("/neu");
   }
 
   return (
@@ -227,6 +207,7 @@ function Shell({ me }: { me: Person }) {
             {notice && <Banner kind="notice" onClose={() => setNotice("")}>{notice}</Banner>}
             <Routes>
               <Route path="/" element={<Home me={me} onImport={actions.importBundle} onIdentity={actions.exportIdentity} />} />
+              <Route path="/neu" element={<NewReviewPage />} />
               <Route path="/reviews/:reviewId" element={<ReviewPage />} />
               <Route path="/reviews/:reviewId/stages/:stageId" element={<StagePage />} />
               <Route path="/reviews/:reviewId/stages/:stageId/screen" element={<ScreeningPage />} />

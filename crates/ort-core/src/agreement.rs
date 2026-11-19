@@ -185,6 +185,20 @@ pub fn percent_agreement(votes: &[(String, String, String)]) -> Percent {
     percent_units(&refs(&e), e.k)
 }
 
+/// Übereinstimmung als ganze Zahlen: (einstimmige Records, Records mit mindestens zwei Voten).
+/// Dieselbe Zählung wie [`percent_agreement`], für Gates im Log, wo Gleitkommazahlen verboten sind.
+pub fn agreement_counts(votes: &[(String, String, String)]) -> (i64, i64) {
+    let mut units: BTreeMap<&String, BTreeSet<&String>> = BTreeMap::new();
+    let mut sizes: BTreeMap<&String, i64> = BTreeMap::new();
+    for (record, _, decision) in votes {
+        units.entry(record).or_default().insert(decision);
+        *sizes.entry(record).or_default() += 1;
+    }
+    let rated: Vec<&&String> = sizes.iter().filter(|(_, n)| **n >= 2).map(|(r, _)| r).collect();
+    let agree = rated.iter().filter(|r| units[**r].len() == 1).count();
+    (agree as i64, rated.len() as i64)
+}
+
 /// Fleiss' Kappa über alle Records mit genau `n` Voten; meldet, wie viele Records herausfallen.
 pub fn fleiss_kappa(votes: &[(String, String, String)], n: usize) -> Fleiss {
     let e = encode(votes);

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ask, save } from "@tauri-apps/plugin-dialog";
 
-import { api, canManage, canVote, Conflict, Criteria, errorText, Estimate, Progress, RecordItem, safeFileName, StageDetail, Summary } from "./api";
+import { api, canManage, canVote, Conflict, CONFLICT_LABEL, Criteria, errorText, Estimate, gateText, Progress, RecordItem, RULE_LABEL, safeFileName, StageDetail, Summary, term } from "./api";
 import { stageState } from "./ReviewPage";
 import { Avatar, Banner, DECISION_PARTS, DecisionBar, Empty, Group, Icon, Kbd, PageHeader, Pill, Row, Stat } from "./ui";
 
@@ -247,6 +247,7 @@ export function StagePage() {
   if (!detail || !summary) return error ? <Banner kind="error">{error}</Banner> : null;
   const { stage, role, criteria } = detail;
   const manage = canManage(role);
+  const records = term(detail.terms, "records", "Einträge");
   const d = summary.decisions;
   const a = summary.agreement;
   const maxVotes = Math.max(1, ...(summary.reviewers ?? []).map((r) => r.n_votes));
@@ -259,10 +260,28 @@ export function StagePage() {
   }
 
   async function closeStage() {
-    const ok = await ask("Danach sind keine Stimmen mehr möglich, auch keine nachgereichten. Der Stand wird als Snapshot festgehalten.", {
-      title: "Stufe schließen?", kind: "warning", okLabel: "Schließen", cancelLabel: "Abbrechen",
-    });
-    if (ok) await run(() => api.close(reviewId, stageId), "Stufe geschlossen, Snapshot erstellt.");
+    // Vorab zeigen, was das Gate der Station ergäbe. Verblindet gibt der Kern darüber keine Auskunft.
+    const gate = await api.gate(reviewId, stageId).catch(() => null);
+    let text = "Danach sind keine Stimmen mehr möglich, auch keine nachgereichten. Der Stand wird als Snapshot festgehalten.";
+    if (gate) {
+      text += gate.passed
+        ? `\n\nDas Gate der Station ist erfüllt: ${gateText(gate)}.`
+        : `\n\nDas Gate der Station ist nicht erfüllt: ${gateText(gate)}. Die nächste Station bleibt gesperrt, bis eine neue Runde das Gate erfüllt oder die Leitung es mit Begründung übersteuert.`;
+    } else if (stage.blind_active) {
+      text += "\n\nDie Stufe ist noch verblindet. Konflikte lassen sich erst nach dem Entblinden klären.";
+    }
+    const ok = await ask(text, { title: "Stufe schließen?", kind: "warning", okLabel: "Schließen", cancelLabel: "Abbrechen" });
+    if (!ok) return;
+    setError("");
+    setNotice("");
+    try {
+      const closed = await api.close(reviewId, stageId);
+      const result = closed.gate ? ` Gate ${closed.gate.passed ? "erfüllt" : "nicht erfüllt"}: ${gateText(closed.gate)}.` : "";
+      setNotice(`Stufe geschlossen, Snapshot erstellt.${result}`);
+      await load();
+    } catch (e) {
+      setError(errorText(e));
+    }
   }
 
   async function exportCsv() {
@@ -280,8 +299,11 @@ export function StagePage() {
         subtitle={
           <>
             <Pill>{stageState(stage)}</Pill>
-            <span>{stage.n_records.toLocaleString("de-DE")} Records</span>
-            <span>mind. {stage.min_reviewers} Stimmen</span>
+            <span>{stage.n_records.toLocaleString("de-DE")} {records}</span>
+            <span>{RULE_LABEL[stage.decision_rule] ?? stage.decision_rule}</span>
+            {stage.decision_rule === "unanimous" && <span>mind. {stage.min_reviewers} Stimmen</span>}
+            {stage.verify && <span>{stage.verify.scope === "sample" ? `Prüfung von ${stage.verify.percent} % der Ausschlüsse, Seed ${stage.verify.seed}` : "Prüfung aller Ausschlüsse"}</span>}
+            {stage.conflict_rule !== "discussion" && <span>Klärung: {CONFLICT_LABEL[stage.conflict_rule] ?? stage.conflict_rule}</span>}
             {stage.seed !== null && <span>Stichprobe, Seed {stage.seed}</span>}
           </>
         }
@@ -298,7 +320,7 @@ export function StagePage() {
 
       <div className="stats">
         <Stat label="Dein Fortschritt" value={`${summary.progress.done} / ${summary.progress.total}`} detail={`${Math.round((summary.progress.done / Math.max(summary.progress.total, 1)) * 100)} % bewertet`} />
-        {a && <Stat label="Übereinstimmung" value={a.percent.percent_agreement == null ? "–" : `${fmt(a.percent.percent_agreement * 100, 1)} %`} detail={`${ci(a.percent_ci, 100, 1, " %")} · ${a.percent.n_items} Records`} />}
+        {a && <Stat label="Übereinstimmung" value={a.percent.percent_agreement == null ? "–" : `${fmt(a.percent.percent_agreement * 100, 1)} %`} detail={`${ci(a.percent_ci, 100, 1, " %")} · ${a.percent.n_items} ${records}`} />}
         {a && <Stat label="Krippendorffs Alpha" value={fmt(a.krippendorff.alpha)} detail={ci(a.alpha_ci)} />}
         {!a && <Stat label="Konflikte" value={<Icon name="lock" size={20} />} detail="sichtbar nach dem Entblinden" />}
       </div>
@@ -332,9 +354,9 @@ export function StagePage() {
       )}
 
       {a && a.cohen_pairs.length > 0 && (
-        <Group title="Paare" footer="Kappa allein kann bei seltenen Einschlüssen täuschen (Kappa-Paradox); deshalb stehen Prozent und PABAK daneben. Intervalle: Perzentil-Bootstrap über Records.">
+        <Group title="Paare" footer="Kappa allein kann bei seltenen Einschlüssen täuschen (Kappa-Paradox); deshalb stehen Prozent und PABAK daneben. Intervalle: Perzentil-Bootstrap über die Einträge.">
           <table className="table">
-            <thead><tr><th>Paar</th><th className="num">Records</th><th className="num">Übereinstimmung</th><th className="num">Kappa</th><th className="num">PABAK</th></tr></thead>
+            <thead><tr><th>Paar</th><th className="num">{records}</th><th className="num">Übereinstimmung</th><th className="num">Kappa</th><th className="num">PABAK</th></tr></thead>
             <tbody>
               {a.cohen_pairs.map((p) => (
                 <tr key={`${p.rater_a}-${p.rater_b}`}>

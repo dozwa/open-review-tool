@@ -5,10 +5,13 @@ Kernideen: ein unveränderliches, signiertes Event-Log für alle Entscheidungen,
 Verblindung, Klärung und Snapshots, eine Auswertung der Übereinstimmung mit Konfidenzintervallen und
 Zusammenarbeit ohne Server über Austauschdateien.
 
-> Status (18.11.2026): Umbau von der Web-Version (Django, PostgreSQL, Docker) zur Mac-App mit Rust und Tauri 2.
-> Enthalten: Identität mit Schlüssel im Schlüsselbund, Reviews mit Rollen, Import von RIS und BibTeX, Stufen,
-> verblindetes Screening, Konflikte und Konsens, Übereinstimmung, CSV-Export, Pakete und Rückmeldungen.
-> Noch nicht enthalten: Zotero-Anbindung, Volltexte, Suchdokumentation, Reporting, signierte und notarisierte App.
+> Status (19.11.2026): Mac-App mit Rust und Tauri 2. Der vollständige Ablauf eines Scoping Reviews wird nach
+> `docs/umsetzungsplan.md` in Meilensteinen gebaut; fertig sind 0 (Fundament) und 1 (Vorlage und Ablauf).
+> Enthalten: Identität mit Schlüssel im Schlüsselbund, Reviews mit Rollen, Review-Typ als Vorlage mit Stationen,
+> Gates und Runden, Import von RIS und BibTeX, Stufen mit drei Auswahlregeln, verblindetes Screening, Konflikte
+> und Konsens (auch als Dritt-Entscheid), Übereinstimmung, CSV-Export, Pakete und Rückmeldungen.
+> Noch nicht enthalten: strukturierte Kriterien, Suchdokumentation, Volltexte, Zotero, Charting, Bericht,
+> signierte und notarisierte App.
 
 ## So arbeitet ein Team
 
@@ -49,8 +52,9 @@ die Schlüsselbund-Sicherung von macOS.
 
 | Pfad | Inhalt |
 | --- | --- |
-| `crates/ort-core/` | Fachkern ohne Oberfläche: Event-Log (`event.rs`, `store.rs`), Projektionen, Übereinstimmung, Import, Fachlogik (`service.rs`), Austausch (`exchange.rs`) |
-| `crates/ort-core/tests/` | Tests für Log, Projektionen, Referenzwerte, Import, Austausch und den Ablauf mit vier Personen |
+| `crates/ort-core/` | Fachkern ohne Oberfläche: Event-Log (`event.rs`, `store.rs`), Register der Ereignistypen (`catalog.rs`), Projektionen, Vorlagen und Ablauf (`workflow.rs`), Übereinstimmung, Import, Fachlogik (`service.rs`), Austausch (`exchange.rs`) |
+| `crates/ort-core/templates/` | Mitgelieferte Vorlagen: „JBI Scoping Review“ und „Freier Ablauf“ |
+| `crates/ort-core/tests/` | Tests für Log, Projektionen, Referenzwerte, Import, Austausch, Vorlagen und Gates und den Ablauf mit vier Personen |
 | `app/src-tauri/` | Tauri-Hülle: Befehle für die Oberfläche, Identität und Schlüsselbund |
 | `app/src/` | Oberfläche mit React und TypeScript |
 | `docs/` | Anforderungsanalyse mit Stufenmodell, JBI-Anforderungen und Umsetzungsplan |
@@ -61,11 +65,14 @@ Tauri 2 mit der WebView von macOS, React 18.
 
 ## Wie es geprüft ist
 
-- **Kern:** 56 Tests. Darunter die Referenzwerte der früheren SQL-Tests (Cohen's Kappa gegen scikit-learn,
+- **Kern:** 77 Tests. Darunter die Referenzwerte der früheren SQL-Tests (Cohen's Kappa gegen scikit-learn,
   Fleiss' Kappa am Wikipedia-Beispiel, Krippendorffs Alpha am publizierten Beispiel mit 0,743, PABAK, Prozent,
   sechs `final_decision`-Szenarien, Maybe-Regel). Die Werte erzeugt `crates/ort-core/tests/fixtures/make_agreement_fixtures.py`.
 - **Austausch:** veränderte Datei, nachträglich neu gehashte Datei ohne Signatur, Außenstehende, Lücken in einer
   Kette, doppeltes Einlesen, Paket für eine andere Person, untergeschobene Records, selbst vergebene Rollen.
+- **Vorlagen und Gates:** Pilot unter 75 % sperrt Titel/Abstract, eine neue Runde oder ein Übersteuern mit
+  Begründung öffnet es; `liberal` und `single_verified` gegen Handrechnung; die Prüfstichprobe lässt sich aus Seed
+  und ID nachrechnen; Dritt-Entscheid wird auch beim Einlesen erzwungen; derselbe Durchlauf mit beiden Vorlagen.
 - **Ablauf:** Owner, zwei Reviewer und eine Person mit Leserecht mit getrennten Dateien, nur über Pakete und
   Rückmeldungen: verblindetes Screening, Paket ohne fremde Stimmen, Entblinden, Konflikte, Konsens, Revision,
   CSV, Abschluss mit Snapshot, abgewiesene Nachzügler, Folgestufe, Prüfung aller Ketten.
@@ -105,6 +112,12 @@ Nur für Entwicklung und Tests.
   Grund: Pakete lassen verblindete Stimmen als ganze Ketten weg, ohne Lücken zu reißen.
 - **Dubletten:** exakter Abgleich über DOI oder normalisierten Titel plus Jahr. Ein unscharfer Abgleich fehlt noch.
 - **Rollenprüfung beim Einlesen:** nach dem Stand nach dem Zusammenführen, nicht zum Zeitpunkt jedes Ereignisses.
+- **Gates:** Das Ergebnis wird beim Schließen einer Stufe auf dem Rechner der Leitung berechnet und als
+  `GateEvaluated` festgehalten. Schließen ist auch mit nicht erfülltem Gate möglich; gesperrt wird die nächste
+  Station. Stationen, die die App noch nicht bearbeiten kann (Suche, Volltexte, Charting, Bericht), stehen in der
+  Leiste als „folgt“ und sperren nichts.
+- **Eine Stimme mit Prüfung (`single_verified`):** Die Stufe ist nie verblindet, weil die zweite Person die
+  Ausschlüsse sehen muss. Wer was schon bewertet hat, weiß eine Person erst nach dem nächsten Paket.
 - **Reihenfolge über Personen hinweg:** nach Zeitstempel; falsch gehende Uhren können die Reihenfolge von Konsens
   oder Rollenwechseln verschieben.
 
@@ -112,7 +125,6 @@ Nur für Entwicklung und Tests.
 
 - Signieren und Notarisieren (Apple Developer ID)
 - Windows und Linux (mit Tauri möglich)
-- Reihenfolge der nächsten Pakete: Zotero (lokale API), Suchdokumentation oder Reporting zuerst
 - Peters et al. 2022 und Pollock et al. 2023 (JBI) auswerten
 
 ## Lizenz

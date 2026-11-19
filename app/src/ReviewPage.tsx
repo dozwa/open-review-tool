@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { open, save } from "@tauri-apps/plugin-dialog";
 
 import {
@@ -8,21 +8,27 @@ import {
   canManage,
   canVote,
   ChainReport,
+  CONFLICT_LABEL,
   errorText,
+  gateText,
   importSummary,
   Member,
   ReviewDetail,
+  RULE_LABEL,
   safeFileName,
   Stage,
+  StageDefaults,
   StageParams,
+  Station,
+  StationCheck,
+  term,
 } from "./api";
 import { ROLE_LABEL, useRefreshSidebar } from "./shared";
-import { Avatar, Banner, Empty, Group, Icon, PageHeader, Pill, Row, Segmented } from "./ui";
+import { Avatar, Banner, Empty, Group, Icon, PageHeader, Pill, Row, Segmented, Stat } from "./ui";
 
 const IMPORT_STATUS: Record<string, string> = { running: "läuft", done: "fertig", failed: "fehlgeschlagen" };
-const KIND_LABEL: Record<string, string> = { pilot: "Pilot", title_abstract: "Titel/Abstract", fulltext: "Volltext" };
 
-type Tab = "stages" | "exchange" | "members" | "imports" | "criteria" | "proof";
+type Tab = "overview" | "exchange" | "members" | "imports" | "criteria" | "proof";
 
 export function stageState(stage: Stage): string {
   if (stage.closed) return "Geschlossen";
@@ -32,9 +38,10 @@ export function stageState(stage: Stage): string {
 
 export function ReviewPage() {
   const { reviewId = "" } = useParams();
+  const location = useLocation();
   const refreshSidebar = useRefreshSidebar();
   const [review, setReview] = useState<ReviewDetail | null>(null);
-  const [tab, setTab] = useState<Tab>("stages");
+  const [tab, setTab] = useState<Tab>("overview");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -47,8 +54,10 @@ export function ReviewPage() {
   }
   useEffect(() => {
     setReview(null);
-    setTab("stages");
-    setError("");
+    setTab("overview");
+    // Der Assistent zum Anlegen reicht mit, was beim Import oder beim Team nicht geklappt hat.
+    const problems = (location.state as { problems?: string[] } | null)?.problems;
+    setError(problems?.length ? `Das Review ist angelegt, aber nicht alles hat geklappt: ${problems.join(" · ")}` : "");
     setNotice("");
     load();
   }, [reviewId]);
@@ -67,11 +76,10 @@ export function ReviewPage() {
   }
 
   if (!review) return error ? <Banner kind="error">{error}</Banner> : null;
-  const manage = canManage(review.role);
   const unique = review.n_records - review.n_duplicates;
 
   const tabs: { value: Tab; label: string; icon: string }[] = [
-    { value: "stages", label: "Stufen", icon: "stack" },
+    { value: "overview", label: "Ablauf", icon: "stack" },
     { value: "exchange", label: "Austausch", icon: "exchange" },
     { value: "members", label: "Mitglieder", icon: "people" },
     { value: "imports", label: "Import", icon: "upload" },
@@ -86,7 +94,8 @@ export function ReviewPage() {
         subtitle={
           <>
             <Pill>{ROLE_LABEL[review.role] ?? review.role}</Pill>
-            <span>{unique.toLocaleString("de-DE")} Records</span>
+            <span>{review.workflow.template_name}</span>
+            <span>{unique.toLocaleString("de-DE")} {term(review.workflow.terms, "records", "Einträge")}</span>
             {review.n_duplicates > 0 && <span>{review.n_duplicates} Dubletten</span>}
             <span>{review.members.length} Mitglieder</span>
             <span>Kriterien v{review.criteria.version}</span>
@@ -97,111 +106,249 @@ export function ReviewPage() {
       <div className="tab-body">
         {error && <Banner kind="error" onClose={() => setError("")}>{error}</Banner>}
         {notice && <Banner kind="notice" onClose={() => setNotice("")}>{notice}</Banner>}
-        {tab === "stages" && <StagesTab review={review} run={run} />}
+        {tab === "overview" && <OverviewTab review={review} run={run} goTo={setTab} />}
         {tab === "exchange" && <ExchangeTab review={review} run={run} />}
         {tab === "members" && <MembersTab review={review} run={run} />}
         {tab === "imports" && <ImportsTab review={review} run={run} />}
         {tab === "criteria" && <CriteriaTab review={review} run={run} />}
         {tab === "proof" && <ProofTab review={review} />}
       </div>
-      {!manage && tab === "stages" && review.stages.length === 0 && (
-        <p className="muted center">Sobald die Leitung eine Stufe öffnet, bekommst du ein neues Paket.</p>
-      )}
     </>
   );
 }
 
 type Run = (action: () => Promise<string | void>, done?: string) => Promise<void>;
 
-function StagesTab({ review, run }: { review: ReviewDetail; run: Run }) {
-  const [creating, setCreating] = useState(false);
+const STATE_LABEL: Record<Station["state"], string> = { locked: "Gesperrt", open: "Offen", running: "Läuft", done: "Abgeschlossen" };
+const STATE_TONE: Record<Station["state"], string | undefined> = { locked: undefined, open: "blue", running: "yellow", done: "green" };
+const TOOL_TABS: Record<string, { tab: Tab; label: string }[]> = {
+  protocol: [{ tab: "criteria", label: "Kriterien" }, { tab: "members", label: "Mitglieder" }],
+  import: [{ tab: "imports", label: "Import" }],
+};
+
+/** Stationen der Vorlage als Leiste: Wo steht das Review? */
+function StationBar({ stations }: { stations: Station[] }) {
+  return (
+    <ol className="station-bar" aria-label="Ablauf">
+      {stations.map((s, i) => (
+        <li key={s.key} className={`station-step s-${s.state}${s.available ? "" : " s-later"}`} title={`${s.label}: ${s.available ? STATE_LABEL[s.state] : "folgt in einer späteren Version"}`}>
+          <a href={`#station-${s.key}`} onClick={(e) => { e.preventDefault(); document.getElementById(`station-${s.key}`)?.scrollIntoView({ behavior: "smooth", block: "center" }); }}>
+            <span className="station-dot">{s.state === "done" ? <Icon name="check" size={12} /> : s.state === "locked" ? <Icon name="lock" size={11} /> : i + 1}</span>
+            <span className="station-name">{s.label}</span>
+          </a>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function CheckList({ checks }: { checks: StationCheck[] }) {
+  if (checks.length === 0) return null;
+  return (
+    <ul className="checks">
+      {checks.map((c) => (
+        <li key={c.check} className={c.passed === null ? "check-open" : c.passed ? "check-ok" : "check-bad"}>
+          <span className="check-mark">{c.passed === null ? null : <Icon name={c.passed ? "check" : "x"} size={11} />}</span>
+          <span>{c.label}{c.detail && <small> · {c.detail}</small>}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function OverviewTab({ review, run, goTo }: { review: ReviewDetail; run: Run; goTo: (tab: Tab) => void }) {
+  const [creating, setCreating] = useState<Station | null>(null);
+  const [overriding, setOverriding] = useState("");
+  const [reason, setReason] = useState("");
   const manage = canManage(review.role);
+  const { workflow } = review;
+  const records = term(workflow.terms, "records", "Einträge");
+  const stages = new Map(review.stages.map((s) => [s.id, s]));
+  const unique = review.n_records - review.n_duplicates;
+  const blocking = workflow.stations.filter((s) => s.blocking);
+  // Stationen ohne Abschlussregel werden nie „fertig“; sie taugen nicht als nächster Schritt.
+  const next = workflow.stations.find((s) => s.available && s.state !== "done" && s.state !== "locked" && (s.blocking || s.kind === "screening"));
+  const openStages = review.stages.filter((s) => !s.closed).length;
+
   return (
     <>
-      {review.stages.length === 0 && !creating && (
-        <Empty icon="stack" title="Noch keine Stufe">
-          {manage ? (
-            <>
-              Starte mit einer Pilotstufe: Das ganze Team screent eine Zufallsstichprobe und gleicht die Kriterien ab.
-              <div><button className="primary" onClick={() => setCreating(true)}><Icon name="plus" /> Stufe öffnen</button></div>
-            </>
-          ) : "Die Leitung hat noch keine Stufe geöffnet."}
-        </Empty>
-      )}
-      <div className="stage-grid">
-        {review.stages.map((stage) => (
-          <article key={stage.id} className="stage-card">
-            <div className="stage-card-head">
-              <span className="stage-kind">{KIND_LABEL[stage.kind] ?? stage.kind}</span>
-              <Pill>{stageState(stage)}</Pill>
-            </div>
-            <h3>{stage.name}</h3>
-            <p className="muted">
-              {stage.n_records.toLocaleString("de-DE")} Records · mind. {stage.min_reviewers} Stimmen
-              {stage.maybe_as && ` · Maybe zählt als ${stage.maybe_as === "include" ? "Include" : "Exclude"}`}
-            </p>
-            <div className="stage-card-actions">
-              {canVote(review.role) && !stage.closed && (
-                <Link className="button primary" to={`/reviews/${review.id}/stages/${stage.id}/screen`}>
-                  <Icon name="play" size={14} /> Screenen
-                </Link>
-              )}
-              <Link className="button" to={`/reviews/${review.id}/stages/${stage.id}`}>
-                <Icon name="chart" size={14} /> Auswertung
-              </Link>
-            </div>
-          </article>
-        ))}
-        {manage && review.stages.length > 0 && !creating && (
-          <button className="stage-card add" onClick={() => setCreating(true)}>
-            <Icon name="plus" size={20} />
-            Neue Stufe
-          </button>
+      <StationBar stations={workflow.stations} />
+      <div className="stats compact">
+        <Stat label={records} value={unique.toLocaleString("de-DE")} detail={review.n_duplicates > 0 ? `${review.n_duplicates} Dubletten erkannt` : "keine Dubletten"} />
+        <Stat label="Team" value={review.members.length} detail={`${review.members.filter((m) => canVote(m.role)).length} mit Schreibrecht`} />
+        <Stat label="Stufen" value={review.stages.length} detail={openStages ? `${openStages} offen` : "keine offen"} />
+        {blocking.length > 0 && (
+          <Stat label="Abschlussregeln" value={`${blocking.filter((s) => s.state === "done").length} / ${blocking.length}`} detail="Stationen mit erfülltem Gate" />
         )}
       </div>
-      {creating && (
-        <StageForm
-          review={review}
-          onCancel={() => setCreating(false)}
-          onSubmit={(params) =>
-            run(async () => {
-              await api.openStage(review.id, params);
-              setCreating(false);
-            }, "Stufe geöffnet. Schick den Mitgliedern unter „Austausch“ ein neues Paket.")
-          }
-        />
+      {next && (
+        <p className="next-step">
+          <Icon name="play" size={12} /> Als Nächstes: <strong>{next.label}</strong>
+          {next.checks.some((c) => c.passed === false) && <> – offen: {next.checks.filter((c) => c.passed === false).map((c) => c.label).join(", ")}</>}
+        </p>
+      )}
+
+      <div className="stations">
+        {workflow.stations.map((station, i) => {
+          const canOpen = manage && station.kind === "screening" && station.state !== "locked" && (station.free_rounds || station.rounds.every((r) => r.closed));
+          const canOverride = manage && station.blocking && station.state !== "done" && station.state !== "locked" && station.rounds.every((r) => r.closed);
+          const failed = station.kind === "screening" && station.checks.some((c) => c.passed === false);
+          return (
+            <section key={station.key} id={`station-${station.key}`} className={`station s-${station.state}${station.available ? "" : " s-later"}`}>
+              <header>
+                <span className="station-dot">{station.state === "done" ? <Icon name="check" size={12} /> : i + 1}</span>
+                <h3>{station.label}</h3>
+                {station.available ? <Pill tone={STATE_TONE[station.state]}>{STATE_LABEL[station.state]}</Pill> : <Pill>folgt</Pill>}
+              </header>
+              <p className="muted">{station.description}</p>
+              {station.state === "locked" && station.available && (
+                <p className="station-note"><Icon name="lock" size={12} /> Wartet auf: {station.blocked_by.map((b) => b.label).join(", ")}</p>
+              )}
+              <CheckList checks={station.checks} />
+              {station.overridden && <p className="station-note"><Icon name="flag" size={12} /> Übersteuert: {station.overridden}</p>}
+              {failed && !station.overridden && station.state !== "done" && (
+                <p className="station-note">Das Gate der letzten Runde ist nicht erfüllt. {manage ? "Öffne eine neue Runde oder übersteuere mit Begründung." : "Die Leitung öffnet eine neue Runde."}</p>
+              )}
+
+              {station.rounds.length > 0 && (
+                <div className="stage-grid">
+                  {station.rounds.map((round) => {
+                    const stage = stages.get(round.stage_id);
+                    if (!stage) return null;
+                    return (
+                      <article key={stage.id} className="stage-card">
+                        <div className="stage-card-head">
+                          <span className="stage-kind">{station.free_rounds ? "Stufe" : `Runde ${round.round}`}</span>
+                          <Pill>{stageState(stage)}</Pill>
+                        </div>
+                        <h3>{stage.name}</h3>
+                        <p className="muted">
+                          {stage.n_records.toLocaleString("de-DE")} {records} · {RULE_LABEL[stage.decision_rule] ?? stage.decision_rule}
+                          {stage.decision_rule === "unanimous" && ` · mind. ${stage.min_reviewers} Stimmen`}
+                          {stage.maybe_as && ` · Maybe zählt als ${stage.maybe_as === "include" ? "Include" : "Exclude"}`}
+                        </p>
+                        {round.gate && (
+                          <p className={round.gate.passed ? "gate-line ok" : "gate-line bad"}>
+                            <Icon name={round.gate.passed ? "check" : "x"} size={12} /> Gate {round.gate.passed ? "erfüllt" : "nicht erfüllt"}: {gateText(round.gate)}
+                          </p>
+                        )}
+                        <div className="stage-card-actions">
+                          {canVote(review.role) && !stage.closed && (
+                            <Link className="button primary" to={`/reviews/${review.id}/stages/${stage.id}/screen`}>
+                              <Icon name="play" size={14} /> Screenen
+                            </Link>
+                          )}
+                          <Link className="button" to={`/reviews/${review.id}/stages/${stage.id}`}>
+                            <Icon name="chart" size={14} /> Auswertung
+                          </Link>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+
+              <div className="station-actions">
+                {(TOOL_TABS[station.tool ?? ""] ?? []).map((t) => (
+                  <button key={t.tab} onClick={() => goTo(t.tab)}>{t.label} öffnen</button>
+                ))}
+                {canOpen && creating?.key !== station.key && (
+                  <button className={station.state === "open" ? "primary" : ""} onClick={() => setCreating(station)}>
+                    <Icon name="plus" size={14} /> {station.free_rounds || station.rounds.length === 0 ? "Stufe öffnen" : "Neue Runde öffnen"}
+                  </button>
+                )}
+                {canOverride && overriding !== station.key && (
+                  <button className="ghost" onClick={() => { setOverriding(station.key); setReason(""); }}>Übersteuern …</button>
+                )}
+              </div>
+
+              {overriding === station.key && (
+                <form
+                  className="override"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    run(async () => {
+                      await api.overrideGate(review.id, station.key, reason);
+                      setOverriding("");
+                    }, `„${station.label}“ übersteuert. Die Begründung steht im Log.`);
+                  }}
+                >
+                  <label htmlFor={`override-${station.key}`}>Warum gilt die Station ohne erfülltes Gate als abgeschlossen?</label>
+                  <div className="inline-form">
+                    <input id={`override-${station.key}`} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Begründung, erscheint später im Bericht" required autoFocus />
+                    <button type="button" onClick={() => setOverriding("")}>Abbrechen</button>
+                    <button className="primary" type="submit">Übersteuern</button>
+                  </div>
+                </form>
+              )}
+
+              {creating?.key === station.key && station.defaults && (
+                <StageForm
+                  review={review}
+                  station={station}
+                  defaults={station.defaults}
+                  onCancel={() => setCreating(null)}
+                  onSubmit={(params) =>
+                    run(async () => {
+                      await api.openStage(review.id, params);
+                      setCreating(null);
+                    }, "Stufe geöffnet. Schick den Mitgliedern unter „Austausch“ ein neues Paket.")
+                  }
+                />
+              )}
+            </section>
+          );
+        })}
+      </div>
+      {!manage && review.stages.length === 0 && (
+        <p className="muted center">Sobald die Leitung eine Stufe öffnet, bekommst du ein neues Paket.</p>
       )}
     </>
   );
 }
 
-function StageForm({ review, onSubmit, onCancel }: {
+function StageForm({ review, station, defaults, onSubmit, onCancel }: {
   review: ReviewDetail;
+  station: Station;
+  defaults: StageDefaults;
   onSubmit: (params: StageParams) => void;
   onCancel: () => void;
 }) {
-  const [name, setName] = useState(review.stages.length === 0 ? "Pilot Titel/Abstract" : "Titel/Abstract");
-  const [scope, setScope] = useState(review.stages.length === 0 ? "sample" : "all");
-  const [sampleSize, setSampleSize] = useState(25);
-  const [sourceStage, setSourceStage] = useState("");
-  const [blind, setBlind] = useState(true);
-  const [minReviewers, setMinReviewers] = useState(2);
-  const [maybeAs, setMaybeAs] = useState("");
+  const { rules } = defaults;
+  const records = term(review.workflow.terms, "records", "Einträge");
+  const [name, setName] = useState(defaults.name);
+  const [scope, setScope] = useState(defaults.scope);
+  const [sampleSize, setSampleSize] = useState(defaults.sample_size ?? 25);
+  const [sourceStage, setSourceStage] = useState(defaults.source_stage ?? "");
+  const [decisionRule, setDecisionRule] = useState(rules.decision_rule.value);
+  const [conflictRule, setConflictRule] = useState(rules.conflict_rule.value);
+  const [blind, setBlind] = useState(rules.blind.value);
+  const [minReviewers, setMinReviewers] = useState(rules.min_reviewers.value);
+  const [maybeAs, setMaybeAs] = useState(rules.maybe_as.value ?? "");
+  const [verifyScope, setVerifyScope] = useState<"all" | "sample">("all");
+  const [verifyPercent, setVerifyPercent] = useState(20);
+  const single = decisionRule === "single_verified";
+  // In der Vorlage festgelegte Eingangsmenge bleibt fest; nur der freie Ablauf lässt die Wahl.
+  const scopeFixed = review.workflow.published && !station.free_rounds;
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
     onSubmit({
-      name, scope, blind, min_reviewers: minReviewers, maybe_as: maybeAs || null,
-      kind: scope === "sample" ? "pilot" : scope === "from_stage" ? "fulltext" : "title_abstract",
+      name, scope, blind: single ? false : blind, min_reviewers: minReviewers, maybe_as: maybeAs || null,
+      kind: station.key,
       sample_size: scope === "sample" ? sampleSize : null,
       seed: null,
-      source_stage: scope === "from_stage" ? sourceStage : null,
+      source_stage: scope === "from_stage" ? sourceStage || null : null,
+      station: station.key,
+      decision_rule: decisionRule,
+      conflict_rule: conflictRule,
+      verify: single ? { scope: verifyScope, percent: verifyScope === "sample" ? verifyPercent : null } : null,
     });
   }
 
   return (
     <form className="sheet" onSubmit={submit}>
-      <h2>Neue Stufe</h2>
+      <h2>{station.label}: {station.free_rounds || defaults.round === 1 ? "neue Stufe" : `Runde ${defaults.round}`}</h2>
       <Group>
         <Row>
           <label htmlFor="stage-name">Name</label>
@@ -209,9 +356,9 @@ function StageForm({ review, onSubmit, onCancel }: {
         </Row>
         <Row>
           <label htmlFor="stage-scope">Umfang</label>
-          <select id="stage-scope" value={scope} onChange={(e) => setScope(e.target.value)}>
-            <option value="sample">Zufallsstichprobe (Pilot)</option>
-            <option value="all">Alle Records ohne Dubletten</option>
+          <select id="stage-scope" value={scope} onChange={(e) => setScope(e.target.value)} disabled={scopeFixed}>
+            <option value="sample">Zufallsstichprobe</option>
+            <option value="all">Alle {records} ohne Dubletten</option>
             <option value="from_stage">Eingeschlossene einer früheren Stufe</option>
           </select>
         </Row>
@@ -224,7 +371,7 @@ function StageForm({ review, onSubmit, onCancel }: {
         {scope === "from_stage" && (
           <Row>
             <label htmlFor="stage-source">Quellstufe</label>
-            <select id="stage-source" value={sourceStage} onChange={(e) => setSourceStage(e.target.value)} required>
+            <select id="stage-source" value={sourceStage} onChange={(e) => setSourceStage(e.target.value)} required disabled={scopeFixed && !!defaults.source_stage}>
               <option value="">Bitte wählen</option>
               {review.stages.map((s) => (
                 <option key={s.id} value={s.id}>{s.name}</option>
@@ -233,15 +380,56 @@ function StageForm({ review, onSubmit, onCancel }: {
           </Row>
         )}
         <Row>
-          <label htmlFor="stage-min">Stimmen je Record</label>
-          <input id="stage-min" className="narrow-input" type="number" min={1} value={minReviewers} onChange={(e) => setMinReviewers(Number(e.target.value))} />
+          <label htmlFor="stage-rule">
+            Auswahlregel
+            {!rules.decision_rule.editable && <small>von der Vorlage festgelegt</small>}
+          </label>
+          <select id="stage-rule" value={decisionRule} onChange={(e) => setDecisionRule(e.target.value)} disabled={!rules.decision_rule.editable}>
+            {Object.entries(RULE_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
         </Row>
+        {single ? (
+          <Row>
+            <label htmlFor="stage-verify">
+              Zweite Stimme für
+              <small>Die zweite Person sieht die Ausschlüsse; die Stufe ist nicht verblindet</small>
+            </label>
+            <span className="inline-actions">
+              <select id="stage-verify" value={verifyScope} onChange={(e) => setVerifyScope(e.target.value as "all" | "sample")}>
+                <option value="all">alle Ausschlüsse</option>
+                <option value="sample">eine Stichprobe der Ausschlüsse</option>
+              </select>
+              {verifyScope === "sample" && (
+                <>
+                  <input className="narrow-input" type="number" min={1} max={100} value={verifyPercent} onChange={(e) => setVerifyPercent(Number(e.target.value))} aria-label="Anteil in Prozent" /> %
+                </>
+              )}
+            </span>
+          </Row>
+        ) : (
+          <Row>
+            <label htmlFor="stage-min">
+              Stimmen je Eintrag
+              {decisionRule === "liberal" && <small>Ein Ausschluss braucht mindestens zwei</small>}
+            </label>
+            <input id="stage-min" className="narrow-input" type="number" min={1} value={minReviewers} onChange={(e) => setMinReviewers(Number(e.target.value))} disabled={!rules.min_reviewers.editable} />
+          </Row>
+        )}
         <Row>
           <label htmlFor="stage-maybe">„Maybe“ zählt als</label>
-          <select id="stage-maybe" value={maybeAs} onChange={(e) => setMaybeAs(e.target.value)}>
+          <select id="stage-maybe" value={maybeAs} onChange={(e) => setMaybeAs(e.target.value)} disabled={!rules.maybe_as.editable}>
             <option value="">eigene Kategorie</option>
             <option value="include">Include</option>
             <option value="exclude">Exclude</option>
+          </select>
+        </Row>
+        <Row>
+          <label htmlFor="stage-conflict">
+            Klärung
+            <small>Bei Dritt-Entscheid darf niemand mit eigener Stimme den Konsens festhalten</small>
+          </label>
+          <select id="stage-conflict" value={conflictRule} onChange={(e) => setConflictRule(e.target.value)} disabled={!rules.conflict_rule.editable}>
+            {Object.entries(CONFLICT_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
         </Row>
         <Row>
@@ -249,7 +437,7 @@ function StageForm({ review, onSubmit, onCancel }: {
             Verblindet
             <small>Stimmen anderer bleiben bis zum Entblinden unsichtbar</small>
           </label>
-          <input id="stage-blind" type="checkbox" className="switch" checked={blind} onChange={(e) => setBlind(e.target.checked)} />
+          <input id="stage-blind" type="checkbox" className="switch" checked={!single && blind} onChange={(e) => setBlind(e.target.checked)} disabled={single || !rules.blind.editable} />
         </Row>
       </Group>
       <p className="hint">Die Regeln sind nach dem Öffnen fest. Für andere Regeln öffnest du eine neue Stufe.</p>

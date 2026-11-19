@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use crate::event::Event;
 use crate::service::ROLES;
+use crate::workflow::{GateResult, Template, CONFLICT_RULES, DECISION_RULES};
 
 /// In welcher Kette ein Ereignis liegt.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -58,7 +59,7 @@ pub struct Spec {
     check: fn(&Value) -> Check,
 }
 
-pub static CATALOG: [Spec; 12] = [
+pub static CATALOG: [Spec; 15] = [
     Spec {
         name: "ReviewCreated",
         version: 1,
@@ -93,7 +94,7 @@ pub static CATALOG: [Spec; 12] = [
     },
     Spec {
         name: "StageInstanceOpened",
-        version: 1,
+        version: 2,
         chain: Chain::Main,
         writer: Writer::Manage,
         stage: StageRule::Required,
@@ -155,6 +156,30 @@ pub static CATALOG: [Spec; 12] = [
         stage: StageRule::OpenUnblinded,
         check: consensus_recorded,
     },
+    Spec {
+        name: "WorkflowVersionPublished",
+        version: 1,
+        chain: Chain::Main,
+        writer: Writer::Manage,
+        stage: StageRule::None,
+        check: workflow_version_published,
+    },
+    Spec {
+        name: "GateEvaluated",
+        version: 1,
+        chain: Chain::Main,
+        writer: Writer::Manage,
+        stage: StageRule::Required,
+        check: gate_evaluated,
+    },
+    Spec {
+        name: "GateOverridden",
+        version: 1,
+        chain: Chain::Main,
+        writer: Writer::Manage,
+        stage: StageRule::None,
+        check: gate_overridden,
+    },
 ];
 
 pub fn spec(event_type: &str) -> Option<&'static Spec> {
@@ -192,10 +217,21 @@ pub fn validate_event(e: &Event) -> Check {
 /// Signatur über dem ursprünglichen Inhalt liegen. Projektionen lesen deshalb über diese Funktion.
 pub fn upcast(e: &Event) -> Value {
     let mut payload = e.payload.clone();
-    if e.event_type == "CriteriaVersionPublished" {
-        upcast_criteria(e.schema_version, &mut payload);
+    match e.event_type.as_str() {
+        "CriteriaVersionPublished" => upcast_criteria(e.schema_version, &mut payload),
+        "StageInstanceOpened" => upcast_stage(&mut payload),
+        _ => {}
     }
     payload
+}
+
+/// Stufen aus Version 1 kennen weder Station noch Auswahl- und Klärungsregel. Sie galten als
+/// einstimmig mit Klärung durch Diskussion; das steht nach der Umwandlung ausdrücklich da.
+fn upcast_stage(payload: &mut Value) {
+    let Some(map) = payload.as_object_mut() else { return };
+    map.entry("round").or_insert_with(|| Value::from(1));
+    map.entry("decision_rule").or_insert_with(|| Value::from("unanimous"));
+    map.entry("conflict_rule").or_insert_with(|| Value::from("discussion"));
 }
 
 /// Version 1 erlaubt fehlende Felder. Sie werden hier aufgefüllt, damit Leser nur eine Form kennen.
@@ -271,7 +307,8 @@ fn any_object(_: &Value) -> Check {
 fn review_created(p: &Value) -> Check {
     is_text(p, "title")?;
     uuid(p, "owner")?;
-    filled(p, "public_key")
+    filled(p, "public_key")?;
+    optional(p, "review_type", filled)
 }
 
 fn member_role_set(p: &Value) -> Check {
@@ -303,7 +340,43 @@ fn stage_instance_opened(p: &Value) -> Check {
     integer(p, "min_reviewers", 1)?;
     optional(p, "maybe_as", |p, key| one_of(p, key, &["include", "exclude"]))?;
     integer(p, "n_records", 0)?;
-    filled(p, "record_ids_sha256")
+    filled(p, "record_ids_sha256")?;
+    optional(p, "station", filled)?;
+    optional(p, "round", |p, key| integer(p, key, 1))?;
+    optional(p, "decision_rule", |p, key| one_of(p, key, &DECISION_RULES))?;
+    optional(p, "conflict_rule", |p, key| one_of(p, key, &CONFLICT_RULES))?;
+    optional(p, "verify", |p, key| {
+        let v = &p[key];
+        one_of(v, "scope", &["all", "sample"]).map_err(|e| format!("Feld „{key}“: {e}"))?;
+        if v["scope"] == "sample" {
+            let percent = v.get("percent").and_then(Value::as_i64);
+            if !percent.is_some_and(|n| (1..=100).contains(&n)) {
+                return Err(format!("Feld „{key}“: Der Anteil der Stichprobe muss zwischen 1 und 100 Prozent liegen."));
+            }
+            integer(v, "seed", 0).map_err(|e| format!("Feld „{key}“: {e}"))?;
+        }
+        Ok(())
+    })
+}
+
+fn workflow_version_published(p: &Value) -> Check {
+    integer(p, "version", 1)?;
+    let template = p.get("template").ok_or("Feld „template“ fehlt.")?;
+    Template::parse(template).map(|_| ())
+}
+
+fn gate_evaluated(p: &Value) -> Check {
+    filled(p, "station")?;
+    integer(p, "round", 1)?;
+    serde_json::from_value::<GateResult>(p.clone())
+        .map(|_| ())
+        .map_err(|_| "Das Ergebnis des Gates ist nicht lesbar.".to_string())
+}
+
+fn gate_overridden(p: &Value) -> Check {
+    filled(p, "station")?;
+    integer(p, "round", 0)?;
+    filled(p, "reason")
 }
 
 fn snapshot_taken(p: &Value) -> Check {
@@ -362,6 +435,41 @@ mod tests {
     }
 
     #[test]
+    fn old_stages_get_the_rules_they_always_had() {
+        let mut e: Event = serde_json::from_value(json!({
+            "event_id": Uuid::new_v4(), "review_id": Uuid::new_v4(), "actor_id": Uuid::new_v4(), "stream": "main",
+            "seq": 1, "type": "StageInstanceOpened", "schema_version": 1, "occurred_at": "", "payload": {},
+            "stage_instance_id": Uuid::new_v4(), "prev_hash": null, "hash": "", "signature": "",
+        }))
+        .unwrap();
+        e.payload = json!({"name": "Alt", "blind": true, "min_reviewers": 2});
+        let current = upcast(&e);
+        assert_eq!((current["decision_rule"].as_str(), current["round"].as_i64()), (Some("unanimous"), Some(1)));
+        assert_eq!(current["conflict_rule"], "discussion");
+        assert!(e.payload.get("decision_rule").is_none());
+    }
+
+    #[test]
+    fn stage_rules_and_verification_are_checked() {
+        let stage = Uuid::new_v4();
+        let base = json!({"name": "TA", "blind": false, "min_reviewers": 1, "n_records": 3, "record_ids_sha256": "x"});
+        let with = |extra: Value| {
+            let mut p = base.clone();
+            p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            validate("StageInstanceOpened", 2, Some(&stage), &p)
+        };
+        assert!(with(json!({})).is_ok());
+        assert!(with(json!({"station": "title_abstract", "round": 2, "decision_rule": "liberal"})).is_ok());
+        assert!(with(json!({"verify": {"scope": "sample", "percent": 20, "seed": 7}})).is_ok());
+        assert!(with(json!({"verify": {"scope": "all"}})).is_ok());
+        assert!(with(json!({"decision_rule": "mehrheit"})).unwrap_err().contains("unzulässigen Wert"));
+        assert!(with(json!({"conflict_rule": "münze"})).unwrap_err().contains("unzulässigen Wert"));
+        assert!(with(json!({"round": 0})).unwrap_err().contains("kleiner als 1"));
+        assert!(with(json!({"verify": {"scope": "sample", "percent": 0, "seed": 7}})).unwrap_err().contains("Anteil"));
+        assert!(with(json!({"verify": {"scope": "sample", "percent": 20}})).unwrap_err().contains("seed"));
+    }
+
+    #[test]
     fn stage_chain_events_are_bound_to_an_open_stage() {
         for s in CATALOG.iter().filter(|s| s.chain == Chain::Stage) {
             assert_eq!(s.stage, StageRule::Open, "{}", s.name);
@@ -395,6 +503,11 @@ mod tests {
             ("ConsensusRecorded", 1, Some(&stage), json!({"record_id": record, "decision": "maybe"}), "unzulässigen"),
             ("MemberRoleSet", 1, None, json!({"actor_id": record, "role": "chef"}), "unzulässigen Wert"),
             ("StageInstanceOpened", 1, Some(&stage), json!({"name": " ", "blind": true}), "ist leer"),
+            ("StageInstanceOpened", 3, Some(&stage), json!({}), "neueren Version"),
+            ("GateOverridden", 1, None, json!({"station": "pilot", "round": 1, "reason": " "}), "ist leer"),
+            ("GateEvaluated", 1, None, json!({"station": "pilot", "round": 1}), "braucht eine Stufe"),
+            ("GateEvaluated", 1, Some(&stage), json!({"station": "pilot", "round": 1}), "nicht lesbar"),
+            ("WorkflowVersionPublished", 1, None, json!({"version": 1, "template": {"key": "x"}}), "nicht lesbar"),
         ];
         for (event_type, version, stage, payload, expected) in cases {
             let err = validate(event_type, version, stage, &payload).unwrap_err();

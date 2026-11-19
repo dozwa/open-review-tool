@@ -74,8 +74,14 @@ pub struct Team {
 impl Team {
     /// Wie die frühere Fixture: 4 RIS-Einträge (1 DOI-Dublette), 2 BibTeX-Einträge (1 Titel-Dublette).
     pub fn new() -> Team {
+        Team::with_template(None)
+    }
+
+    /// Dasselbe Team mit einer mitgelieferten Vorlage; ohne Angabe wie ein Review von früher.
+    pub fn with_template(template: Option<&str>) -> Team {
         let dir = TempDir::new().unwrap();
-        let owner = Review::create(&dir.path().join("owner.sqlite"), person("owner"), "Testreview").unwrap();
+        let owner =
+            Review::create_with(&dir.path().join("owner.sqlite"), person("owner"), "Testreview", template).unwrap();
         let (r1, r2, viewer) = (person("r1"), person("r2"), person("viewer"));
         owner.set_member(&r1.public(), "reviewer").unwrap();
         owner.set_member(&r2.public(), "reviewer").unwrap();

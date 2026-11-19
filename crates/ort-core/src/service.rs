@@ -19,8 +19,9 @@ use crate::catalog;
 use crate::error::{conflict, forbidden, invalid, not_found, Result};
 use crate::event::{now_timestamp, parse_public_key, sha256_hex, Event, Identity, PublicIdentity};
 use crate::import;
-use crate::projection::{string_list, FinalDecision, MaybeMode, ReviewState, StageState};
+use crate::projection::{string_list, FinalDecision, MaybeMode, ReviewState, StageState, Verify};
 use crate::store::{AssignmentRow, BatchRow, RecordRow, Store};
+use crate::workflow::{self, Facts, GateResult, StationView, Template, Workflow, WORKFLOW_TYPES};
 
 pub const ROLES: [&str; 4] = ["owner", "admin", "reviewer", "viewer"];
 pub const MANAGE_ROLES: [&str; 2] = ["owner", "admin"];
@@ -78,6 +79,24 @@ pub struct StageView {
     pub unblinded: bool,
     pub closed: bool,
     pub blind_active: bool,
+    pub station: Option<String>,
+    pub round: i64,
+    pub decision_rule: String,
+    pub conflict_rule: String,
+    pub verify: Option<Verify>,
+}
+
+/// Ablauf des Reviews für die Oberfläche: Vorlage, Begriffe und Stationen mit Zustand.
+#[derive(Clone, Debug, Serialize)]
+pub struct WorkflowView {
+    /// `false` bei Reviews ohne veröffentlichte Vorlage; sie laufen im freien Ablauf.
+    pub published: bool,
+    pub version: i64,
+    pub template_key: String,
+    pub template_name: String,
+    pub review_type: String,
+    pub terms: BTreeMap<String, String>,
+    pub stations: Vec<StationView>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -92,6 +111,7 @@ pub struct ReviewDetail {
     pub criteria: Criteria,
     pub stages: Vec<StageView>,
     pub imports: Vec<BatchRow>,
+    pub workflow: WorkflowView,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -138,6 +158,8 @@ pub struct StageDetail {
     pub role: String,
     pub progress: Progress,
     pub criteria: Criteria,
+    /// Begriffe der Vorlage, z. B. „Einträge“ oder „Quellen“.
+    pub terms: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -200,6 +222,8 @@ pub struct Snapshot {
     pub label: String,
     pub hash: String,
     pub n_heads: usize,
+    /// Ergebnis des Gates, wenn die Station der Stufe eines hat.
+    pub gate: Option<GateResult>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -223,6 +247,13 @@ pub struct OpenStage {
     pub sample_size: Option<i64>,
     pub seed: Option<i64>,
     pub source_stage: Option<Uuid>,
+    /// Station der Vorlage. Ohne veröffentlichte Vorlage darf sie fehlen.
+    pub station: Option<String>,
+    /// Ohne Angabe gilt die Regel der Vorlage.
+    pub decision_rule: Option<String>,
+    pub conflict_rule: Option<String>,
+    /// Nur bei `single_verified`; ohne Angabe werden alle Ausschlüsse geprüft.
+    pub verify: Option<Verify>,
 }
 
 impl Default for OpenStage {
@@ -237,6 +268,10 @@ impl Default for OpenStage {
             sample_size: None,
             seed: None,
             source_stage: None,
+            station: None,
+            decision_rule: None,
+            conflict_rule: None,
+            verify: None,
         }
     }
 }
@@ -274,22 +309,38 @@ fn parse_record_id(record_id: &str) -> Result<Uuid> {
 
 impl Review {
     /// Legt ein neues Review in einer neuen Datei an. Wer es anlegt, ist Owner.
+    /// Ohne Vorlage läuft es im freien Ablauf wie Reviews aus der Zeit vor den Vorlagen.
     pub fn create(path: &Path, me: Identity, title: &str) -> Result<Review> {
+        Self::create_with(path, me, title, None)
+    }
+
+    /// Legt ein Review an und kopiert die gewählte mitgelieferte Vorlage ins Log.
+    pub fn create_with(path: &Path, me: Identity, title: &str, template: Option<&str>) -> Result<Review> {
         if title.trim().is_empty() {
             return Err(invalid("Titel fehlt."));
         }
         if path.exists() {
             return Err(conflict("Für dieses Review gibt es schon eine Datei."));
         }
-        Self::init(Store::open(path)?, me, title)
+        let template = Self::builtin(template)?;
+        Self::init(Store::open(path)?, me, title, template)
     }
 
     /// Für Tests und Werkzeuge: Review nur im Speicher.
     pub fn create_in_memory(me: Identity, title: &str) -> Result<Review> {
-        Self::init(Store::in_memory()?, me, title)
+        Self::init(Store::in_memory()?, me, title, None)
     }
 
-    fn init(store: Store, me: Identity, title: &str) -> Result<Review> {
+    pub fn create_in_memory_with(me: Identity, title: &str, template: Option<&str>) -> Result<Review> {
+        Self::init(Store::in_memory()?, me, title, Self::builtin(template)?)
+    }
+
+    fn builtin(key: Option<&str>) -> Result<Option<Template>> {
+        key.map(|k| workflow::builtin_template(k).ok_or_else(|| invalid(format!("Unbekannte Vorlage „{k}“."))))
+            .transpose()
+    }
+
+    fn init(store: Store, me: Identity, title: &str, template: Option<Template>) -> Result<Review> {
         let title = title.trim();
         if title.is_empty() {
             return Err(invalid("Titel fehlt."));
@@ -299,16 +350,23 @@ impl Review {
         let tx = review.store.conn().unchecked_transaction()?;
         review.store.set_meta("review_id", &review_id.to_string())?;
         let me = &review.me;
-        review.append(
-            "ReviewCreated",
-            None,
-            json!({"title": title, "owner": me.actor_id.to_string(), "public_key": me.public_key()}),
-        )?;
+        let mut created = json!({"title": title, "owner": me.actor_id.to_string(), "public_key": me.public_key()});
+        if let Some(t) = &template {
+            created["review_type"] = json!(t.review_type);
+        }
+        review.append("ReviewCreated", None, created)?;
         review.append(
             "MemberRoleSet",
             None,
             json!({"actor_id": me.actor_id.to_string(), "role": "owner", "public_key": me.public_key()}),
         )?;
+        if let Some(t) = &template {
+            review.append(
+                "WorkflowVersionPublished",
+                None,
+                json!({"version": 1, "template": serde_json::to_value(t)?, "change_note": ""}),
+            )?;
+        }
         review.store.set_person(&me.actor_id, &me.name)?;
         tx.commit()?;
         Ok(review)
@@ -353,6 +411,119 @@ impl Review {
     fn stage_state(&self, stage_id: &Uuid) -> Result<StageState> {
         StageState::build(stage_id, &self.store.stage_events(stage_id)?)
             .ok_or_else(|| not_found("Stufe nicht gefunden."))
+    }
+
+    // ------------------------------------------------------------ Ablauf
+
+    /// Vorlage, Gate-Ergebnisse und Übersteuerungen. Ohne veröffentlichte Vorlage der freie Ablauf.
+    pub fn workflow(&self) -> Result<Workflow> {
+        Ok(Workflow::build(&self.store.events_of_types(&WORKFLOW_TYPES)?))
+    }
+
+    fn stage_states(&self, state: &ReviewState) -> Result<Vec<StageState>> {
+        state.stage_ids.iter().map(|id| self.stage_state(id)).collect()
+    }
+
+    fn facts(&self, state: &ReviewState) -> Result<Facts> {
+        let n_records: i64 =
+            self.store.conn().query_row("SELECT count(*) FROM record WHERE duplicate_of IS NULL", [], |r| r.get(0))?;
+        Ok(Facts {
+            criteria_published: criteria_from(state.criteria.as_ref()).version > 0,
+            n_writers: state.members.values().filter(|m| WRITE_ROLES.contains(&m.role.as_str())).count() as i64,
+            n_records,
+        })
+    }
+
+    /// Stationen der Vorlage mit Zustand, Runden und Gates.
+    pub fn stations(&self) -> Result<Vec<StationView>> {
+        let state = self.state()?;
+        require(&state, &self.me.actor_id, &ROLES)?;
+        Ok(self.workflow()?.stations(&self.facts(&state)?, &self.stage_states(&state)?))
+    }
+
+    pub fn station(&self, key: &str) -> Result<StationView> {
+        self.stations()?.into_iter().find(|s| s.key == key).ok_or_else(|| not_found("Diese Station gibt es nicht."))
+    }
+
+    /// Eingaben für die nächste Stufe einer Station, wie die Vorlage sie vorsieht.
+    pub fn stage_defaults(&self, station: &str) -> Result<OpenStage> {
+        let view = self.station(station)?;
+        let d = view.defaults.ok_or_else(|| invalid("Diese Station arbeitet nicht mit Stufen."))?;
+        Ok(OpenStage {
+            name: d.name,
+            kind: view.key.clone(),
+            blind: d.rules.blind.value && d.rules.decision_rule.value != "single_verified",
+            min_reviewers: d.rules.min_reviewers.value,
+            maybe_as: d.rules.maybe_as.value,
+            scope: d.scope,
+            sample_size: d.sample_size,
+            seed: None,
+            source_stage: d.source_stage,
+            station: Some(view.key),
+            decision_rule: Some(d.rules.decision_rule.value),
+            conflict_rule: Some(d.rules.conflict_rule.value),
+            verify: None,
+        })
+    }
+
+    /// Veröffentlicht eine geänderte Vorlage als neue Version. Stufen behalten die Regeln, mit denen
+    /// sie geöffnet wurden.
+    pub fn publish_workflow(&self, template: &Value, change_note: &str) -> Result<i64> {
+        let state = self.state()?;
+        require(&state, &self.me.actor_id, &MANAGE_ROLES)?;
+        Template::parse(template).map_err(invalid)?;
+        let current = self.workflow()?;
+        if current.published() && change_note.trim().is_empty() {
+            return Err(invalid("Eine geänderte Vorlage braucht eine Begründung."));
+        }
+        let version = current.version + 1;
+        self.append(
+            "WorkflowVersionPublished",
+            None,
+            json!({"version": version, "template": template, "change_note": change_note.trim()}),
+        )?;
+        Ok(version)
+    }
+
+    /// Schaltet eine Station mit Begründung frei, obwohl ihr Gate nicht erfüllt ist.
+    pub fn override_gate(&self, station: &str, reason: &str) -> Result<()> {
+        let state = self.state()?;
+        require(&state, &self.me.actor_id, &MANAGE_ROLES)?;
+        let reason = reason.trim();
+        if reason.is_empty() {
+            return Err(invalid("Übersteuern braucht eine Begründung."));
+        }
+        let view = self.station(station)?;
+        if !view.blocking {
+            return Err(invalid(format!("Die Station „{}“ sperrt nichts.", view.label)));
+        }
+        if view.state == "done" {
+            return Err(conflict(format!("Die Station „{}“ ist bereits abgeschlossen.", view.label)));
+        }
+        if view.rounds.iter().any(|r| !r.closed) {
+            return Err(conflict("Erst die laufende Stufe dieser Station schließen."));
+        }
+        let round = view.rounds.last().map_or(0, |r| r.round);
+        self.append("GateOverridden", None, json!({"station": view.key, "round": round, "reason": reason}))?;
+        Ok(())
+    }
+
+    /// Ergebnis des Gates, wie es beim Schließen ins Log käme. Schreibt nichts.
+    pub fn gate_preview(&self, stage_id: &Uuid) -> Result<Option<GateResult>> {
+        let state = self.state()?;
+        require(&state, &self.me.actor_id, &MANAGE_ROLES)?;
+        let stage = self.stage_state(stage_id)?;
+        if stage.blind_active() {
+            return Err(forbidden("Die Stufe ist verblindet. Das Gate ist erst nach dem Entblinden einsehbar."));
+        }
+        self.evaluate_gate(&self.workflow()?, &stage)
+    }
+
+    fn evaluate_gate(&self, workflow: &Workflow, stage: &StageState) -> Result<Option<GateResult>> {
+        let Some(station) = workflow.station_of(stage).filter(|s| !s.gate.is_empty()) else { return Ok(None) };
+        let assigned: Vec<String> =
+            self.store.assignments(Some(&stage.config.id))?.into_iter().map(|a| a.record_id.to_string()).collect();
+        Ok(Some(workflow::evaluate_gate(station, stage, &assigned)))
     }
 
     pub fn name_of(&self, actor: &Uuid) -> Result<String> {
@@ -577,6 +748,21 @@ impl Review {
             criteria: criteria_from(state.criteria.as_ref()),
             stages: self.list_stages()?,
             imports: self.store.batches()?,
+            workflow: self.workflow_view(&state)?,
+        })
+    }
+
+    fn workflow_view(&self, state: &ReviewState) -> Result<WorkflowView> {
+        let workflow = self.workflow()?;
+        let stations = workflow.stations(&self.facts(state)?, &self.stage_states(state)?);
+        Ok(WorkflowView {
+            published: workflow.published(),
+            version: workflow.version,
+            template_key: workflow.template.key,
+            template_name: workflow.template.name,
+            review_type: workflow.template.review_type,
+            terms: workflow.template.terms,
+            stations,
         })
     }
 
@@ -604,10 +790,79 @@ impl Review {
         if params.min_reviewers < 1 {
             return Err(invalid("Mindestens eine Stimme je Record ist nötig."));
         }
+
+        // Station, Sperren und Regeln aus der Vorlage
+        let workflow = self.workflow()?;
+        let stages = self.stage_states(&state)?;
+        let views = workflow.stations(&self.facts(&state)?, &stages);
+        let key = match (&params.station, workflow.published()) {
+            (Some(key), _) => key.clone(),
+            (None, false) => workflow.template.default_station().map(|s| s.key.clone()).unwrap_or_default(),
+            (None, true) => return Err(invalid("Zu welcher Station gehört die Stufe? Die Angabe fehlt.")),
+        };
+        let station = workflow.template.station(&key).ok_or_else(|| not_found("Diese Station gibt es nicht."))?;
+        if station.kind != "screening" {
+            return Err(invalid(format!("Die Station „{}“ arbeitet nicht mit Screening-Stufen.", station.label)));
+        }
+        let view = views.iter().find(|v| v.key == key).ok_or_else(|| not_found("Diese Station gibt es nicht."))?;
+        if let Some(blocker) = view.blocked_by.first() {
+            return Err(conflict(format!(
+                "Die Station „{}“ ist gesperrt: „{}“ ist noch nicht abgeschlossen. Die Leitung kann das mit einer Begründung übersteuern.",
+                station.label, blocker.label
+            )));
+        }
+        if !station.free_rounds && view.rounds.iter().any(|r| !r.closed) {
+            return Err(conflict(format!("In der Station „{}“ ist noch eine Stufe offen.", station.label)));
+        }
+        let round = view.rounds.last().map_or(0, |r| r.round) + 1;
+        let rules = workflow.template.rules_for(station);
+        let decision_rule = params.decision_rule.clone().unwrap_or_else(|| rules.decision_rule.value.clone());
+        let conflict_rule = params.conflict_rule.clone().unwrap_or_else(|| rules.conflict_rule.value.clone());
+        if !workflow::DECISION_RULES.contains(&decision_rule.as_str()) {
+            return Err(invalid("Unbekannte Auswahlregel."));
+        }
+        if !workflow::CONFLICT_RULES.contains(&conflict_rule.as_str()) {
+            return Err(invalid("Unbekannte Klärungsregel."));
+        }
+        let fixed = |editable: bool, same: bool, what: &str| -> Result<()> {
+            if editable || same {
+                Ok(())
+            } else {
+                Err(invalid(format!("Die Vorlage legt {what} für die Station „{}“ fest.", station.label)))
+            }
+        };
+        fixed(rules.decision_rule.editable, decision_rule == rules.decision_rule.value, "die Auswahlregel")?;
+        fixed(rules.conflict_rule.editable, conflict_rule == rules.conflict_rule.value, "die Klärungsregel")?;
+        fixed(rules.min_reviewers.editable, params.min_reviewers == rules.min_reviewers.value, "die Zahl der Stimmen")?;
+        fixed(rules.maybe_as.editable, params.maybe_as == rules.maybe_as.value, "die Maybe-Regel")?;
+        fixed(rules.blind.editable, params.blind == rules.blind.value, "die Verblindung")?;
+        let verify = if decision_rule == "single_verified" {
+            if params.blind {
+                return Err(invalid(
+                    "Bei „eine Stimme mit Prüfung“ sieht die zweite Person die Ausschlüsse. Die Stufe kann deshalb nicht verblindet sein.",
+                ));
+            }
+            let mut verify = params.verify.clone().unwrap_or(Verify { scope: "all".into(), percent: None, seed: None });
+            match verify.scope.as_str() {
+                "all" => (verify.percent, verify.seed) = (None, None),
+                "sample" => {
+                    if !verify.percent.is_some_and(|p| (1..=100).contains(&p)) {
+                        return Err(invalid("Der Anteil der Stichprobe muss zwischen 1 und 100 Prozent liegen."));
+                    }
+                    verify.seed = Some(verify.seed.unwrap_or_else(|| rand::thread_rng().gen_range(1..2_147_483_647)));
+                }
+                _ => return Err(invalid("Die Prüfung gilt für alle Ausschlüsse oder für eine Stichprobe.")),
+            }
+            Some(verify)
+        } else {
+            None
+        };
+        let source_stage = params.source_stage.or(view.defaults.as_ref().and_then(|d| d.source_stage));
+
         let mut seed = params.seed;
         let ids: Vec<String> = match params.scope.as_str() {
             "from_stage" => {
-                let source_id = params.source_stage.ok_or_else(|| invalid("Quellstufe fehlt."))?;
+                let source_id = source_stage.ok_or_else(|| invalid("Quellstufe fehlt."))?;
                 let source = self.stage_state(&source_id)?;
                 source
                     .final_decisions()
@@ -658,8 +913,10 @@ impl Review {
                 "maybe_as": params.maybe_as, "criteria_version": criteria.version.to_string(),
                 "scope": params.scope, "sample_size": if sample_scope { Some(ids.len()) } else { None },
                 "seed": if sample_scope { seed } else { None },
-                "source_stage": if params.scope == "from_stage" { params.source_stage.map(|s| s.to_string()) } else { None },
+                "source_stage": if params.scope == "from_stage" { source_stage.map(|s| s.to_string()) } else { None },
                 "n_records": ids.len(), "record_ids_sha256": self.store.assignment_digest(&stage_id)?,
+                "station": key, "round": round, "decision_rule": decision_rule, "conflict_rule": conflict_rule,
+                "verify": verify,
             }),
         )?;
         tx.commit()?;
@@ -686,8 +943,16 @@ impl Review {
             return Err(conflict("Die Stufe ist bereits geschlossen."));
         }
         let label = format!("Abschluss {}", stage.config.name);
+        let workflow = self.workflow()?;
+        let gate = self.evaluate_gate(&workflow, &stage)?;
         let tx = self.store.conn().unchecked_transaction()?;
         self.append("StageInstanceClosed", Some(*stage_id), json!({"label": label}))?;
+        if let Some(result) = &gate {
+            let mut payload = serde_json::to_value(result)?;
+            payload["station"] = json!(workflow.station_of(&stage).map(|s| s.key.clone()));
+            payload["round"] = json!(stage.config.round);
+            self.append("GateEvaluated", Some(*stage_id), payload)?;
+        }
         let heads: Vec<Value> = self
             .store
             .heads()?
@@ -698,7 +963,7 @@ impl Review {
         let n_heads = heads.len();
         self.append("SnapshotTaken", Some(*stage_id), json!({"label": label, "heads": heads, "hash": hash}))?;
         tx.commit()?;
-        Ok(Snapshot { label, hash, n_heads })
+        Ok(Snapshot { label, hash, n_heads, gate })
     }
 
     // ------------------------------------------------------------ Abstimmen
@@ -790,7 +1055,17 @@ impl Review {
             return Err(invalid("Ein Konsens muss include oder exclude sein."));
         }
         let record = self.require_assigned(stage_id, record_id)?.to_string();
-        let method = if method.is_empty() { "discussion" } else { method };
+        let third_person = stage.config.conflict_rule == "third_person";
+        if third_person && stage.votes.contains_key(&(record.clone(), self.me.actor_id)) {
+            return Err(forbidden(
+                "In dieser Stufe entscheidet eine dritte Person. Du hast zu diesem Eintrag selbst abgestimmt.",
+            ));
+        }
+        let method = match method {
+            "" if third_person => "third_person",
+            "" => "discussion",
+            other => other,
+        };
         self.append(
             "ConsensusRecorded",
             Some(*stage_id),
@@ -804,8 +1079,20 @@ impl Review {
         self.store.record(&id)?.map(RecordItem::from).ok_or_else(|| not_found("Record nicht gefunden."))
     }
 
-    fn progress(&self, stage: &StageState) -> Progress {
-        Progress { done: self.my_votes(stage).len(), total: stage.config.n_records.max(0) as usize }
+    /// Fortschritt der eigenen Arbeit. Bei `liberal` und `single_verified` zählt nur, was von dieser
+    /// Person noch gebraucht wird; bei `unanimous` sind das alle Einträge der Stufe.
+    fn progress(&self, stage: &StageState) -> Result<Progress> {
+        let done = self.my_votes(stage).len();
+        if stage.config.decision_rule == "unanimous" {
+            return Ok(Progress { done, total: stage.config.n_records.max(0) as usize });
+        }
+        let open = self
+            .store
+            .assignments(Some(&stage.config.id))?
+            .into_iter()
+            .filter(|a| stage.wants_vote_from(&a.record_id.to_string(), &self.me.actor_id))
+            .count();
+        Ok(Progress { done, total: done + open })
     }
 
     pub fn stage_detail(&self, stage_id: &Uuid) -> Result<StageDetail> {
@@ -813,24 +1100,28 @@ impl Review {
         let role = require(&state, &self.me.actor_id, &ROLES)?.to_string();
         let stage = self.stage_state(stage_id)?;
         Ok(StageDetail {
-            progress: self.progress(&stage),
+            progress: self.progress(&stage)?,
             stage: stage_view(&stage),
             role,
             criteria: criteria_from(state.criteria.as_ref()),
+            terms: self.workflow()?.template.terms,
         })
     }
 
-    /// Nächster Record ohne eigenes Votum, in der für alle gleichen Reihenfolge der Stufe.
+    /// Nächster Record, zu dem die eigene Stimme gebraucht wird, in der für alle gleichen Reihenfolge.
     pub fn next_record(&self, stage_id: &Uuid) -> Result<NextRecord> {
         let state = self.state()?;
         require(&state, &self.me.actor_id, &ROLES)?;
         let stage = self.stage_state(stage_id)?;
-        let mine = self.my_votes(&stage);
-        let next =
-            self.store.assignments(Some(stage_id))?.into_iter().find(|a| !mine.contains_key(&a.record_id.to_string()));
+        let me = self.me.actor_id;
+        let next = self
+            .store
+            .assignments(Some(stage_id))?
+            .into_iter()
+            .find(|a| stage.wants_vote_from(&a.record_id.to_string(), &me));
         Ok(NextRecord {
             record: next.map(|a| self.record_item(&a.record_id.to_string())).transpose()?,
-            progress: self.progress(&stage),
+            progress: self.progress(&stage)?,
         })
     }
 
@@ -872,7 +1163,7 @@ impl Review {
         let stage = self.stage_state(stage_id)?;
         let mut out = Summary {
             stage: stage_view(&stage),
-            progress: self.progress(&stage),
+            progress: self.progress(&stage)?,
             reviewers: None,
             decisions: None,
             agreement: None,
@@ -1043,5 +1334,10 @@ fn stage_view(s: &StageState) -> StageView {
         unblinded: s.unblinded,
         closed: s.closed,
         blind_active: s.blind_active(),
+        station: c.station.clone(),
+        round: c.round,
+        decision_rule: c.decision_rule.clone(),
+        conflict_rule: c.conflict_rule.clone(),
+        verify: c.verify.clone(),
     }
 }

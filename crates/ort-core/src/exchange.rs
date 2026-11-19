@@ -328,16 +328,23 @@ pub fn merge(review: &Review, bundle: &Bundle) -> Result<MergeReport> {
         .filter(|id| StageState::build(id, &local).is_some_and(|s| s.closed))
         .copied()
         .collect();
-    let merged_state = ReviewState::build(&all.iter().map(|e| (*e).clone()).collect::<Vec<_>>());
     let all_owned: Vec<Event> = all.iter().map(|e| (*e).clone()).collect();
-    let blind_after: BTreeSet<Uuid> = merged_state
-        .stage_ids
-        .iter()
-        .filter(|id| StageState::build(id, &all_owned).is_some_and(|s| s.blind_active()))
-        .copied()
-        .collect();
-    let known_stages: BTreeSet<Uuid> = merged_state.stage_ids.iter().copied().collect();
-    let has_created = local.iter().any(|e| e.event_type == "ReviewCreated");
+    let merged_state = ReviewState::build(&all_owned);
+    let merged_stages: Vec<StageState> =
+        merged_state.stage_ids.iter().filter_map(|id| StageState::build(id, &all_owned)).collect();
+    let context = MergeContext {
+        roles: &roles,
+        has_created: local.iter().any(|e| e.event_type == "ReviewCreated"),
+        known_stages: merged_state.stage_ids.iter().copied().collect(),
+        closed_before,
+        blind_after: merged_stages.iter().filter(|s| s.blind_active()).map(|s| s.config.id).collect(),
+        // Bei Dritt-Entscheid: wer zu welchem Eintrag selbst abgestimmt hat
+        own_votes: merged_stages
+            .iter()
+            .filter(|s| s.config.conflict_rule == "third_person")
+            .flat_map(|s| s.votes.keys().map(|(record, actor)| (s.config.id, record.clone(), *actor)))
+            .collect(),
+    };
 
     let mut report = MergeReport::default();
     let tx = store.conn().unchecked_transaction()?;
@@ -392,7 +399,7 @@ pub fn merge(review: &Review, bundle: &Bundle) -> Result<MergeReport> {
                 stopped = true;
                 continue;
             }
-            if let Err(reason) = authorize(e, &roles, has_created, &known_stages, &closed_before, &blind_after) {
+            if let Err(reason) = authorize(e, &context) {
                 reject(reason, &mut report);
                 stopped = true;
                 continue;
@@ -451,15 +458,21 @@ pub fn merge(review: &Review, bundle: &Bundle) -> Result<MergeReport> {
     Ok(report)
 }
 
-/// Prüft ein einzelnes fremdes Ereignis gegen das Register: Rolle, Kette, Stufe und Payload.
-fn authorize(
-    e: &Event,
-    roles: &HashMap<Uuid, String>,
+/// Was beim Einlesen über das Review bekannt sein muss, um ein einzelnes Ereignis zu prüfen.
+struct MergeContext<'a> {
+    roles: &'a HashMap<Uuid, String>,
     has_created: bool,
-    known_stages: &BTreeSet<Uuid>,
-    closed_before: &BTreeSet<Uuid>,
-    blind_after: &BTreeSet<Uuid>,
-) -> std::result::Result<(), String> {
+    known_stages: BTreeSet<Uuid>,
+    closed_before: BTreeSet<Uuid>,
+    blind_after: BTreeSet<Uuid>,
+    /// (Stufe, Eintrag, Person) für Stufen mit Dritt-Entscheid.
+    own_votes: BTreeSet<(Uuid, String, Uuid)>,
+}
+
+/// Prüft ein einzelnes fremdes Ereignis gegen das Register: Rolle, Kette, Stufe und Payload.
+fn authorize(e: &Event, context: &MergeContext) -> std::result::Result<(), String> {
+    let MergeContext { roles, has_created, known_stages, closed_before, blind_after, own_votes } = context;
+    let has_created = *has_created;
     let role = roles.get(&e.actor_id).map(String::as_str).unwrap_or("");
     let t = e.event_type.as_str();
     let spec = catalog::spec(t).ok_or_else(|| format!("Unbekannter Ereignistyp {t}."))?;
@@ -485,6 +498,10 @@ fn authorize(
         }
         if spec.stage == StageRule::OpenUnblinded && blind_after.contains(&stage) {
             return Err("Konsens in einer verblindeten Stufe.".into());
+        }
+        let record = e.payload_str("record_id").unwrap_or_default().to_string();
+        if t == "ConsensusRecorded" && own_votes.contains(&(stage, record, e.actor_id)) {
+            return Err("Dritt-Entscheid: Diese Person hat zu dem Eintrag selbst abgestimmt.".into());
         }
     }
     Ok(())
@@ -526,9 +543,18 @@ mod tests {
         let roles = HashMap::from([(actor, "reviewer".to_string())]);
         let known = BTreeSet::from([stage]);
         let none = BTreeSet::new();
-        let check = |e: &Event, closed: &BTreeSet<Uuid>, blind: &BTreeSet<Uuid>| {
-            authorize(e, &roles, true, &known, closed, blind)
-        };
+        let context =
+            |roles: &'static HashMap<Uuid, String>, closed: &BTreeSet<Uuid>, blind: &BTreeSet<Uuid>| MergeContext {
+                roles,
+                has_created: true,
+                known_stages: known.clone(),
+                closed_before: closed.clone(),
+                blind_after: blind.clone(),
+                own_votes: BTreeSet::new(),
+            };
+        let roles: &'static HashMap<Uuid, String> = Box::leak(Box::new(roles));
+        let check =
+            |e: &Event, closed: &BTreeSet<Uuid>, blind: &BTreeSet<Uuid>| authorize(e, &context(roles, closed, blind));
         let good = vote(stage, actor);
         assert_eq!(check(&good, &none, &none), Ok(()));
         assert!(check(&good, &known, &none).unwrap_err().contains("geschlossen"));
@@ -545,7 +571,13 @@ mod tests {
         let consensus = Event { event_type: "ConsensusRecorded".into(), stream: MAIN_STREAM.into(), ..good.clone() };
         assert_eq!(check(&consensus, &none, &none), Ok(()));
         assert!(check(&consensus, &none, &known).unwrap_err().contains("verblindeten"));
-        let viewer = HashMap::from([(actor, "viewer".to_string())]);
-        assert!(authorize(&good, &viewer, true, &known, &none, &none).unwrap_err().contains("nicht abstimmen"));
+        // Dritt-Entscheid: wer selbst abgestimmt hat, hält keinen Konsens fest
+        let record = consensus.payload_str("record_id").unwrap().to_string();
+        let mut third = context(roles, &none, &none);
+        third.own_votes.insert((stage, record, actor));
+        assert!(authorize(&consensus, &third).unwrap_err().contains("Dritt-Entscheid"));
+        let viewer: &'static HashMap<Uuid, String> =
+            Box::leak(Box::new(HashMap::from([(actor, "viewer".to_string())])));
+        assert!(authorize(&good, &context(viewer, &none, &none)).unwrap_err().contains("nicht abstimmen"));
     }
 }
