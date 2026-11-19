@@ -5,12 +5,13 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 
 import { api, BUNDLE_FILTER, errorText, importSummary, Person, ReviewListItem, safeFileName } from "./api";
 import { FormEntryPage, FormStagePage } from "./FormStage";
+import { capital, language, setLanguage, t } from "./i18n";
 import { NewReviewPage } from "./NewReview";
 import { ReviewPage } from "./ReviewPage";
 import { ScreeningPage } from "./Screening";
 import { StagePage } from "./StagePages";
 import { isReviewTab, RefreshContext, REVIEW_TABS, ROLE_LABEL, TermsContext } from "./shared";
-import { Avatar, Banner, Icon } from "./ui";
+import { Avatar, Banner, Icon, LanguageSelect } from "./ui";
 import "./styles.css";
 
 /** Aktionen, die von überall erreichbar sind. */
@@ -28,12 +29,12 @@ function useGlobalActions(me: Person, onDone: (message: string, reviewId?: strin
   const exportIdentity = async () => {
     const path = await save({
       defaultPath: `${safeFileName(me.name)}.ortid`,
-      filters: [{ name: "Identitätsdatei", extensions: ["ortid"] }],
+      filters: [{ name: t("Identitätsdatei"), extensions: ["ortid"] }],
     });
     if (!path) return;
     try {
       await api.exportIdentity(path);
-      onDone("Identitätsdatei gespeichert. Schick sie der Person, die das Review leitet.");
+      onDone(t("Identitätsdatei gespeichert. Schick sie der Person, die das Review leitet."));
     } catch (e) {
       onError(errorText(e));
     }
@@ -60,17 +61,16 @@ function Setup({ onDone }: { onDone: (me: Person) => void }) {
       <form className="setup-card" onSubmit={submit}>
         <img className="setup-logo" src="/logo.svg" alt="" />
         <h1>Open Review Tool</h1>
-        <p className="subtitle">Screening für Scoping und Systematic Reviews. Ohne Server, ohne Konto.</p>
+        <p className="subtitle">{t("Screening für Scoping und Systematic Reviews. Ohne Server, ohne Konto.")}</p>
         <label className="field">
-          <span>Wie heißt du?</span>
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Vor- und Nachname" autoFocus required />
+          <span>{t("Wie heißt du?")}</span>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("Vor- und Nachname")} autoFocus required />
         </label>
         <p className="hint">
-          <Icon name="key" size={14} /> Die App erzeugt einen Schlüssel, mit dem sie jede deiner Entscheidungen signiert.
-          Er bleibt im Schlüsselbund dieses Macs.
+          <Icon name="key" size={14} /> {t("Die App erzeugt einen Schlüssel, mit dem sie jede deiner Entscheidungen signiert. Er bleibt im Schlüsselbund dieses Macs.")}
         </p>
         {error && <Banner kind="error">{error}</Banner>}
-        <button className="primary large" type="submit">Los geht’s</button>
+        <button className="primary large" type="submit">{t("Los geht’s")}</button>
       </form>
     </div>
   );
@@ -99,38 +99,38 @@ function Sidebar({ me, reviews, terms, onImport, onIdentity, onNew }: {
     <aside className="sidebar">
       <div className="sidebar-top" data-tauri-drag-region />
       {reviewId && !showList ? (
-        <nav className="sidebar-nav" aria-label="Bereiche des Reviews">
+        <nav className="sidebar-nav" aria-label={t("Bereiche des Reviews")}>
           <button className="nav-item nav-back" onClick={() => setShowList(true)}>
-            <Icon name="back" size={14} /> Alle Reviews
+            <Icon name="back" size={14} /> {t("Alle Reviews")}
           </button>
           <div className="nav-title" title={current?.title}>
-            <strong>{current?.title ?? "Review"}</strong>
+            <strong>{current?.title ?? t("Review")}</strong>
             {current?.role && <small>{ROLE_LABEL[current.role] ?? current.role}</small>}
           </div>
-          {REVIEW_TABS.map((t) => (
+          {REVIEW_TABS.map((tab) => (
             <Link
-              key={t.value}
-              to={t.value === "overview" ? `/reviews/${reviewId}` : `/reviews/${reviewId}?tab=${t.value}`}
-              className={`nav-item${activeTab === t.value ? " active" : ""}`}
-              aria-current={activeTab === t.value ? "page" : undefined}
+              key={tab.value}
+              to={tab.value === "overview" ? `/reviews/${reviewId}` : `/reviews/${reviewId}?tab=${tab.value}`}
+              className={`nav-item${activeTab === tab.value ? " active" : ""}`}
+              aria-current={activeTab === tab.value ? "page" : undefined}
             >
-              <Icon name={t.icon} />
-              <span className="nav-label">{t.value === "sources" ? terms.sources || t.label : t.label}</span>
+              <Icon name={tab.icon} />
+              <span className="nav-label">{tab.value === "sources" ? (terms.sources && capital(terms.sources)) || tab.label : tab.label}</span>
             </Link>
           ))}
         </nav>
       ) : (
         <nav className="sidebar-nav">
           <NavLink to="/" end className="nav-item">
-            <Icon name="inbox" /> Übersicht
+            <Icon name="inbox" /> {t("Übersicht")}
           </NavLink>
           <div className="nav-section">
-            <span>Reviews</span>
-            <button className="plain" onClick={onNew} title="Neues Review" aria-label="Neues Review">
+            <span>{t("Reviews")}</span>
+            <button className="plain" onClick={onNew} title={t("Neues Review")} aria-label={t("Neues Review")}>
               <Icon name="plus" size={14} />
             </button>
           </div>
-          {reviews?.length === 0 && <p className="nav-empty">Noch keine Reviews</p>}
+          {reviews?.length === 0 && <p className="nav-empty">{t("Noch keine Reviews")}</p>}
           {(reviews ?? []).map((r) => (
             <NavLink key={r.id} to={`/reviews/${r.id}`} className="nav-item" title={r.title} onClick={() => setShowList(false)}>
               <Icon name="file" />
@@ -142,15 +142,19 @@ function Sidebar({ me, reviews, terms, onImport, onIdentity, onNew }: {
       )}
       <div className="sidebar-bottom">
         <button className="nav-item" onClick={onImport}>
-          <Icon name="download" /> Paket einlesen
+          <Icon name="download" /> {t("Paket einlesen")}
         </button>
-        <button className="me" onClick={onIdentity} title="Identitätsdatei speichern">
+        <button className="me" onClick={onIdentity} title={t("Identitätsdatei speichern")}>
           <Avatar name={me.name} size={26} />
           <span>
             <strong>{me.name}</strong>
-            <small>Identitätsdatei speichern</small>
+            <small>{t("Identitätsdatei speichern")}</small>
           </span>
         </button>
+        <label className="language-row">
+          <Icon name="globe" size={14} />
+          <LanguageSelect value={language} label={t("Sprache der Oberfläche")} onChange={setLanguage} />
+        </label>
       </div>
     </aside>
   );
@@ -158,45 +162,45 @@ function Sidebar({ me, reviews, terms, onImport, onIdentity, onNew }: {
 
 function Home({ me, onImport, onIdentity }: { me: Person; onImport: () => void; onIdentity: () => void }) {
   const steps = [
-    ["Identität teilen", "Jede Person schickt ihre Identitätsdatei an die Leitung."],
-    ["Review anlegen", "Die Leitung wählt den Review-Typ, importiert die Treffer und öffnet eine Stufe."],
-    ["Pakete verteilen", "Jedes Mitglied bekommt ein Paket – verblindet nur mit den eigenen Stimmen."],
-    ["Screenen", "Mit i, e und m geht es schnell. Danach eine Rückmeldung speichern."],
-    ["Zusammenführen", "Die Leitung liest Rückmeldungen ein, klärt Konflikte und schließt ab."],
+    [t("Identität teilen"), t("Jede Person schickt ihre Identitätsdatei an die Leitung.")],
+    [t("Review anlegen"), t("Die Leitung wählt den Review-Typ, importiert die Treffer und öffnet eine Stufe.")],
+    [t("Pakete verteilen"), t("Jedes Mitglied bekommt ein Paket – verblindet nur mit den eigenen Stimmen.")],
+    [t("Screenen"), t("Mit i, e und m geht es schnell. Danach eine Rückmeldung speichern.")],
+    [t("Zusammenführen"), t("Die Leitung liest Rückmeldungen ein, klärt Konflikte und schließt ab.")],
   ];
 
   return (
     <div className="home">
       <div className="hero">
-        <h1>Hallo {me.name.split(" ")[0]}</h1>
-        <p className="subtitle">Alle Entscheidungen werden signiert und lückenlos protokolliert. Zusammengearbeitet wird über Dateien.</p>
+        <h1>{t("Hallo {name}", { name: me.name.split(" ")[0] })}</h1>
+        <p className="subtitle">{t("Alle Entscheidungen werden signiert und lückenlos protokolliert. Zusammengearbeitet wird über Dateien.")}</p>
       </div>
       <div className="action-cards">
         <div className="action-card">
           <div className="action-icon"><Icon name="plus" size={20} /></div>
-          <h2>Neues Review</h2>
-          <p>Du leitest das Review: Typ wählen, Treffer importieren, Team einladen.</p>
+          <h2>{t("Neues Review")}</h2>
+          <p>{t("Du leitest das Review: Typ wählen, Treffer importieren, Team einladen.")}</p>
           <div className="inline-actions">
-            <NavLink className="button primary" to="/neu">Review anlegen …</NavLink>
+            <NavLink className="button primary" to="/neu">{t("Review anlegen …")}</NavLink>
           </div>
         </div>
         <div className="action-card">
           <div className="action-icon"><Icon name="download" size={20} /></div>
-          <h2>Bei einem Review mitmachen</h2>
-          <p>Schick zuerst deine Identitätsdatei an die Leitung. Das Paket, das du dann bekommst, liest du hier ein.</p>
+          <h2>{t("Bei einem Review mitmachen")}</h2>
+          <p>{t("Schick zuerst deine Identitätsdatei an die Leitung. Das Paket, das du dann bekommst, liest du hier ein.")}</p>
           <div className="inline-actions">
-            <button onClick={onIdentity}>Identitätsdatei speichern</button>
-            <button className="primary" onClick={onImport}>Paket einlesen</button>
+            <button onClick={onIdentity}>{t("Identitätsdatei speichern")}</button>
+            <button className="primary" onClick={onImport}>{t("Paket einlesen")}</button>
           </div>
         </div>
       </div>
-      <h2 className="section-title">So funktioniert’s</h2>
+      <h2 className="section-title">{t("So funktioniert’s")}</h2>
       <ol className="steps">
-        {steps.map(([t, d], i) => (
-          <li key={t}>
+        {steps.map(([title, text], i) => (
+          <li key={title}>
             <span className="step-num">{i + 1}</span>
-            <strong>{t}</strong>
-            <span>{d}</span>
+            <strong>{title}</strong>
+            <span>{text}</span>
           </li>
         ))}
       </ol>
@@ -254,7 +258,7 @@ function Shell({ me }: { me: Person }) {
               <Route path="/reviews/:reviewId/stages/:stageId/screen" element={<ScreeningPage />} />
               <Route path="/reviews/:reviewId/forms/:stageId" element={<FormStagePage />} />
               <Route path="/reviews/:reviewId/forms/:stageId/:recordId" element={<FormEntryPage />} />
-              <Route path="*" element={<p>Seite nicht gefunden.</p>} />
+              <Route path="*" element={<p>{t("Seite nicht gefunden.")}</p>} />
             </Routes>
           </main>
         </div>
@@ -289,6 +293,8 @@ async function start() {
   if (import.meta.env.DEV && !native) {
     await import("./dev/mock").then((m) => m.installMock());
   }
+  // Der Kern spricht dieselbe Sprache wie die Oberfläche: Fehlermeldungen, Vorlagentexte, Leitlinien.
+  await api.setLanguage(language).catch(() => undefined);
   createRoot(document.getElementById("root")!).render(
     <React.StrictMode>
       <App />

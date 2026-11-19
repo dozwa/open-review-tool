@@ -115,13 +115,14 @@ den Voreinstellungen und in den Stationen nach dem Screening. Der Review-Typ wä
 legt Kriterienschema, Stationsliste, Auswahlregel, Mindeststimmen, Klärungsregel, Gate-Schwellen, Pflichtfelder,
 Begriffe und Berichtscheckliste fest und steht als `WorkflowVersionPublished` im Log.
 
-Belegt ist nur die Scoping-Vorlage (JBI Kapitel 10). Die übrigen Zeilen stammen aus der bestehenden Analyse (MECIR)
+Belegt sind die Scoping-Vorlage (JBI Kapitel 10), der Rapid Review (Garritty et al. 2024) und der
+State-of-the-Art-Review (Barry et al. 2022); die beiden letzten sind gebaut. Die übrigen Zeilen stammen aus der bestehenden Analyse (MECIR)
 und aus Vorwissen, nicht aus einer neuen Recherche. Vor dem Bau einer Vorlage ist ihre Leitlinie zu lesen.
 
 | Vorlage | Abweichung von der Scoping-Vorlage | Neue Bausteine |
 | --- | --- | --- |
-| Rapid Review | Auswahlregel `liberal` oder `single_verified` statt `unanimous`. Die Abkürzung erscheint als Limitation im Methodentext | keine |
-| State of the Art, Literature Review | Kein verbindlicher Standard bekannt. Eine Stimme je Eintrag, Gates abgeschaltet, oft ein Zeitfenster als Kriterium | keine |
+| Rapid Review | Doppelte Bewertung einer Stichprobe, danach `single_verified` statt `unanimous`; Extraktion durch eine Person mit Prüfung. Jede Abkürzung erscheint als Limitation im Methodentext | keine |
+| State of the Art, Literature Review | Kein verbindlicher Standard; sechs Schritte nach Barry et al. 2022. Eine Stimme je Eintrag, Gates abgeschaltet, der Zeitraum als Kriterium | keine |
 | Systematic Review | Kriterien nach PICO. Zwei unabhängige Personen Pflicht (`unanimous`, nicht abwählbar). Bias-Bewertung Pflicht und doppelt. Extraktion mit Zahlenwerten je Studienarm und Zeitpunkt. Bericht nach PRISMA 2020, Begriff „Studien“ statt „Quellen“ | Bewertungsstufe, numerische Extraktion mit wiederholbaren Gruppen, Export für R oder RevMan |
 | Umbrella Review | Einheit sind Reviews statt Primärstudien. Bewertung der Reviews. Übersicht, welche Primärstudien sich überschneiden | Bewertungsstufe, Überschneidungsmatrix |
 | Qualitativ, Mixed Methods | Anderes Kriterienschema. Bewertung mit passenden Checklisten. Extraktion von Befunden mit Belegzitaten | Bewertungsstufe, Feldtyp „Befund mit Zitat“ |
@@ -175,12 +176,18 @@ und Rückmeldungen durchspielt.
   formuliert. Kappa und Alpha werden daneben angezeigt, sperren aber nicht.
 - **Dritt-Entscheid:** JBI verlangt eine Person ohne eigene Stimme zu dem Eintrag. Vorschlag: bei der Regel
   „Dritt-Entscheid“ erzwingen, bei „Diskussion“ nicht.
-- **Leitlinien der weiteren Vorlagen:** Vor Paket 9 und 10 die jeweilige Leitlinie auswerten (Cochrane Handbook und
-  MECIR, Cochrane Rapid Reviews Methods Group, JBI Kapitel zu Umbrella und qualitativen Reviews). Bisher ist nur
-  die Scoping-Vorlage belegt.
+- **Leitlinien der weiteren Vorlagen:** Für Paket 9 sind die Empfehlungen der Cochrane Rapid Reviews Methods Group
+  und der Ansatz von Barry et al. ausgewertet (siehe Quellen). Vor Paket 10 stehen noch aus: Cochrane Handbook und
+  MECIR, JBI Kapitel zu Umbrella und qualitativen Reviews.
 - **Abschnitt 2.4 des JBI Manuals** vor Paket 3 lesen, ebenso die neue PRISMA-ScR, sobald sie erschienen ist.
 
 ## Quellen
+
+Rapid Review und State of the Art (abgerufen am 19.11.2026):
+Garritty C et al. [Updated recommendations for the Cochrane rapid review methods guidance for rapid reviews of
+effectiveness](https://doi.org/10.1136/bmj-2023-076335). BMJ 2024;384:e076335.
+Barry ES, Merkebu J, Varpio L. [State-of-the-art literature review methodology: A six-step approach for knowledge
+synthesis](https://pmc.ncbi.nlm.nih.gov/articles/PMC9582072/). Perspect Med Educ 2022;11:281–288.
 
 JBI Manual for Evidence Synthesis, Kapitel 10 (abgerufen am 19.11.2026):
 [10.2.5 Planned approach](https://jbi-global.atlassian.net/wiki/spaces/MANUAL/pages/355862729),

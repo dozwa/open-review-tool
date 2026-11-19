@@ -31,6 +31,7 @@ use crate::projection::{order_key, string_list, ReviewState, StageState};
 use crate::search::Searches;
 use crate::service::{require, stage_criteria, Review, MANAGE_ROLES, ROLES, WRITE_ROLES};
 use crate::store::{AssignmentRow, BatchRow, Head, RecordRow, Store};
+use crate::tr;
 
 pub const BUNDLE_FORMAT: &str = "ort-bundle";
 pub const IDENTITY_FORMAT: &str = "ort-identity";
@@ -60,12 +61,12 @@ pub fn identity_file(person: &PublicIdentity) -> Result<String> {
 
 pub fn read_identity_file(text: &str) -> Result<PublicIdentity> {
     let file: IdentityFile =
-        serde_json::from_str(text).map_err(|_| invalid("Das ist keine Identitätsdatei des Open Review Tool."))?;
+        serde_json::from_str(text).map_err(|_| invalid(tr!("Das ist keine Identitätsdatei des Open Review Tool.")))?;
     if file.format != IDENTITY_FORMAT {
-        return Err(invalid("Das ist keine Identitätsdatei des Open Review Tool."));
+        return Err(invalid(tr!("Das ist keine Identitätsdatei des Open Review Tool.")));
     }
     if file.version > IDENTITY_VERSION {
-        return Err(invalid("Die Identitätsdatei stammt aus einer neueren Version der App."));
+        return Err(invalid(tr!("Die Identitätsdatei stammt aus einer neueren Version der App.")));
     }
     parse_public_key(&file.person.public_key)?;
     Ok(file.person)
@@ -110,14 +111,14 @@ impl Bundle {
 
     pub fn from_json(text: &str) -> Result<Bundle> {
         let value: serde_json::Value =
-            serde_json::from_str(text).map_err(|_| invalid("Die Datei ist kein Paket und keine Rückmeldung."))?;
+            serde_json::from_str(text).map_err(|_| invalid(tr!("Die Datei ist kein Paket und keine Rückmeldung.")))?;
         if value.get("format").and_then(|f| f.as_str()) != Some(BUNDLE_FORMAT) {
-            return Err(invalid("Die Datei ist kein Paket und keine Rückmeldung des Open Review Tool."));
+            return Err(invalid(tr!("Die Datei ist kein Paket und keine Rückmeldung des Open Review Tool.")));
         }
         if value.get("version").and_then(|v| v.as_u64()).unwrap_or(0) > FORMAT_VERSION as u64 {
-            return Err(invalid("Diese Datei stammt aus einer neueren Version der App."));
+            return Err(invalid(tr!("Diese Datei stammt aus einer neueren Version der App.")));
         }
-        serde_json::from_value(value).map_err(|e| integrity(format!("Die Datei ist beschädigt: {e}")))
+        serde_json::from_value(value).map_err(|e| integrity(tr!("Die Datei ist beschädigt: {}", e)))
     }
 }
 
@@ -138,7 +139,7 @@ pub fn export_package(review: &Review, recipient: &Uuid) -> Result<Bundle> {
     let state = review.state()?;
     require(&state, &review.me.actor_id, &MANAGE_ROLES)?;
     if !state.members.contains_key(recipient) {
-        return Err(not_found("Diese Person ist kein Mitglied des Reviews."));
+        return Err(not_found(tr!("Diese Person ist kein Mitglied des Reviews.")));
     }
     let events = review.store.events()?;
     let mut blinded = BTreeSet::new();
@@ -210,10 +211,12 @@ pub struct MergeReport {
 /// Legt aus einem Paket ein neues Review an (erstes Einlesen bei einer Person).
 pub fn create_from_package(path: &Path, me: Identity, bundle: &Bundle) -> Result<(Review, MergeReport)> {
     if bundle.kind != BundleKind::Package {
-        return Err(invalid("Ein neues Review lässt sich nur aus einem Paket anlegen, nicht aus einer Rückmeldung."));
+        return Err(invalid(tr!(
+            "Ein neues Review lässt sich nur aus einem Paket anlegen, nicht aus einer Rückmeldung."
+        )));
     }
     if path.exists() {
-        return Err(conflict("Dieses Review gibt es auf diesem Rechner schon."));
+        return Err(conflict(tr!("Dieses Review gibt es auf diesem Rechner schon.")));
     }
     let result = (|| {
         let store = Store::open(path)?;
@@ -221,7 +224,7 @@ pub fn create_from_package(path: &Path, me: Identity, bundle: &Bundle) -> Result
         let review = Review { store, me };
         let report = merge(&review, bundle)?;
         if review.state()?.role_of(&review.me.actor_id).is_none() {
-            return Err(forbidden("Du bist in diesem Paket nicht als Mitglied eingetragen."));
+            return Err(forbidden(tr!("Du bist in diesem Paket nicht als Mitglied eingetragen.")));
         }
         Ok((review, report))
     })();
@@ -254,7 +257,7 @@ fn keys_and_roles(events: &[&Event]) -> Result<(HashMap<Uuid, VerifyingKey>, Has
                 }
                 let owner = e.payload_str("owner").and_then(|s| Uuid::parse_str(s).ok());
                 if owner != Some(e.actor_id) || e.stream != MAIN_STREAM || e.seq != 1 {
-                    return Err(integrity("Das Ereignis ReviewCreated ist ungültig."));
+                    return Err(integrity(tr!("Das Ereignis ReviewCreated ist ungültig.")));
                 }
                 let key = parse_public_key(e.payload_str("public_key").unwrap_or_default())?;
                 e.verify(&key)?;
@@ -288,21 +291,22 @@ pub fn merge(review: &Review, bundle: &Bundle) -> Result<MergeReport> {
     let store = &review.store;
     let review_id = store.review_id()?;
     if bundle.review_id != review_id {
-        return Err(invalid("Die Datei gehört zu einem anderen Review."));
+        return Err(invalid(tr!("Die Datei gehört zu einem anderen Review.")));
     }
     if bundle.kind == BundleKind::Package && bundle.recipient.is_some_and(|r| r != review.me.actor_id) {
-        return Err(forbidden("Dieses Paket ist für eine andere Person bestimmt."));
+        return Err(forbidden(tr!("Dieses Paket ist für eine andere Person bestimmt.")));
     }
 
     // 1. Prüfsummen aller Ereignisse
     for e in &bundle.events {
         if e.review_id != review_id {
-            return Err(integrity("Die Datei enthält Ereignisse eines anderen Reviews."));
+            return Err(integrity(tr!("Die Datei enthält Ereignisse eines anderen Reviews.")));
         }
         if e.compute_hash()? != e.hash {
-            return Err(integrity(format!(
+            return Err(integrity(tr!(
                 "Die Datei ist beschädigt oder wurde verändert: Prüfsumme von Ereignis {} ({}) stimmt nicht.",
-                e.event_id, e.event_type
+                e.event_id,
+                e.event_type
             )));
         }
     }
@@ -315,7 +319,7 @@ pub fn merge(review: &Review, bundle: &Bundle) -> Result<MergeReport> {
     // 3. Signaturen
     for e in &bundle.events {
         let key = keys.get(&e.actor_id).ok_or_else(|| {
-            forbidden(format!(
+            forbidden(tr!(
                 "Die Datei enthält Ereignisse einer Person, die in diesem Review nicht Mitglied ist ({}).",
                 &e.actor_id.to_string()[..8]
             ))
@@ -367,7 +371,7 @@ pub fn merge(review: &Review, bundle: &Bundle) -> Result<MergeReport> {
     }
     for ((_, actor, stream), mut chain) in chains {
         chain.sort_by_key(|e| e.seq);
-        let who = review.name_of(&actor).ok().filter(|n| !n.starts_with("Unbekannt")).unwrap_or_else(|| {
+        let who = store.person_name(&actor).ok().flatten().unwrap_or_else(|| {
             bundle
                 .people
                 .iter()
@@ -383,7 +387,7 @@ pub fn merge(review: &Review, bundle: &Bundle) -> Result<MergeReport> {
             }
             if let Some(existing) = store.event_by_id(&e.event_id)? {
                 if existing.hash != e.hash {
-                    return Err(integrity(format!(
+                    return Err(integrity(tr!(
                         "Ereignis {} liegt hier schon in einer anderen Fassung vor.",
                         e.event_id
                     )));
@@ -392,18 +396,19 @@ pub fn merge(review: &Review, bundle: &Bundle) -> Result<MergeReport> {
                 continue;
             }
             let reject = |reason: String, report: &mut MergeReport| {
-                report.rejected.push(format!("{who}, {} Nr. {}: {reason}", e.event_type, e.seq));
+                report.rejected.push(tr!("{}, {} Nr. {}: {}", who, e.event_type, e.seq, reason));
             };
             if store.event_at(&actor, &stream, e.seq)?.is_some() {
-                reject("An dieser Stelle der Kette steht hier schon ein anderes Ereignis. Die Kette wurde auf zwei Rechnern getrennt fortgeschrieben.".into(), &mut report);
+                reject(tr!("An dieser Stelle der Kette steht hier schon ein anderes Ereignis. Die Kette wurde auf zwei Rechnern getrennt fortgeschrieben."), &mut report);
                 stopped = true;
                 continue;
             }
             let expected = head.as_ref().map_or(1, |h| h.seq + 1);
             if e.seq != expected || e.prev_hash != head.as_ref().map(|h| h.hash.clone()) {
                 reject(
-                    format!(
-                        "Lücke in der Kette (erwartet Nr. {expected}). Bitte eine vollständige Rückmeldung anfordern."
+                    tr!(
+                        "Lücke in der Kette (erwartet Nr. {}). Bitte eine vollständige Rückmeldung anfordern.",
+                        expected
                     ),
                     &mut report,
                 );
@@ -454,14 +459,16 @@ pub fn merge(review: &Review, bundle: &Bundle) -> Result<MergeReport> {
             .find(|e| e.event_type == "RecordsImported" && e.payload_str("batch_id") == Some(&batch.to_string()));
         let expected = event.and_then(|e| e.payload_str("records_sha256"));
         if expected != Some(store.records_digest(&batch)?.as_str()) {
-            return Err(integrity("Die Records in der Datei passen nicht zur signierten Prüfsumme ihres Imports."));
+            return Err(integrity(tr!(
+                "Die Records in der Datei passen nicht zur signierten Prüfsumme ihres Imports."
+            )));
         }
     }
     for stage in touched_stages {
         let event = after.iter().find(|e| e.event_type == "StageInstanceOpened" && e.stage_instance_id == Some(stage));
         let expected = event.and_then(|e| e.payload_str("record_ids_sha256"));
         if expected != Some(store.assignment_digest(&stage)?.as_str()) {
-            return Err(integrity("Die Zuweisungen einer Stufe passen nicht zur signierten Prüfsumme der Stufe."));
+            return Err(integrity(tr!("Die Zuweisungen einer Stufe passen nicht zur signierten Prüfsumme der Stufe.")));
         }
     }
 
@@ -504,18 +511,18 @@ fn authorize(e: &Event, context: &MergeContext) -> std::result::Result<(), Strin
     let has_created = *has_created;
     let role = roles.get(&e.actor_id).map(String::as_str).unwrap_or("");
     let t = e.event_type.as_str();
-    let spec = catalog::spec(t).ok_or_else(|| format!("Unbekannter Ereignistyp {t}."))?;
+    let spec = catalog::spec(t).ok_or_else(|| tr!("Unbekannter Ereignistyp {}.", t))?;
     match spec.writer {
-        Writer::Creator if has_created => return Err("Das Review ist hier schon angelegt.".into()),
+        Writer::Creator if has_created => return Err(tr!("Das Review ist hier schon angelegt.")),
         Writer::Creator => {}
-        Writer::Manage if !MANAGE_ROLES.contains(&role) => return Err("Nur Owner und Admins dürfen das.".into()),
+        Writer::Manage if !MANAGE_ROLES.contains(&role) => return Err(tr!("Nur Owner und Admins dürfen das.")),
         Writer::Manage => {}
-        Writer::Write if !WRITE_ROLES.contains(&role) => return Err("Diese Person darf nicht abstimmen.".into()),
+        Writer::Write if !WRITE_ROLES.contains(&role) => return Err(tr!("Diese Person darf nicht abstimmen.")),
         Writer::Write => {}
     }
     catalog::validate_event(e)?;
     if stream_for(t, e.stage_instance_id.as_ref()).ok().as_deref() != Some(e.stream.as_str()) {
-        return Err("Das Ereignis liegt in der falschen Kette.".into());
+        return Err(tr!("Das Ereignis liegt in der falschen Kette."));
     }
     // Ein Import oder ein Peer-Review nennt eine Suchversion, die es geben muss.
     let search_version = match t {
@@ -526,7 +533,7 @@ fn authorize(e: &Event, context: &MergeContext) -> std::result::Result<(), Strin
     if let Some(id) = e.payload_str("search_id").filter(|_| search_version.is_some()) {
         let known = Uuid::parse_str(id).ok().zip(search_version.and_then(|v| v.as_i64()));
         if !known.is_some_and(|key| searches.contains(&key)) {
-            return Err("Die Suchversion ist hier nicht bekannt.".into());
+            return Err(tr!("Die Suchversion ist hier nicht bekannt."));
         }
     }
     if t == "FormConfirmed" {
@@ -535,35 +542,35 @@ fn authorize(e: &Event, context: &MergeContext) -> std::result::Result<(), Strin
         let known =
             id.and_then(|id| forms.get(&id)).is_some_and(|f| f.versions.iter().any(|v| Some(v.version) == version));
         if !known {
-            return Err("Die Formularversion ist hier nicht bekannt.".into());
+            return Err(tr!("Die Formularversion ist hier nicht bekannt."));
         }
     }
     if matches!(spec.stage, StageRule::Open | StageRule::OpenUnblinded) {
-        let stage = e.stage_instance_id.ok_or("Stufe fehlt.")?;
+        let stage = e.stage_instance_id.ok_or_else(|| tr!("Stufe fehlt."))?;
         if !known_stages.contains(&stage) {
-            return Err("Die Stufe ist hier nicht bekannt.".into());
+            return Err(tr!("Die Stufe ist hier nicht bekannt."));
         }
         if closed_before.contains(&stage) {
-            return Err("Die Stufe war bereits geschlossen.".into());
+            return Err(tr!("Die Stufe war bereits geschlossen."));
         }
         if spec.stage == StageRule::OpenUnblinded && blind_after.contains(&stage) {
-            return Err("Konsens in einer verblindeten Stufe.".into());
+            return Err(tr!("Konsens in einer verblindeten Stufe."));
         }
         // Stimmen gehören in Screening-Stufen, Formularwerte in Formular-Stufen.
         match (t.starts_with("Form"), form_stages.get(&stage)) {
-            (true, None) => return Err("Die Stufe arbeitet nicht mit einem Formular.".into()),
-            (false, Some(_)) => return Err("Die Stufe arbeitet mit einem Formular, nicht mit Stimmen.".into()),
+            (true, None) => return Err(tr!("Die Stufe arbeitet nicht mit einem Formular.")),
+            (false, Some(_)) => return Err(tr!("Die Stufe arbeitet mit einem Formular, nicht mit Stimmen.")),
             (true, Some(form)) if t != "FormEntryCompleted" => {
                 let version = e.payload.get("form_version").and_then(|v| v.as_i64()).unwrap_or(0);
                 let field = forms.field_in(form, version, e.payload_str("field").unwrap_or_default());
-                let field = field.ok_or("Das Feld gibt es in dieser Version des Formulars nicht.")?;
+                let field = field.ok_or_else(|| tr!("Das Feld gibt es in dieser Version des Formulars nicht."))?;
                 check_value(field, &normal(e.payload.get("value").unwrap_or(&serde_json::Value::Null)))?;
             }
             _ => {}
         }
         let record = e.payload_str("record_id").unwrap_or_default().to_string();
         if t == "ConsensusRecorded" && own_votes.contains(&(stage, record, e.actor_id)) {
-            return Err("Dritt-Entscheid: Diese Person hat zu dem Eintrag selbst abgestimmt.".into());
+            return Err(tr!("Dritt-Entscheid: Diese Person hat zu dem Eintrag selbst abgestimmt."));
         }
         if let (Some(criteria), Some(decision)) = (reason_rules.get(&stage), e.payload_str("decision")) {
             let reasons = string_list(e.payload.get("reasons"));

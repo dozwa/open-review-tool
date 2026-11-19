@@ -1,4 +1,7 @@
 // Beispielbericht für die Browser-Vorschau. Das Diagramm stammt aus dem Kern (`report::diagram_svg`).
+// Begriffe und Namen der Ebenen folgen der Sprache; Diagramm und Texte sind ein deutscher Abzug.
+
+import { core } from "./core";
 
 export const mockReport = {
   "flow": {
@@ -19,14 +22,14 @@ export const mockReport = {
         "input": 380,
         "input_from": null,
         "key": "title_abstract",
-        "label": "Titel/Abstract",
+        "label": core("Titel/Abstract"),
         "not_assigned": 0,
         "open": 0,
         "reasons": [
           {
             "code": "",
             "n": 366,
-            "text": "ohne Hauptgrund"
+            "text": core("ohne Hauptgrund")
           }
         ],
         "retrieval": null,
@@ -43,7 +46,7 @@ export const mockReport = {
         "input": 14,
         "input_from": "title_abstract",
         "key": "fulltext",
-        "label": "Volltext-Screening",
+        "label": core("Volltext-Screening"),
         "not_assigned": 0,
         "open": 3,
         "reasons": [
@@ -74,10 +77,10 @@ export const mockReport = {
         "rounds": 1
       }
     ],
-    "record_term": "Eintrag",
-    "records_term": "Einträge",
+    "record_term": core("Eintrag"),
+    "records_term": core("Einträge"),
     "resolved_duplicates": 4,
-    "source_term": "Quelle",
+    "source_term": core("Quelle"),
     "sources": [
       {
         "n_duplicates": 0,
@@ -107,7 +110,7 @@ export const mockReport = {
         "source": "CINAHL"
       }
     ],
-    "sources_term": "Quellen",
+    "sources_term": core("Quellen"),
     "unique": 380
   },
   "problems": [],

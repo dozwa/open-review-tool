@@ -16,6 +16,7 @@ use crate::canonical::to_canonical;
 use crate::catalog;
 use crate::error::{invalid, Result};
 use crate::event::{now_timestamp, sha256_hex, stream_for, Event, Identity};
+use crate::tr;
 
 /// Schritte des Tabellenschemas. Die Nummer des letzten ausgeführten Schritts steht in
 /// `PRAGMA user_version`. Neue Schritte nur anhängen, bestehende nie ändern.
@@ -133,7 +134,7 @@ impl Store {
         conn.pragma_update(None, "foreign_keys", "ON")?;
         let done: usize = conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))?.max(0) as usize;
         if done > MIGRATIONS.len() {
-            return Err(invalid("Diese Review-Datei stammt aus einer neueren Version der App."));
+            return Err(invalid(tr!("Diese Review-Datei stammt aus einer neueren Version der App.")));
         }
         for (index, sql) in MIGRATIONS.iter().enumerate().skip(done) {
             let tx = conn.unchecked_transaction()?;
@@ -166,8 +167,8 @@ impl Store {
     }
 
     pub fn review_id(&self) -> Result<Uuid> {
-        let text = self.meta("review_id")?.ok_or_else(|| invalid("Die Datei enthält kein Review."))?;
-        Uuid::parse_str(&text).map_err(|_| invalid("Ungültige Review-ID in der Datei."))
+        let text = self.meta("review_id")?.ok_or_else(|| invalid(tr!("Die Datei enthält kein Review.")))?;
+        Uuid::parse_str(&text).map_err(|_| invalid(tr!("Ungültige Review-ID in der Datei.")))
     }
 
     pub fn head(&self, actor_id: &Uuid, stream: &str) -> Result<Option<Head>> {

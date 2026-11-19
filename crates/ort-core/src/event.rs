@@ -11,6 +11,7 @@ use uuid::Uuid;
 use crate::canonical::to_canonical;
 use crate::catalog::{self, Chain};
 use crate::error::{integrity, invalid, Result};
+use crate::tr;
 
 pub const MAIN_STREAM: &str = "main";
 
@@ -23,10 +24,10 @@ pub fn stage_stream(stage_id: &Uuid) -> String {
 }
 
 pub fn stream_for(event_type: &str, stage_id: Option<&Uuid>) -> Result<String> {
-    let spec = catalog::spec(event_type).ok_or_else(|| invalid(format!("Unbekannter Ereignistyp {event_type}.")))?;
+    let spec = catalog::spec(event_type).ok_or_else(|| invalid(tr!("Unbekannter Ereignistyp {}.", event_type)))?;
     match spec.chain {
         Chain::Stage => {
-            let stage = stage_id.ok_or_else(|| invalid(format!("{event_type} braucht eine Stufe.")))?;
+            let stage = stage_id.ok_or_else(|| invalid(tr!("{} braucht eine Stufe.", event_type)))?;
             Ok(stage_stream(stage))
         }
         Chain::Main => Ok(MAIN_STREAM.to_string()),
@@ -95,19 +96,21 @@ impl Event {
     /// Prüft Hash und Signatur. Die Kette (Vorgänger) prüft der Aufrufer.
     pub fn verify(&self, key: &VerifyingKey) -> Result<()> {
         if self.compute_hash()? != self.hash {
-            return Err(integrity(format!(
+            return Err(integrity(tr!(
                 "Prüfsumme stimmt nicht: Ereignis {} ({}) wurde verändert.",
-                self.event_id, self.event_type
+                self.event_id,
+                self.event_type
             )));
         }
-        let hash = hex::decode(&self.hash).map_err(|_| integrity("Prüfsumme ist kein Hex-Text."))?;
-        let sig_bytes = B64.decode(&self.signature).map_err(|_| integrity("Signatur ist kein Base64-Text."))?;
+        let hash = hex::decode(&self.hash).map_err(|_| integrity(tr!("Prüfsumme ist kein Hex-Text.")))?;
+        let sig_bytes = B64.decode(&self.signature).map_err(|_| integrity(tr!("Signatur ist kein Base64-Text.")))?;
         let sig_array: [u8; 64] =
-            sig_bytes.as_slice().try_into().map_err(|_| integrity("Signatur hat die falsche Länge."))?;
+            sig_bytes.as_slice().try_into().map_err(|_| integrity(tr!("Signatur hat die falsche Länge.")))?;
         key.verify(&hash, &Signature::from_bytes(&sig_array)).map_err(|_| {
-            integrity(format!(
+            integrity(tr!(
                 "Signatur ungültig: Ereignis {} ({}) stammt nicht von der angegebenen Person.",
-                self.event_id, self.event_type
+                self.event_id,
+                self.event_type
             ))
         })
     }
@@ -134,12 +137,13 @@ impl std::fmt::Debug for Identity {
 impl Identity {
     pub fn generate(name: &str) -> Result<Identity> {
         let mut secret = [0u8; 32];
-        getrandom::getrandom(&mut secret).map_err(|e| invalid(format!("Kein Zufall verfügbar: {e}")))?;
+        getrandom::getrandom(&mut secret).map_err(|e| invalid(tr!("Kein Zufall verfügbar: {}", e)))?;
         Ok(Identity { actor_id: Uuid::new_v4(), name: name.trim().to_string(), key: SigningKey::from_bytes(&secret) })
     }
 
     pub fn from_secret(actor_id: Uuid, name: &str, secret: &[u8]) -> Result<Identity> {
-        let secret: [u8; 32] = secret.try_into().map_err(|_| invalid("Privater Schlüssel hat die falsche Länge."))?;
+        let secret: [u8; 32] =
+            secret.try_into().map_err(|_| invalid(tr!("Privater Schlüssel hat die falsche Länge.")))?;
         Ok(Identity { actor_id, name: name.to_string(), key: SigningKey::from_bytes(&secret) })
     }
 
@@ -156,7 +160,7 @@ impl Identity {
     }
 
     pub(crate) fn sign_hash(&self, hash_hex: &str) -> Result<String> {
-        let hash = hex::decode(hash_hex).map_err(|_| invalid("Prüfsumme ist kein Hex-Text."))?;
+        let hash = hex::decode(hash_hex).map_err(|_| invalid(tr!("Prüfsumme ist kein Hex-Text.")))?;
         Ok(B64.encode(self.key.sign(&hash).to_bytes()))
     }
 }
@@ -170,10 +174,10 @@ pub struct PublicIdentity {
 }
 
 pub fn parse_public_key(text: &str) -> Result<VerifyingKey> {
-    let bytes = B64.decode(text).map_err(|_| integrity("Öffentlicher Schlüssel ist kein Base64-Text."))?;
+    let bytes = B64.decode(text).map_err(|_| integrity(tr!("Öffentlicher Schlüssel ist kein Base64-Text.")))?;
     let array: [u8; 32] =
-        bytes.as_slice().try_into().map_err(|_| integrity("Öffentlicher Schlüssel hat die falsche Länge."))?;
-    VerifyingKey::from_bytes(&array).map_err(|_| integrity("Öffentlicher Schlüssel ist ungültig."))
+        bytes.as_slice().try_into().map_err(|_| integrity(tr!("Öffentlicher Schlüssel hat die falsche Länge.")))?;
+    VerifyingKey::from_bytes(&array).map_err(|_| integrity(tr!("Öffentlicher Schlüssel ist ungültig.")))
 }
 
 #[cfg(test)]

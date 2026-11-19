@@ -19,14 +19,17 @@ use crate::agreement::{self, Metric};
 use crate::criteria::Criteria;
 use crate::error::{invalid, Result};
 use crate::forms::{Field, StageSummary};
+use crate::i18n;
 use crate::projection::{MaybeMode, StageState};
 use crate::protocol::{self, Checklist, Evidence, Protocol};
 use crate::service::{csv_field, require, stage_criteria, Review, SourceCount, BOOTSTRAP_N, BOOTSTRAP_SEED, ROLES};
 use crate::sources::{self, TypeCount, Unit as SourceUnit};
 use crate::store::RecordRow;
+use crate::tr;
 use crate::workflow::{Station, Workflow};
 
-/// Dateien, die der Bericht ausgibt: Schlüssel und vorgeschlagener Dateiname.
+/// Dateien, die der Bericht ausgibt: Schlüssel und vorgeschlagener Dateiname. Der Name wird bei der
+/// Ausgabe in die geltende Sprache übersetzt.
 pub const REPORT_FILES: [(&str, &str); 9] = [
     ("diagram", "flussdiagramm.svg"),
     ("excluded", "ausgeschlossene-volltexte.csv"),
@@ -122,21 +125,17 @@ impl Flow {
         let mut beyond = Vec::new();
         let mut expect = |what: String, left: i64, right: i64| {
             if left != right {
-                out.push(format!("{what}: {left} ist nicht {right}."));
+                out.push(tr!("{}: {} ist nicht {}.", what, left, right));
             }
         };
+        expect(tr!("Treffer je Quelle und Summe"), self.sources.iter().map(|s| s.n_records).sum(), self.identified);
         expect(
-            "Treffer je Quelle und Summe".to_string(),
-            self.sources.iter().map(|s| s.n_records).sum(),
-            self.identified,
-        );
-        expect(
-            "Treffer aus anderen Quellen".to_string(),
+            tr!("Treffer aus anderen Quellen"),
             self.sources.iter().filter(|s| is_other(&s.origin)).map(|s| s.n_records).sum(),
             self.other_identified,
         );
         expect(
-            "Treffer ohne Dubletten".to_string(),
+            tr!("Treffer ohne Dubletten"),
             self.identified - self.exact_duplicates - self.resolved_duplicates,
             self.unique,
         );
@@ -147,37 +146,45 @@ impl Flow {
                 Some(key) => self.levels.iter().find(|l| &l.key == key).map(|l| l.included),
             };
             if let Some(from) = from {
-                expect(format!("Eingang von „{name}“"), level.input, from);
+                expect(tr!("Eingang von „{}“", name), level.input, from);
             }
             let aside = match &level.retrieval {
                 Some(r) => {
-                    expect(format!("Gesuchte Volltexte vor „{name}“"), r.sought, level.input);
+                    expect(tr!("Gesuchte Volltexte vor „{}“", name), r.sought, level.input);
                     r.unavailable + r.open + r.waiting
                 }
                 None => level.not_assigned,
             };
-            expect(format!("Verbleib des Eingangs von „{name}“"), level.assessed + aside, level.input);
-            expect(format!("Entscheidungen in „{name}“"), level.included + level.excluded + level.open, level.assessed);
-            expect(format!("Gründe in „{name}“"), level.reasons.iter().map(|r| r.n).sum(), level.excluded);
+            expect(tr!("Verbleib des Eingangs von „{}“", name), level.assessed + aside, level.input);
+            expect(tr!("Entscheidungen in „{}“", name), level.included + level.excluded + level.open, level.assessed);
+            expect(tr!("Gründe in „{}“", name), level.reasons.iter().map(|r| r.n).sum(), level.excluded);
             for (what, part, whole) in [
-                ("Geprüfte", level.other_assessed, level.assessed.min(self.other_identified)),
-                ("Eingeschlossene", level.other_included, level.included.min(level.other_assessed)),
+                (
+                    tr!("Geprüfte aus anderen Quellen in „{}“", name),
+                    level.other_assessed,
+                    level.assessed.min(self.other_identified),
+                ),
+                (
+                    tr!("Eingeschlossene aus anderen Quellen in „{}“", name),
+                    level.other_included,
+                    level.included.min(level.other_assessed),
+                ),
             ] {
                 if part > whole {
-                    beyond.push(format!("{what} aus anderen Quellen in „{name}“: {part} ist mehr als {whole}."));
+                    beyond.push(tr!("{}: {} ist mehr als {}.", what, part, whole));
                 }
             }
         }
         if let (Some(sources), Some(records)) = (self.included_sources, self.included) {
             if sources > records {
-                beyond.push(format!("Eingeschlossene Quellen: {sources} ist mehr als {records} Einträge."));
+                beyond.push(tr!("Eingeschlossene Quellen: {} ist mehr als {} Einträge.", sources, records));
             }
             if !self.source_types.is_empty() {
-                expect("Quellen je Quellenart".to_string(), self.source_types.iter().map(|t| t.n).sum(), sources);
+                expect(tr!("Quellen je Quellenart"), self.source_types.iter().map(|t| t.n).sum(), sources);
             }
         }
         expect(
-            "Eingeschlossene am Ende".to_string(),
+            tr!("Eingeschlossene am Ende"),
             self.included.unwrap_or(0),
             self.levels.last().map_or(0, |l| l.included),
         );
@@ -306,7 +313,7 @@ fn units<'a>(workflow: &Workflow, stages: &'a [StageState]) -> Vec<Unit<'a>> {
                 }
                 out.push(Unit {
                     key: stage.config.id.to_string(),
-                    label: stage.config.name.clone(),
+                    label: i18n::text(&stage.config.name),
                     stages: vec![stage],
                     from: stage.config.source_stage.clone(),
                     requires_fulltext: false,
@@ -322,7 +329,7 @@ fn units<'a>(workflow: &Workflow, stages: &'a [StageState]) -> Vec<Unit<'a>> {
             }
             out.push(Unit {
                 key: station.key.clone(),
-                label: station.label.clone(),
+                label: i18n::text(&station.label),
                 stages: own,
                 from,
                 requires_fulltext: station.requires_fulltext,
@@ -493,7 +500,7 @@ impl Review {
             for code in order.iter().chain(&unknown).chain(std::iter::once(&String::new())) {
                 if let Some(n) = by_reason.get(code) {
                     let text = match code.is_empty() {
-                        true => "ohne Hauptgrund".to_string(),
+                        true => tr!("ohne Hauptgrund"),
                         false => texts.get(code).cloned().unwrap_or_default(),
                     };
                     level.reasons.push(ReasonCount { code: code.clone(), text, n: *n });
@@ -514,7 +521,10 @@ impl Review {
             false => sources::units(&last_included, &studies),
         };
         let source_types = match units.iter().any(|u| !u.source_type.is_empty()) {
-            true => sources::count_types(&units, &workflow.template.source_types),
+            true => sources::count_types(&units, &workflow.template.source_types)
+                .into_iter()
+                .map(|t| TypeCount { label: i18n::text(&t.label), ..t })
+                .collect(),
             false => Vec::new(),
         };
         let flow = Flow {
@@ -529,10 +539,10 @@ impl Review {
             included: levels.last().map(|l| l.included),
             complete,
             levels,
-            record_term: workflow.template.term("record").to_string(),
-            records_term: workflow.template.term("records").to_string(),
-            source_term: workflow.template.term("source").to_string(),
-            sources_term: workflow.template.term("sources").to_string(),
+            record_term: i18n::text(workflow.template.term("record")),
+            records_term: i18n::text(workflow.template.term("records")),
+            source_term: i18n::text(workflow.template.term("source")),
+            sources_term: i18n::text(workflow.template.term("sources")),
         };
         Ok(Data { workflow, stages, flow, included: last_included, units, excluded: excluded_rows })
     }
@@ -633,7 +643,7 @@ impl Review {
             let mut cells = vec![
                 (number + 1).to_string(),
                 label,
-                kind.clone(),
+                i18n::text(kind),
                 r.authors,
                 r.year.map(|y| y.to_string()).unwrap_or_default(),
                 r.title,
@@ -652,8 +662,8 @@ impl Review {
         let filename = REPORT_FILES
             .iter()
             .find(|(key, _)| *key == kind)
-            .map(|(_, name)| name.to_string())
-            .ok_or_else(|| invalid("Diese Datei kennt der Bericht nicht."))?;
+            .map(|(_, name)| i18n::text(name))
+            .ok_or_else(|| invalid(tr!("Diese Datei kennt der Bericht nicht.")))?;
         let data = self.report_data()?;
         let methods = |review: &Review| -> Result<(String, i64)> {
             review.methods_text(&data, &review.charting(&data), &review.protocol()?)
@@ -663,7 +673,7 @@ impl Review {
             "excluded" => self.excluded_csv(&data)?,
             "included" => {
                 if data.flow.levels.is_empty() {
-                    return Err(invalid("Es gibt noch keine Auswahl, aus der Eingeschlossene hervorgehen."));
+                    return Err(invalid(tr!("Es gibt noch keine Auswahl, aus der Eingeschlossene hervorgehen.")));
                 }
                 let mut records = Vec::new();
                 for id in &data.included {
@@ -685,7 +695,7 @@ impl Review {
                     n_fields: fields.len() as i64,
                 };
                 let list = self.checklist(&data, &charting, &protocol, &table, methods(self)?.1)?;
-                let list = list.ok_or_else(|| invalid("Die Vorlage dieses Reviews nennt keine Checkliste."))?;
+                let list = list.ok_or_else(|| invalid(tr!("Die Vorlage dieses Reviews nennt keine Checkliste.")))?;
                 protocol::checklist_markdown(&list)
             }
             _ => methods(self)?.0,
@@ -730,7 +740,7 @@ impl Review {
                 let fields = [
                     (number + 1).to_string(),
                     label.clone(),
-                    kind.clone(),
+                    i18n::text(kind),
                     if *id == unit.primary { "primary" } else { "companion" }.to_string(),
                     if included.contains(id) { "yes" } else { "no" }.to_string(),
                     r.id.to_string(),
@@ -772,50 +782,51 @@ impl Review {
     fn search_appendix(&self) -> Result<String> {
         let searches = self.searches()?;
         let summary = self.import_summary()?;
-        let mut out = String::from("# Suchanhang\n");
+        let mut out = tr!("# Suchanhang\n");
         if searches.is_empty() {
-            out.push_str("\nEs ist keine Suche festgehalten.\n");
+            out.push_str(&tr!("\nEs ist keine Suche festgehalten.\n"));
         }
         for search in &searches {
             let Some(latest) = search.versions.last() else { continue };
             let v = &latest.version;
             let platform = if v.platform.is_empty() { String::new() } else { format!(" ({})", v.platform) };
             out.push_str(&format!("\n## {}{platform}\n\n", v.source));
-            out.push_str(&format!("- Herkunft: {}\n", origin_label(&v.origin)));
-            out.push_str(&format!("- Tag der Suche: {}\n", german_date(&v.searched_on)));
+            out.push_str(&tr!("- Herkunft: {}\n", origin_label(&v.origin)));
+            out.push_str(&tr!("- Tag der Suche: {}\n", local_date(&v.searched_on)));
             if !v.limits.is_empty() {
-                out.push_str(&format!("- Grenzen: {}\n", v.limits));
+                out.push_str(&tr!("- Grenzen: {}\n", v.limits));
             }
             if let Some(limit) = v.hit_limit {
-                out.push_str(&format!("- Übernommen wurden höchstens die ersten {limit} Treffer.\n"));
+                out.push_str(&tr!("- Übernommen wurden höchstens die ersten {} Treffer.\n", limit));
             }
             if let Some(hits) = v.hits {
-                out.push_str(&format!("- Treffer laut Quelle: {hits}\n"));
+                out.push_str(&tr!("- Treffer laut Quelle: {}\n", hits));
             }
-            out.push_str(&format!(
+            out.push_str(&tr!(
                 "- Importiert: {} (davon {} beim Import als Dublette erkannt)\n",
-                latest.n_records, latest.n_duplicates
+                latest.n_records,
+                latest.n_duplicates
             ));
             for review in &v.peer_reviews {
-                out.push_str(&format!(
+                out.push_str(&tr!(
                     "- Peer-Review am {}: {}\n",
-                    german_date(&review.reviewed_on),
+                    local_date(&review.reviewed_on),
                     one_line(&review.note)
                 ));
             }
-            out.push_str(&format!("\nSuchstring (Version {}):\n\n{}\n", v.version, code_block(&v.query)));
+            out.push_str(&tr!("\nSuchstring (Version {}):\n\n{}\n", v.version, code_block(&v.query)));
             let older: Vec<_> = search.versions.iter().rev().skip(1).collect();
             for earlier in older {
                 let e = &earlier.version;
-                out.push_str(&format!(
+                out.push_str(&tr!(
                     "\nVersion {} vom {}, importiert: {}.",
                     e.version,
-                    german_date(&e.searched_on),
+                    local_date(&e.searched_on),
                     earlier.n_records
                 ));
                 if let Some(next) = search.versions.iter().find(|x| x.version.previous_version == Some(e.version)) {
                     if !next.version.change_note.is_empty() {
-                        out.push_str(&format!(
+                        out.push_str(&tr!(
                             " Geändert zu Version {}: {}",
                             next.version.version,
                             one_line(&next.version.change_note)
@@ -827,11 +838,12 @@ impl Review {
         }
         let loose: Vec<&SourceCount> = summary.sources.iter().filter(|s| s.search_id.is_none()).collect();
         if !loose.is_empty() {
-            out.push_str("\n## Importe ohne festgehaltene Suche\n\n");
+            out.push_str(&tr!("\n## Importe ohne festgehaltene Suche\n\n"));
             for s in loose {
-                let source = if s.source.is_empty() { "ohne Angabe" } else { &s.source };
-                out.push_str(&format!(
-                    "- {source} ({}): {} importiert, davon {} beim Import als Dublette erkannt\n",
+                let source = if s.source.is_empty() { tr!("ohne Angabe") } else { s.source.clone() };
+                out.push_str(&tr!(
+                    "- {} ({}): {} importiert, davon {} beim Import als Dublette erkannt\n",
+                    source,
                     origin_label(&s.origin),
                     s.n_records,
                     s.n_duplicates
@@ -848,61 +860,61 @@ impl Review {
     fn methods_text(&self, data: &Data, charting: &[ChartStation], protocol: &Protocol) -> Result<(String, i64)> {
         let (flow, workflow) = (&data.flow, &data.workflow);
         let records = &flow.records_term;
-        let mut out = format!("# Methoden: Auswahl der {}\n\n", flow.sources_term);
+        let mut out = tr!("# Methoden: Auswahl der {}\n\n", flow.sources_term);
         if workflow.published() {
-            out.push_str(&format!(
+            out.push_str(&tr!(
                 "Der Ablauf folgte der Vorlage „{}“ (Version {}).",
-                workflow.template.name, workflow.version
+                i18n::text(&workflow.template.name),
+                workflow.version
             ));
         } else {
-            out.push_str("Das Review lief ohne feste Vorlage.");
+            out.push_str(&tr!("Das Review lief ohne feste Vorlage."));
         }
         if let Some(r) = &protocol.registration {
-            let identifier = if r.identifier.is_empty() { String::new() } else { format!(" ({})", r.identifier) };
-            out.push_str(&format!(
-                " Das Protokoll wurde am {} registriert: {}{identifier}.",
-                german_date(&r.registered_on),
-                r.registry
-            ));
+            let on = local_date(&r.registered_on);
+            out.push_str(&match r.identifier.is_empty() {
+                true => tr!(" Das Protokoll wurde am {} registriert: {}.", on, r.registry),
+                false => tr!(" Das Protokoll wurde am {} registriert: {} ({}).", on, r.registry, r.identifier),
+            });
         }
         if !flow.complete {
-            out.push_str(" Stand: Die Auswahl ist noch nicht abgeschlossen; die Zahlen sind vorläufig.");
+            out.push_str(&tr!(" Stand: Die Auswahl ist noch nicht abgeschlossen; die Zahlen sind vorläufig."));
         }
-        out.push_str("\n\n## Suche und Dubletten\n\n");
+        out.push_str(&tr!("\n\n## Suche und Dubletten\n\n"));
+        let unnamed = tr!("ohne Angabe");
         let mut names: Vec<&str> = Vec::new();
         for s in &flow.sources {
-            let name = if s.source.is_empty() { "ohne Angabe" } else { s.source.as_str() };
+            let name = if s.source.is_empty() { unnamed.as_str() } else { s.source.as_str() };
             if !names.contains(&name) {
                 names.push(name);
             }
         }
-        out.push_str(&format!(
-            "Aus {} wurden {} {records} übernommen ({}). ",
-            count(names.len() as i64, "Quelle", "Quellen"),
-            flow.identified,
-            names.join(", ")
-        ));
+        let listed = names.join(", ");
+        out.push_str(&match names.len() {
+            1 => tr!("Aus 1 Quelle wurden {} {} übernommen ({}). ", flow.identified, records, listed),
+            n => tr!("Aus {} Quellen wurden {} {} übernommen ({}). ", n, flow.identified, records, listed),
+        });
         if flow.other_identified > 0 {
-            out.push_str(&format!(
-                "Davon stammen {} aus der Zitationssuche oder von anderen Wegen außerhalb von Datenbanken und Registern; \
-                 sie durchliefen dieselben Schritte als weitere Runde. ",
+            out.push_str(&tr!(
+                "Davon stammen {} aus der Zitationssuche oder von anderen Wegen außerhalb von Datenbanken und Registern; sie durchliefen dieselben Schritte als weitere Runde. ",
                 flow.other_identified
             ));
         }
-        out.push_str(&format!(
-            "Beim Import wurden {} als exakte Dubletten erkannt (gleiche DOI, sonst gleicher Titel und gleiches Jahr). \
-             Mögliche weitere Dubletten wurden paarweise geprüft; {} wurden entfernt. Es blieben {} {records}. \
-             Suchstrings, Datum und Grenzen je Quelle stehen im Suchanhang.\n",
-            flow.exact_duplicates, flow.resolved_duplicates, flow.unique
+        out.push_str(&tr!(
+            "Beim Import wurden {} als exakte Dubletten erkannt (gleiche DOI, sonst gleicher Titel und gleiches Jahr). Mögliche weitere Dubletten wurden paarweise geprüft; {} wurden entfernt. Es blieben {} {}. Suchstrings, Datum und Grenzen je Quelle stehen im Suchanhang.\n",
+            flow.exact_duplicates,
+            flow.resolved_duplicates,
+            flow.unique,
+            records
         ));
         for search in self.searches()? {
             let (Some(first), Some(last)) = (search.versions.first(), search.versions.last()) else { continue };
             if search.versions.len() > 1 {
-                out.push_str(&format!(
+                out.push_str(&tr!(
                     "\nDie Suche in {} wurde nach dem {} geändert oder wiederholt, zuletzt am {} (Version {}).\n",
                     last.version.source,
-                    german_date(&first.version.searched_on),
-                    german_date(&last.version.searched_on),
+                    local_date(&first.version.searched_on),
+                    local_date(&last.version.searched_on),
                     last.version.version
                 ));
             }
@@ -915,8 +927,8 @@ impl Review {
                 continue;
             }
             let groups: Vec<(String, Vec<&StageState>)> = match station.free_rounds {
-                true => own.iter().map(|s| (s.config.name.clone(), vec![*s])).collect(),
-                false => vec![(station.label.clone(), own)],
+                true => own.iter().map(|s| (i18n::text(&s.config.name), vec![*s])).collect(),
+                false => vec![(i18n::text(&station.label), own)],
             };
             for (label, group) in groups {
                 out.push_str(&format!("\n## {label}\n\n"));
@@ -929,53 +941,53 @@ impl Review {
         }
 
         for chart in charting {
-            out.push_str(&format!("\n## {}\n\n", chart.station.label));
+            out.push_str(&format!("\n## {}\n\n", i18n::text(&chart.station.label)));
             out.push_str(&charting_text(data, chart, &mut limitations));
         }
 
         let changes = protocol.deviations.iter().filter(|d| d.kind != "gate").map(|d| {
             let note = if d.note.is_empty() { String::new() } else { format!(": {}", one_line(&d.note)) };
-            format!("- {}: {}{note}\n", german_date(&d.at[..d.at.len().min(10)]), d.title)
+            format!("- {}: {}{note}\n", local_date(&d.at[..d.at.len().min(10)]), d.title)
         });
         limitations.extend(changes);
         let overrides: Vec<String> = workflow
             .overrides
             .iter()
             .map(|o| {
-                let label = workflow.template.station(&o.station).map_or(o.station.as_str(), |s| s.label.as_str());
-                format!("- „{label}“ wurde von der Leitung ohne erfülltes Gate freigegeben: {}\n", one_line(&o.reason))
+                let label = workflow.template.station(&o.station).map_or(o.station.clone(), |s| i18n::text(&s.label));
+                tr!("- „{}“ wurde von der Leitung ohne erfülltes Gate freigegeben: {}\n", label, one_line(&o.reason))
             })
             .collect();
         if !limitations.is_empty() || !overrides.is_empty() {
-            out.push_str("\n## Abweichungen und Limitationen\n\n");
+            out.push_str(&tr!("\n## Abweichungen und Limitationen\n\n"));
             for line in limitations.iter().chain(&overrides) {
                 out.push_str(line);
             }
         }
         if let Some(n) = flow.included {
-            out.push_str(&format!(
-                "\n## Ergebnis\n\n{} {} eingeschlossen{}.\n",
-                n,
-                if n == 1 { "Eintrag wurde".to_string() } else { format!("{records} wurden") },
-                if flow.complete { "" } else { " (vorläufig)" }
-            ));
+            out.push_str(&tr!("\n## Ergebnis\n\n"));
+            out.push_str(&match (n, flow.complete) {
+                (1, true) => tr!("1 Eintrag wurde eingeschlossen.\n"),
+                (1, false) => tr!("1 Eintrag wurde eingeschlossen (vorläufig).\n"),
+                (_, true) => tr!("{} {} wurden eingeschlossen.\n", n, records),
+                (_, false) => tr!("{} {} wurden eingeschlossen (vorläufig).\n", n, records),
+            });
             let other = flow.levels.last().map_or(0, |l| l.other_included);
             if flow.other_identified > 0 {
-                out.push_str(&format!(
-                    "Davon {} aus der Zitationssuche oder von anderen Wegen.\n",
-                    if other == 1 { "stammt 1".to_string() } else { format!("stammen {other}") }
-                ));
+                out.push_str(&match other {
+                    1 => tr!("Davon stammt 1 aus der Zitationssuche oder von anderen Wegen.\n"),
+                    _ => tr!("Davon stammen {} aus der Zitationssuche oder von anderen Wegen.\n", other),
+                });
             }
             if let Some(sources) = flow.included_sources.filter(|s| *s != n) {
-                out.push_str(&format!(
-                    "\nMehrere Veröffentlichungen derselben Studie wurden zu einer {} gebündelt, damit nichts doppelt \
-                     zählt. Gezählt werden {}.\n",
+                out.push_str(&tr!(
+                    "\nMehrere Veröffentlichungen derselben Studie wurden zu einer {} gebündelt, damit nichts doppelt zählt. Gezählt werden {}.\n",
                     flow.source_term,
                     count(sources, &flow.source_term, &flow.sources_term)
                 ));
             }
             if !flow.source_types.is_empty() {
-                out.push_str(&format!("\n{} je Quellenart:\n\n", flow.sources_term));
+                out.push_str(&tr!("\n{} je Quellenart:\n\n", flow.sources_term));
                 for kind in &flow.source_types {
                     out.push_str(&format!("- {}: {}\n", kind.label, kind.n));
                 }
@@ -999,108 +1011,118 @@ impl Review {
         let mut out = String::new();
         let pilot = is_sample(station) || config.scope.as_deref() == Some("sample");
         if pilot {
-            out.push_str(&format!(
-                "Vor der Auswahl bewertete das Team in {} eine Zufallsstichprobe. ",
-                count(stages.len() as i64, "Runde", "Runden")
-            ));
-            if let Some(percent) = station.gate.iter().find(|g| g.check == "agreement_min").and_then(|g| g.percent) {
-                out.push_str(&format!("Für den Übergang waren mindestens {percent} % Übereinstimmung verlangt. "));
+            out.push_str(&match stages.len() {
+                1 => tr!("Vor der Auswahl bewertete das Team in 1 Runde eine Zufallsstichprobe. "),
+                n => tr!("Vor der Auswahl bewertete das Team in {} Runden eine Zufallsstichprobe. ", n),
+            });
+            if let Some(p) = station.gate.iter().find(|g| g.check == "agreement_min").and_then(|g| g.percent) {
+                out.push_str(&tr!("Für den Übergang waren mindestens {} Übereinstimmung verlangt. ", percent(p)));
             }
         }
 
         // Regel der Auswahl
+        let sources = &data.flow.sources_term;
         match config.decision_rule.as_str() {
-            "single_verified" => {
-                let scope = match config.verify.as_ref().filter(|v| v.scope == "sample").and_then(|v| v.percent) {
-                    Some(p) => format!("eine Zufallsstichprobe von {p} % der Ausschlüsse"),
-                    None => "alle Ausschlüsse".to_string(),
-                };
-                out.push_str(&format!("Eine Person bewertete jeden Eintrag; eine zweite Person prüfte {scope}. "));
-                limitations.push(format!(
-                    "- In „{label}“ bewertete nur eine Person jeden Eintrag; eine zweite prüfte {scope}. \
-                     Einschlüsse wurden nicht doppelt bewertet. Das weicht von zwei unabhängigen Stimmen je Eintrag ab; \
-                     einzelne passende {} können dadurch fehlen.\n",
-                    data.flow.sources_term
-                ));
-            }
+            "single_verified" => match config.verify.as_ref().filter(|v| v.scope == "sample").and_then(|v| v.percent) {
+                Some(p) => {
+                    out.push_str(&tr!(
+                            "Eine Person bewertete jeden Eintrag; eine zweite Person prüfte eine Zufallsstichprobe von {} der Ausschlüsse. ",
+                            percent(p)
+                        ));
+                    limitations.push(tr!(
+                            "- In „{}“ bewertete nur eine Person jeden Eintrag; eine zweite prüfte eine Zufallsstichprobe von {} der Ausschlüsse. Einschlüsse wurden nicht doppelt bewertet. Das weicht von zwei unabhängigen Stimmen je Eintrag ab; einzelne passende {} können dadurch fehlen.\n",
+                            label,
+                            percent(p),
+                            sources
+                        ));
+                }
+                None => {
+                    out.push_str(&tr!(
+                        "Eine Person bewertete jeden Eintrag; eine zweite Person prüfte alle Ausschlüsse. "
+                    ));
+                    limitations.push(tr!(
+                            "- In „{}“ bewertete nur eine Person jeden Eintrag; eine zweite prüfte alle Ausschlüsse. Einschlüsse wurden nicht doppelt bewertet. Das weicht von zwei unabhängigen Stimmen je Eintrag ab; einzelne passende {} können dadurch fehlen.\n",
+                            label,
+                            sources
+                        ));
+                }
+            },
             rule => {
                 let n = config.min_reviewers.max(if rule == "liberal" { 2 } else { 1 });
-                let how = match (n, config.blind) {
-                    (1, _) => "Jeder Eintrag wurde von einer Person bewertet".to_string(),
-                    (n, true) => format!(
-                        "Jeder Eintrag wurde von mindestens {n} Personen unabhängig bewertet; die Stimmen der anderen waren bis zum Entblinden nicht sichtbar"
+                out.push_str(&match (n, config.blind) {
+                    (1, _) => tr!("Jeder Eintrag wurde von einer Person bewertet. "),
+                    (n, true) => tr!(
+                        "Jeder Eintrag wurde von mindestens {} Personen unabhängig bewertet; die Stimmen der anderen waren bis zum Entblinden nicht sichtbar. ",
+                        n
                     ),
-                    (n, false) => format!(
-                        "Jeder Eintrag wurde von mindestens {n} Personen bewertet; die Stimmen waren gegenseitig sichtbar"
+                    (n, false) => tr!(
+                        "Jeder Eintrag wurde von mindestens {} Personen bewertet; die Stimmen waren gegenseitig sichtbar. ",
+                        n
                     ),
-                };
-                out.push_str(&how);
-                out.push_str(match (rule, n) {
-                    ("liberal", _) => ". Ein Eintrag kam weiter, sobald eine Person ihn einschloss; ausgeschlossen wurde nur einstimmig. ",
-                    (_, 1) => ". ",
-                    _ => ". Entschieden war ein Eintrag bei übereinstimmenden Stimmen. ",
                 });
+                match (rule, n) {
+                    ("liberal", _) => out.push_str(&tr!(
+                        "Ein Eintrag kam weiter, sobald eine Person ihn einschloss; ausgeschlossen wurde nur einstimmig. "
+                    )),
+                    (_, 1) => {}
+                    _ => out.push_str(&tr!("Entschieden war ein Eintrag bei übereinstimmenden Stimmen. ")),
+                }
                 if n == 1 {
-                    limitations.push(format!(
-                        "- In „{label}“ bewertete nur eine Person jeden Eintrag, ohne Prüfung durch eine zweite. \
-                         Einzelne passende {} können dadurch fehlen.\n",
-                        data.flow.sources_term
+                    limitations.push(tr!(
+                        "- In „{}“ bewertete nur eine Person jeden Eintrag, ohne Prüfung durch eine zweite. Einzelne passende {} können dadurch fehlen.\n",
+                        label,
+                        sources
                     ));
                 }
                 if !config.blind && n > 1 {
-                    limitations.push(format!("- In „{label}“ waren die Stimmen nicht verblindet.\n"));
+                    limitations.push(tr!("- In „{}“ waren die Stimmen nicht verblindet.\n", label));
                 }
             }
         }
-        out.push_str(match config.maybe_as.as_deref() {
-            Some("include") => "„Vielleicht“ zählte als Einschluss. ",
-            Some("exclude") => "„Vielleicht“ zählte als Ausschluss. ",
-            _ => "„Vielleicht“ blieb eine eigene Antwort und musste geklärt werden. ",
+        out.push_str(&match config.maybe_as.as_deref() {
+            Some("include") => tr!("„Vielleicht“ zählte als Einschluss. "),
+            Some("exclude") => tr!("„Vielleicht“ zählte als Ausschluss. "),
+            _ => tr!("„Vielleicht“ blieb eine eigene Antwort und musste geklärt werden. "),
         });
         if config.decision_rule != "single_verified" && config.min_reviewers.max(1) > 1
             || config.decision_rule == "liberal"
         {
-            out.push_str(match config.conflict_rule.as_str() {
+            out.push_str(&match config.conflict_rule.as_str() {
                 "third_person" => {
-                    "Abweichungen entschied eine dritte Person, die den Eintrag nicht selbst bewertet hatte. "
+                    tr!("Abweichungen entschied eine dritte Person, die den Eintrag nicht selbst bewertet hatte. ")
                 }
-                _ => "Abweichungen wurden im Gespräch geklärt. ",
+                _ => tr!("Abweichungen wurden im Gespräch geklärt. "),
             });
         }
         if config.reason_required {
-            out.push_str(
-                "Jeder Ausschluss trägt genau einen Hauptgrund aus den Ausschlusskriterien. Nannten die Stimmen \
-                 verschiedene Gründe und gab es keine Klärung, zählt der Grund, der in den Kriterien zuerst steht. ",
-            );
+            out.push_str(&tr!(
+                "Jeder Ausschluss trägt genau einen Hauptgrund aus den Ausschlusskriterien. Nannten die Stimmen verschiedene Gründe und gab es keine Klärung, zählt der Grund, der in den Kriterien zuerst steht. "
+            ));
         }
         if let Some(version) = config.criteria_version.as_deref().filter(|v| !v.is_empty()) {
-            out.push_str(&format!("Es galten die Kriterien in Version {version}. "));
+            out.push_str(&tr!("Es galten die Kriterien in Version {}. ", version));
         }
         out.push('\n');
 
         // Zahlen je Runde
         for stage in stages {
             let c = &stage.config;
-            let head = match stages.len() {
-                1 => format!("\n{} {records}", c.n_records),
-                _ => format!("\nRunde {}: {} {records}", c.round, c.n_records),
-            };
-            out.push_str(&head);
+            out.push_str(&round_head(stages.len(), c.round, c.n_records, records));
             if stage.blind_active() {
-                out.push_str("; die Stufe ist noch verblindet, Zahlen folgen nach dem Entblinden.\n");
+                out.push_str(&tr!("; die Stufe ist noch verblindet, Zahlen folgen nach dem Entblinden.\n"));
                 continue;
             }
             let people: BTreeSet<Uuid> = stage.votes.keys().map(|(_, actor)| *actor).collect();
-            out.push_str(&format!(", {} beteiligt. ", count(people.len() as i64, "Person", "Personen")));
+            out.push_str(&people_text(people.len() as i64));
             out.push_str(&agreement_text(stage, records));
             if !stage.consensus.is_empty() {
-                out.push_str(&format!(
-                    "Über {} wurde in der Klärung entschieden. ",
-                    count(stage.consensus.len() as i64, "Eintrag", records)
-                ));
+                out.push_str(&match stage.consensus.len() {
+                    1 => tr!("Über 1 Eintrag wurde in der Klärung entschieden. "),
+                    n => tr!("Über {} {} wurde in der Klärung entschieden. ", n, records),
+                });
             }
             if !stage.closed {
-                out.push_str("Die Stufe ist noch offen. ");
+                out.push_str(&tr!("Die Stufe ist noch offen. "));
             }
             out.push('\n');
         }
@@ -1108,26 +1130,31 @@ impl Review {
         if let Some(level) = level {
             out.push('\n');
             if let Some(r) = &level.retrieval {
-                out.push_str(&format!(
-                    "Für {} wurde der Volltext gesucht; {} nicht beschaffbar",
-                    count(r.sought, "Eintrag", records),
-                    if r.unavailable == 1 { "1 war".to_string() } else { format!("{} waren", r.unavailable) }
-                ));
+                out.push_str(&match r.sought {
+                    1 => tr!("Für 1 Eintrag wurde der Volltext gesucht"),
+                    n => tr!("Für {} {} wurde der Volltext gesucht", n, records),
+                });
+                out.push_str(&match r.unavailable {
+                    1 => tr!("; 1 war nicht beschaffbar"),
+                    n => tr!("; {} waren nicht beschaffbar", n),
+                });
                 if r.open + r.waiting > 0 {
-                    out.push_str(&format!(", bei {} läuft die Beschaffung oder Prüfung noch", r.open + r.waiting));
+                    out.push_str(&tr!(", bei {} läuft die Beschaffung oder Prüfung noch", r.open + r.waiting));
                 }
                 out.push_str(". ");
             }
-            out.push_str(&format!(
+            out.push_str(&tr!(
                 "Geprüft: {}, eingeschlossen: {}, ausgeschlossen: {}",
-                level.assessed, level.included, level.excluded
+                level.assessed,
+                level.included,
+                level.excluded
             ));
             if level.open > 0 {
-                out.push_str(&format!(", noch offen: {}", level.open));
+                out.push_str(&tr!(", noch offen: {}", level.open));
             }
             out.push_str(".\n");
             if level.fulltext && level.excluded > 0 {
-                out.push_str("\nAusschlussgründe:\n\n");
+                out.push_str(&tr!("\nAusschlussgründe:\n\n"));
                 for reason in &level.reasons {
                     out.push_str(&format!("- {}: {}\n", reason_label(reason), reason.n));
                 }
@@ -1162,57 +1189,73 @@ fn table_rows<'a>(data: &'a Data, charting: &[ChartStation]) -> (Vec<Field>, Vec
 /// Abschnitt des Methodentexts zu einer Formular-Station.
 fn charting_text(data: &Data, chart: &ChartStation, limitations: &mut Vec<String>) -> String {
     let (source, sources) = (&data.flow.source_term, &data.flow.sources_term);
-    let label = &chart.station.label;
+    let label = i18n::text(&chart.station.label);
     let Some((last, summary)) = chart.stages.last() else { return String::new() };
     let config = &last.config;
     let mut out = String::new();
-    let rounds = count(chart.stages.len() as i64, "Runde", "Runden");
     if is_sample(chart.station) {
-        out.push_str(&format!(
-            "Das Formular „{}“ wurde in {rounds} an einer Zufallsstichprobe je Quellenart erprobt und im Team abgestimmt. ",
-            summary.form_name
-        ));
-        out.push_str(match summary.confirmed {
-            true => "Danach bestätigte die Leitung das Formular. ",
-            false => "Das Formular ist noch nicht bestätigt. ",
+        out.push_str(&match chart.stages.len() {
+            1 => tr!(
+                "Das Formular „{}“ wurde in 1 Runde an einer Zufallsstichprobe je Quellenart erprobt und im Team abgestimmt. ",
+                summary.form_name
+            ),
+            n => tr!(
+                "Das Formular „{}“ wurde in {} Runden an einer Zufallsstichprobe je Quellenart erprobt und im Team abgestimmt. ",
+                summary.form_name,
+                n
+            ),
+        });
+        out.push_str(&match summary.confirmed {
+            true => tr!("Danach bestätigte die Leitung das Formular. "),
+            false => tr!("Das Formular ist noch nicht bestätigt. "),
         });
     } else {
-        out.push_str(&format!(
+        out.push_str(&tr!(
             "Extrahiert wurde mit dem Formular „{}“ (Version {}). ",
-            summary.form_name, summary.form_version
+            summary.form_name,
+            summary.form_version
         ));
     }
     match (config.decision_rule.as_str(), config.min_reviewers.max(1), config.blind) {
         ("single_verified", _, _) => {
-            out.push_str(&format!(
-                "Eine Person extrahierte jede {source}; eine zweite prüfte die Angaben und berichtigte sie. "
+            out.push_str(&tr!(
+                "Eine Person extrahierte jede {}; eine zweite prüfte die Angaben und berichtigte sie. ",
+                source
             ));
-            limitations.push(format!(
-                "- In „{label}“ extrahierte nur eine Person jede {source}; eine zweite prüfte die Angaben. \
-                 Das weicht von zwei unabhängigen Extraktionen ab.\n"
+            limitations.push(tr!(
+                "- In „{}“ extrahierte nur eine Person jede {}; eine zweite prüfte die Angaben. Das weicht von zwei unabhängigen Extraktionen ab.\n",
+                label,
+                source
             ));
         }
         (_, 1, _) => {
-            out.push_str(&format!("Jede {source} wurde von einer Person extrahiert. "));
-            limitations.push(format!(
-                "- In „{label}“ extrahierte nur eine Person jede {source}, ohne Prüfung durch eine zweite.\n"
+            out.push_str(&tr!("Jede {} wurde von einer Person extrahiert. ", source));
+            limitations.push(tr!(
+                "- In „{}“ extrahierte nur eine Person jede {}, ohne Prüfung durch eine zweite.\n",
+                label,
+                source
             ));
         }
-        (_, n, true) => out.push_str(&format!(
-            "Jede {source} wurde von mindestens {n} Personen unabhängig extrahiert; die Angaben der anderen waren bis \
-             zum Entblinden nicht sichtbar. Abweichungen wurden je Feld geklärt. "
+        (_, n, true) => out.push_str(&tr!(
+            "Jede {} wurde von mindestens {} Personen unabhängig extrahiert; die Angaben der anderen waren bis zum Entblinden nicht sichtbar. Abweichungen wurden je Feld geklärt. ",
+            source,
+            n
         )),
         (_, n, false) => {
-            out.push_str(&format!(
-                "Jede {source} wurde von mindestens {n} Personen extrahiert; die Angaben waren gegenseitig sichtbar. \
-                 Abweichungen wurden je Feld geklärt. "
+            out.push_str(&tr!(
+                "Jede {} wurde von mindestens {} Personen extrahiert; die Angaben waren gegenseitig sichtbar. Abweichungen wurden je Feld geklärt. ",
+                source,
+                n
             ));
-            limitations.push(format!("- In „{label}“ waren die Angaben nicht verblindet.\n"));
+            limitations.push(tr!("- In „{}“ waren die Angaben nicht verblindet.\n", label));
         }
     }
     out.push('\n');
     if !is_sample(chart.station) {
-        out.push_str(&format!("\nErhoben wurden {}:\n\n", count(summary.fields.len() as i64, "Angabe", "Angaben")));
+        out.push_str(&match summary.fields.len() {
+            1 => tr!("\nErhoben wurden 1 Angabe:\n\n"),
+            n => tr!("\nErhoben wurden {} Angaben:\n\n", n),
+        });
         for field in &summary.fields {
             let mut line = format!("- {}", field.label);
             if !field.description.trim().is_empty() {
@@ -1222,42 +1265,39 @@ fn charting_text(data: &Data, chart: &ChartStation, limitations: &mut Vec<String
                 line.push_str(&format!(" ({})", field.options.join(", ")));
             }
             if !field.analysis.trim().is_empty() {
-                line.push_str(&format!(" Auswertung: {}.", one_line(field.analysis.trim_end_matches('.'))));
+                line.push_str(&tr!(" Auswertung: {}.", one_line(field.analysis.trim_end_matches('.'))));
             }
             out.push_str(&line);
             out.push('\n');
         }
     }
     for (stage, s) in &chart.stages {
-        let head = match chart.stages.len() {
-            1 => format!("\n{} {sources}", s.n_sources),
-            _ => format!("\nRunde {}: {} {sources}", stage.config.round, s.n_sources),
-        };
-        out.push_str(&head);
+        out.push_str(&round_head(chart.stages.len(), stage.config.round, s.n_sources, sources));
         let (Some(counts), Some(people)) = (&s.counts, s.n_people) else {
-            out.push_str("; die Stufe ist noch verblindet, Zahlen folgen nach dem Entblinden.\n");
+            out.push_str(&tr!("; die Stufe ist noch verblindet, Zahlen folgen nach dem Entblinden.\n"));
             continue;
         };
-        out.push_str(&format!(", {} beteiligt. Abgeglichen: {}", count(people, "Person", "Personen"), counts.done));
-        for (n, what) in [
-            (counts.conflict, "mit offener Abweichung"),
-            (counts.incomplete, "mit leerem Pflichtfeld"),
-            (counts.extracted, "wartet auf Prüfung"),
-            (counts.open, "noch offen"),
+        out.push_str(&people_text(people));
+        out.push_str(&tr!("Abgeglichen: {}", counts.done));
+        for (n, text) in [
+            (counts.conflict, tr!(", mit offener Abweichung: {}", counts.conflict)),
+            (counts.incomplete, tr!(", mit leerem Pflichtfeld: {}", counts.incomplete)),
+            (counts.extracted, tr!(", wartet auf Prüfung: {}", counts.extracted)),
+            (counts.open, tr!(", noch offen: {}", counts.open)),
         ] {
             if n > 0 {
-                out.push_str(&format!(", {what}: {n}"));
+                out.push_str(&text);
             }
         }
         out.push_str(". ");
         if s.n_resolved > 0 {
-            out.push_str(&format!(
-                "{} in der Klärung festgelegt. ",
-                count(s.n_resolved, "Feld wurde", "Felder wurden")
-            ));
+            out.push_str(&match s.n_resolved {
+                1 => tr!("1 Feld wurde in der Klärung festgelegt. "),
+                n => tr!("{} Felder wurden in der Klärung festgelegt. ", n),
+            });
         }
         if !stage.closed {
-            out.push_str("Die Stufe ist noch offen. ");
+            out.push_str(&tr!("Die Stufe ist noch offen. "));
         }
         out.push('\n');
     }
@@ -1266,36 +1306,33 @@ fn charting_text(data: &Data, chart: &ChartStation, limitations: &mut Vec<String
 
 /// Registrierung und Abweichungen als Markdown.
 fn deviations_markdown(protocol: &Protocol) -> String {
-    let mut out = String::from("# Protokoll und Abweichungen\n\n");
+    let mut out = tr!("# Protokoll und Abweichungen\n\n");
     match &protocol.registration {
         Some(r) => {
-            let identifier = if r.identifier.is_empty() { String::new() } else { format!(" ({})", r.identifier) };
-            out.push_str(&format!(
-                "Protokoll registriert am {}: {}{identifier}.",
-                german_date(&r.registered_on),
-                r.registry
-            ));
+            let on = local_date(&r.registered_on);
+            out.push_str(&match r.identifier.is_empty() {
+                true => tr!("Protokoll registriert am {}: {}.", on, r.registry),
+                false => tr!("Protokoll registriert am {}: {} ({}).", on, r.registry, r.identifier),
+            });
             if !r.note.is_empty() {
                 out.push_str(&format!(" {}", one_line(&r.note)));
             }
-            out.push_str(&format!(
-                "\n\nIm Review festgehalten am {}. Neue Versionen von Kriterien, Suchen und Ablauf seit diesem Tag \
-                 stehen unten.\n",
-                german_date(&r.recorded_at[..r.recorded_at.len().min(10)])
+            out.push_str(&tr!(
+                "\n\nIm Review festgehalten am {}. Neue Versionen von Kriterien, Suchen und Ablauf seit diesem Tag stehen unten.\n",
+                local_date(&r.recorded_at[..r.recorded_at.len().min(10)])
             ));
         }
-        None => out.push_str(
-            "Es ist kein Protokoll registriert. Ohne diesen Bezugspunkt stehen hier nur Formularänderungen nach der \
-             Bestätigung und übersteuerte Gates.\n",
-        ),
+        None => out.push_str(&tr!(
+            "Es ist kein Protokoll registriert. Ohne diesen Bezugspunkt stehen hier nur Formularänderungen nach der Bestätigung und übersteuerte Gates.\n"
+        )),
     }
-    out.push_str("\n## Abweichungen\n\n");
+    out.push_str(&tr!("\n## Abweichungen\n\n"));
     if protocol.deviations.is_empty() {
-        out.push_str("Keine.\n");
+        out.push_str(&tr!("Keine.\n"));
     }
     for d in &protocol.deviations {
-        let note = if d.note.is_empty() { "ohne Begründung".to_string() } else { one_line(&d.note) };
-        out.push_str(&format!("- {}: {}. Begründung: {note}\n", german_date(&d.at[..d.at.len().min(10)]), d.title));
+        let note = if d.note.is_empty() { tr!("ohne Begründung") } else { one_line(&d.note) };
+        out.push_str(&tr!("- {}: {}. Begründung: {}\n", local_date(&d.at[..d.at.len().min(10)]), d.title, note));
     }
     out
 }
@@ -1307,26 +1344,31 @@ fn agreement_text(stage: &StageState, records: &str) -> String {
     if n == 0 {
         return String::new();
     }
-    let percent = agreement::bootstrap(&votes, &Metric::Percent, BOOTSTRAP_N, BOOTSTRAP_SEED, 0.95);
+    let share = agreement::bootstrap(&votes, &Metric::Percent, BOOTSTRAP_N, BOOTSTRAP_SEED, 0.95);
     let alpha = agreement::bootstrap(&votes, &Metric::Alpha, BOOTSTRAP_N, BOOTSTRAP_SEED, 0.95);
     let interval = |low: Option<f64>, high: Option<f64>, scale: f64, digits: usize| match (low, high) {
         (Some(low), Some(high)) => {
-            format!("95-%-Intervall {} bis {}", decimal(low * scale, digits), decimal(high * scale, digits))
+            tr!("95-%-Intervall {} bis {}", decimal(low * scale, digits), decimal(high * scale, digits))
         }
-        _ => "Intervall nicht bestimmbar".to_string(),
+        _ => tr!("Intervall nicht bestimmbar"),
     };
-    let mut out = format!(
-        "Übereinstimmung vor der Klärung: {} % ({agree} von {n} mehrfach bewerteten {records}n; {})",
-        decimal(agree as f64 * 100.0 / n as f64, 1),
-        interval(percent.ci_low, percent.ci_high, 100.0, 1)
+    let mut out = tr!(
+        "Übereinstimmung vor der Klärung: {} ({} von {} mehrfach bewerteten {}n; {})",
+        percent(decimal(agree as f64 * 100.0 / n as f64, 1)),
+        agree,
+        n,
+        records,
+        interval(share.ci_low, share.ci_high, 100.0, 1)
     );
     match alpha.value {
-        Some(value) => out.push_str(&format!(
-            ", Krippendorffs Alpha {} ({}; Perzentil-Bootstrap mit {BOOTSTRAP_N} Ziehungen, Startwert {BOOTSTRAP_SEED}). ",
+        Some(value) => out.push_str(&tr!(
+            ", Krippendorffs Alpha {} ({}; Perzentil-Bootstrap mit {} Ziehungen, Startwert {}). ",
             decimal(value, 2),
-            interval(alpha.ci_low, alpha.ci_high, 1.0, 2)
+            interval(alpha.ci_low, alpha.ci_high, 1.0, 2),
+            BOOTSTRAP_N,
+            BOOTSTRAP_SEED
         )),
-        None => out.push_str("; Krippendorffs Alpha ist nicht bestimmbar, weil alle Stimmen gleich lauten. "),
+        None => out.push_str(&tr!("; Krippendorffs Alpha ist nicht bestimmbar, weil alle Stimmen gleich lauten. ")),
     }
     out
 }
@@ -1337,9 +1379,38 @@ fn count(n: i64, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })
 }
 
-/// Zahl mit Dezimalkomma.
+/// Zahl mit dem Dezimalzeichen der geltenden Sprache: deutsch Komma, sonst Punkt.
 fn decimal(value: f64, digits: usize) -> String {
-    format!("{value:.digits$}").replace('.', ",")
+    let text = format!("{value:.digits$}");
+    match i18n::current() == i18n::SOURCE {
+        true => text.replace('.', ","),
+        false => text,
+    }
+}
+
+/// Prozentangabe in der geltenden Sprache: deutsch „71,9 %“, sonst „71.9%“. Die Zahl kommt fertig
+/// formatiert, Dezimalstellen über [`decimal`].
+pub(crate) fn percent(number: impl std::fmt::Display) -> String {
+    match i18n::current() == i18n::SOURCE {
+        true => format!("{number} %"),
+        false => format!("{number}%"),
+    }
+}
+
+/// Wie viele Personen an einer Stufe beteiligt waren, als Satzteil nach den Zahlen der Runde.
+fn people_text(n: i64) -> String {
+    match n {
+        1 => tr!(", 1 Person beteiligt. "),
+        _ => tr!(", {} Personen beteiligt. ", n),
+    }
+}
+
+/// Beginn der Zeile zu einer Runde: Zahl und Begriff, bei mehreren Runden mit deren Nummer.
+fn round_head(rounds: usize, round: i64, n: i64, term: &str) -> String {
+    match rounds {
+        1 => format!("\n{n} {term}"),
+        _ => tr!("\nRunde {}: {} {}", round, n, term),
+    }
 }
 
 fn one_line(text: &str) -> String {
@@ -1358,21 +1429,22 @@ fn code_block(text: &str) -> String {
     format!("{fence}\n{}\n{fence}", text.trim_end())
 }
 
-fn german_date(iso: &str) -> String {
+/// Datum in der Schreibweise der geltenden Sprache; die Reihenfolge der Teile steht im Katalog.
+fn local_date(iso: &str) -> String {
     let parts: Vec<&str> = iso.split('-').collect();
     match parts.as_slice() {
-        [y, m, d] => format!("{d}.{m}.{y}"),
+        [y, m, d] => tr!("{}.{}.{}", d, m, y),
         _ => iso.to_string(),
     }
 }
 
-fn origin_label(origin: &str) -> &'static str {
+fn origin_label(origin: &str) -> String {
     match origin {
-        "database" => "Datenbank",
-        "register" => "Register",
-        "citation" => "Zitationssuche",
-        "other" => "andere Quelle",
-        _ => "ohne Angabe",
+        "database" => tr!("Datenbank"),
+        "register" => tr!("Register"),
+        "citation" => i18n::text_in("Herkunft", "Zitationssuche"),
+        "other" => tr!("andere Quelle"),
+        _ => tr!("ohne Angabe"),
     }
 }
 
@@ -1517,7 +1589,7 @@ fn rows(flow: &Flow) -> Vec<(TextBox, Side)> {
     // Je Quelle eine Zeile, getrennt nach Datenbanken und Registern und nach anderen Wegen.
     let mut by_source: Vec<(bool, String, i64)> = Vec::new();
     for s in &flow.sources {
-        let name = if s.source.is_empty() { "ohne Angabe".to_string() } else { s.source.clone() };
+        let name = if s.source.is_empty() { tr!("ohne Angabe") } else { s.source.clone() };
         let other = is_other(&s.origin);
         match by_source.iter_mut().find(|(o, n, _)| *o == other && *n == name) {
             Some(entry) => entry.2 += s.n_records,
@@ -1531,14 +1603,13 @@ fn rows(flow: &Flow) -> Vec<(TextBox, Side)> {
         text
     };
     let branch = flow.other_identified > 0;
-    let total = format!("Identifiziert: {}", count(flow.identified, &flow.record_term, records));
-    let removed =
-        TextBox::new(format!("Vor der Auswahl entfernt: {}", flow.exact_duplicates + flow.resolved_duplicates))
-            .line(format!("Dubletten, beim Import erkannt: {}", flow.exact_duplicates))
-            .line(format!("Dubletten, einzeln entschieden: {}", flow.resolved_duplicates));
+    let total = tr!("Identifiziert: {}", count(flow.identified, &flow.record_term, records));
+    let removed = TextBox::new(tr!("Vor der Auswahl entfernt: {}", flow.exact_duplicates + flow.resolved_duplicates))
+        .line(tr!("Dubletten, beim Import erkannt: {}", flow.exact_duplicates))
+        .line(tr!("Dubletten, einzeln entschieden: {}", flow.resolved_duplicates));
     if branch {
-        let main = TextBox::new(format!("Datenbanken und Register: {}", flow.identified - flow.other_identified));
-        let side = TextBox::new(format!("Andere Quellen: {}", flow.other_identified));
+        let main = TextBox::new(tr!("Datenbanken und Register: {}", flow.identified - flow.other_identified));
+        let side = TextBox::new(tr!("Andere Quellen: {}", flow.other_identified));
         out.push((listed(main, false), Side::In(listed(side, true))));
         out.push((TextBox::new(total), Side::Out(removed)));
     } else {
@@ -1547,22 +1618,22 @@ fn rows(flow: &Flow) -> Vec<(TextBox, Side)> {
 
     for level in &flow.levels {
         if let Some(r) = &level.retrieval {
-            let missing = TextBox::new(format!("Nicht beschafft: {}", r.unavailable + r.open))
-                .line(format!("nicht beschaffbar: {}", r.unavailable))
-                .line_if(r.open > 0, format!("Beschaffung offen: {}", r.open));
-            out.push((TextBox::new(format!("Volltext gesucht: {}", r.sought)), Side::Out(missing)));
+            let missing = TextBox::new(tr!("Nicht beschafft: {}", r.unavailable + r.open))
+                .line(tr!("nicht beschaffbar: {}", r.unavailable))
+                .line_if(r.open > 0, tr!("Beschaffung offen: {}", r.open));
+            out.push((TextBox::new(tr!("Volltext gesucht: {}", r.sought)), Side::Out(missing)));
         }
-        let main = TextBox::new(format!("{}: {} geprüft", level.label, level.assessed))
-            .line_if(level.rounds > 1, format!("in {} Runden", level.rounds))
-            .line_if(level.not_assigned > 0, format!("noch keiner Stufe zugeteilt: {}", level.not_assigned))
+        let main = TextBox::new(tr!("{}: {} geprüft", level.label, level.assessed))
+            .line_if(level.rounds > 1, tr!("in {} Runden", level.rounds))
+            .line_if(level.not_assigned > 0, tr!("noch keiner Stufe zugeteilt: {}", level.not_assigned))
             .line_if(
                 level.retrieval.as_ref().is_some_and(|r| r.waiting > 0),
-                format!("beschafft, noch nicht zugeteilt: {}", level.retrieval.as_ref().map_or(0, |r| r.waiting)),
+                tr!("beschafft, noch nicht zugeteilt: {}", level.retrieval.as_ref().map_or(0, |r| r.waiting)),
             )
-            .line_if(level.open > 0, format!("noch offen: {}", level.open))
-            .line_if(level.blinded > 0, format!("davon in verblindeter Stufe: {}", level.blinded))
-            .line_if(branch, format!("aus anderen Quellen: {}", level.other_assessed));
-        let mut excluded = TextBox::new(format!("Ausgeschlossen: {}", level.excluded));
+            .line_if(level.open > 0, tr!("noch offen: {}", level.open))
+            .line_if(level.blinded > 0, tr!("davon in verblindeter Stufe: {}", level.blinded))
+            .line_if(branch, tr!("aus anderen Quellen: {}", level.other_assessed));
+        let mut excluded = TextBox::new(tr!("Ausgeschlossen: {}", level.excluded));
         if level.fulltext {
             for reason in &level.reasons {
                 excluded = excluded.line(format!("{}: {}", reason_label(reason), reason.n));
@@ -1574,14 +1645,13 @@ fn rows(flow: &Flow) -> Vec<(TextBox, Side)> {
     if let Some(n) = flow.included {
         let sources = flow.included_sources.unwrap_or(n);
         let other = flow.levels.last().map_or(0, |l| l.other_included);
-        let mut last =
-            TextBox::new(format!("Eingeschlossen: {}", count(sources, &flow.source_term, &flow.sources_term)))
-                .line_if(sources != n, format!("{records} darin: {n}"))
-                .line_if(branch, format!("{records} aus anderen Quellen: {other}"));
+        let mut last = TextBox::new(tr!("Eingeschlossen: {}", count(sources, &flow.source_term, &flow.sources_term)))
+            .line_if(sources != n, tr!("{} darin: {}", records, n))
+            .line_if(branch, tr!("{} aus anderen Quellen: {}", records, other));
         for kind in &flow.source_types {
             last = last.line(format!("{}: {}", kind.label, kind.n));
         }
-        out.push((last.line_if(!flow.complete, "vorläufig, die Auswahl läuft noch".to_string()), Side::None));
+        out.push((last.line_if(!flow.complete, tr!("vorläufig, die Auswahl läuft noch")), Side::None));
     }
     out
 }
@@ -1653,9 +1723,10 @@ pub fn diagram_svg(flow: &Flow) -> String {
     format!(
         "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {width} {height}\" width=\"{width}\" height=\"{height}\" \
          font-family=\"Helvetica, Arial, sans-serif\" font-size=\"13\" fill=\"currentColor\" role=\"img\" \
-         aria-label=\"Flussdiagramm der Auswahl\">\n\
+         aria-label=\"{}\">\n\
          <defs><marker id=\"pfeil\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\">\
-         <path d=\"M0,0 L8,4 L0,8 z\" fill=\"currentColor\"/></marker></defs>\n{body}</svg>\n"
+         <path d=\"M0,0 L8,4 L0,8 z\" fill=\"currentColor\"/></marker></defs>\n{body}</svg>\n",
+        xml(&tr!("Flussdiagramm der Auswahl"))
     )
 }
 
@@ -1792,7 +1863,7 @@ mod tests {
     #[test]
     fn helpers_format_german_text() {
         assert_eq!(decimal(91.25, 1), "91,2");
-        assert_eq!(german_date("2026-11-19"), "19.11.2026");
+        assert_eq!(local_date("2026-11-19"), "19.11.2026");
         assert_eq!(code_block("a ``` b"), "````\na ``` b\n````");
         assert_eq!(count(1, "Runde", "Runden"), "1 Runde");
     }

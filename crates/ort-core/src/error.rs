@@ -1,3 +1,5 @@
+use crate::tr;
+
 /// Fehler mit deutschem Text für die Oberfläche. Die Varianten entsprechen den früheren HTTP-Status:
 /// `Invalid` 400, `Forbidden` 403, `NotFound` 404, `Conflict` 409.
 #[derive(Debug, thiserror::Error)]
@@ -13,11 +15,12 @@ pub enum Error {
     /// Datei beschädigt, verändert oder Signatur ungültig.
     #[error("{0}")]
     Integrity(String),
-    #[error("Datenbankfehler: {0}")]
+    // Der Vorsatz erscheint in der Sprache, die bei der Anzeige gilt.
+    #[error("{}", tr!("Datenbankfehler: {}", .0))]
     Db(#[from] rusqlite::Error),
-    #[error("Ungültiges JSON: {0}")]
+    #[error("{}", tr!("Ungültiges JSON: {}", .0))]
     Json(#[from] serde_json::Error),
-    #[error("Dateifehler: {0}")]
+    #[error("{}", tr!("Dateifehler: {}", .0))]
     Io(#[from] std::io::Error),
 }
 

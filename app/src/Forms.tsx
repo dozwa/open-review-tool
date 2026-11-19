@@ -4,6 +4,7 @@
 import React, { useEffect, useState } from "react";
 
 import { api, canManage, errorText, FIELD_TYPE_LABEL, FieldType, Form, FormField, FormsView, ReviewDetail } from "./api";
+import { formatDate, t, tn } from "./i18n";
 import { Banner, Empty, Group, Icon, Pill, Row } from "./ui";
 
 type Run = (action: () => Promise<string | void>, done?: string) => Promise<void>;
@@ -69,75 +70,74 @@ function FormEditor({ name: startName, fields: startFields, form, purpose, onCan
 
   return (
     <form className="sheet form-editor" onSubmit={submit}>
-      <h2>{form ? `Formular bearbeiten: Version ${latest(form).version + 1}` : "Neues Formular"}</h2>
+      <h2>{form ? t("Formular bearbeiten: Version {version}", { version: latest(form).version + 1 }) : t("Neues Formular")}</h2>
       <Group>
         <Row>
-          <label htmlFor="form-name">Name</label>
+          <label htmlFor="form-name">{t("Name")}</label>
           <input id="form-name" value={name} onChange={(e) => setName(e.target.value)} required />
         </Row>
       </Group>
       {fields.map((f, i) => (
         <fieldset className="field-draft" key={i}>
-          <legend>Feld {i + 1}{f.fixed && <small> · Schlüssel {f.key}</small>}</legend>
+          <legend>{t("Feld {n}", { n: i + 1 })}{f.fixed && <small> · {t("Schlüssel {key}", { key: f.key })}</small>}</legend>
           <div className="field-draft-grid">
             <label>
-              Name
+              {t("Name")}
               <input value={f.label} onChange={(e) => change(i, { label: e.target.value })} required />
             </label>
             <label>
-              Typ
-              <select value={f.type} onChange={(e) => change(i, { type: e.target.value as FieldType })} disabled={f.fixed} title={f.fixed ? "Ein veröffentlichtes Feld behält seinen Typ" : undefined}>
+              {t("Typ")}
+              <select value={f.type} onChange={(e) => change(i, { type: e.target.value as FieldType })} disabled={f.fixed} title={f.fixed ? t("Ein veröffentlichtes Feld behält seinen Typ") : undefined}>
                 {Object.entries(FIELD_TYPE_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select>
             </label>
             <label>
-              Abschnitt
-              <input value={f.group} onChange={(e) => change(i, { group: e.target.value })} placeholder="z. B. Methodik" />
+              {t("Abschnitt")}
+              <input value={f.group} onChange={(e) => change(i, { group: e.target.value })} placeholder={t("z. B. Methodik")} />
             </label>
             <label className="check">
-              <input type="checkbox" checked={f.required} onChange={(e) => change(i, { required: e.target.checked })} /> Pflichtfeld
+              <input type="checkbox" checked={f.required} onChange={(e) => change(i, { required: e.target.checked })} /> {t("Pflichtfeld")}
             </label>
             <label className="wide">
-              Hinweis zum Ausfüllen
+              {t("Hinweis zum Ausfüllen")}
               <input value={f.description} onChange={(e) => change(i, { description: e.target.value })} />
             </label>
             <label className="wide">
-              Auswertung
-              <input value={f.analysis} onChange={(e) => change(i, { analysis: e.target.value })} placeholder="z. B. Häufigkeit je Kategorie" />
+              {t("Auswertung")}
+              <input value={f.analysis} onChange={(e) => change(i, { analysis: e.target.value })} placeholder={t("z. B. Häufigkeit je Kategorie")} />
             </label>
             {hasOptions(f.type) && (
               <label className="wide">
-                Auswahlwerte, einer je Zeile
+                {t("Auswahlwerte, einer je Zeile")}
                 <textarea rows={4} value={f.optionsText} onChange={(e) => change(i, { optionsText: e.target.value })} required />
               </label>
             )}
           </div>
           <div className="field-draft-actions">
-            <button type="button" className="ghost" disabled={i === 0} onClick={() => move(i, -1)}>Nach oben</button>
-            <button type="button" className="ghost" disabled={i === fields.length - 1} onClick={() => move(i, 1)}>Nach unten</button>
-            <button type="button" className="ghost" onClick={() => setFields(fields.filter((_, j) => j !== i))}><Icon name="x" size={12} /> Entfernen</button>
+            <button type="button" className="ghost" disabled={i === 0} onClick={() => move(i, -1)}>{t("Nach oben")}</button>
+            <button type="button" className="ghost" disabled={i === fields.length - 1} onClick={() => move(i, 1)}>{t("Nach unten")}</button>
+            <button type="button" className="ghost" onClick={() => setFields(fields.filter((_, j) => j !== i))}><Icon name="x" size={12} /> {t("Entfernen")}</button>
           </div>
         </fieldset>
       ))}
-      <button type="button" onClick={add}><Icon name="plus" size={14} /> Feld hinzufügen</button>
+      <button type="button" onClick={add}><Icon name="plus" size={14} /> {t("Feld hinzufügen")}</button>
       {form && (
         <Group>
           <Row>
             <label htmlFor="form-note">
-              Was hat sich geändert?
-              {form.confirmed && <small>Pflicht, weil das Formular bestätigt ist. Die Begründung steht im Log.</small>}
+              {t("Was hat sich geändert?")}
+              {form.confirmed && <small>{t("Pflicht, weil das Formular bestätigt ist. Die Begründung steht im Log.")}</small>}
             </label>
             <input id="form-note" value={note} onChange={(e) => setNote(e.target.value)} required={form.confirmed} />
           </Row>
         </Group>
       )}
       <p className="hint">
-        Entfernte Felder verschwinden aus Tabelle und Eingabe; ihre Werte bleiben im Log. Neue Pflichtfelder sind bei
-        fertigen Quellen nachzutragen.
+        {t("Entfernte Felder verschwinden aus Tabelle und Eingabe; ihre Werte bleiben im Log. Neue Pflichtfelder sind bei fertigen Quellen nachzutragen.")}
       </p>
       <div className="sheet-actions">
-        <button type="button" onClick={onCancel}>Abbrechen</button>
-        <button className="primary" type="submit" disabled={fields.length === 0}>Veröffentlichen</button>
+        <button type="button" onClick={onCancel}>{t("Abbrechen")}</button>
+        <button className="primary" type="submit" disabled={fields.length === 0}>{t("Veröffentlichen")}</button>
       </div>
     </form>
   );
@@ -148,30 +148,30 @@ function FormCard({ form, manage, onEdit, onConfirm }: { form: Form; manage: boo
   const [history, setHistory] = useState(false);
   return (
     <Group
-      title={`${current.name} · Version ${current.version}`}
+      title={t("{name} · Version {version}", { name: current.name, version: current.version })}
       action={
         manage && (
           <span className="inline-actions">
-            {!current.confirmed && <button onClick={onConfirm}><Icon name="check" size={14} /> Bestätigen</button>}
-            <button onClick={onEdit}>Bearbeiten</button>
+            {!current.confirmed && <button onClick={onConfirm}><Icon name="check" size={14} /> {t("Bestätigen")}</button>}
+            <button onClick={onEdit}>{t("Bearbeiten")}</button>
           </span>
         )
       }
       footer={
         current.confirmed
-          ? "Diese Version ist bestätigt. Jede weitere Änderung braucht eine Begründung."
+          ? t("Diese Version ist bestätigt. Jede weitere Änderung braucht eine Begründung.")
           : form.confirmed
-            ? "Geändert nach der Bestätigung. Die Begründung steht in den Versionen."
-            : "Noch nicht bestätigt. Die Leitung bestätigt das Formular nach dem Pilot."
+            ? t("Geändert nach der Bestätigung. Die Begründung steht in den Versionen.")
+            : t("Noch nicht bestätigt. Die Leitung bestätigt das Formular nach dem Pilot.")
       }
     >
       <table className="table">
-        <thead><tr><th>Feld</th><th>Typ</th><th>Abschnitt</th><th>Auswertung</th></tr></thead>
+        <thead><tr><th>{t("Feld")}</th><th>{t("Typ")}</th><th>{t("Abschnitt")}</th><th>{t("Auswertung")}</th></tr></thead>
         <tbody>
           {current.fields.map((f) => (
             <tr key={f.key}>
               <td>
-                {f.label} {f.required && <Pill tone="blue">Pflicht</Pill>}
+                {f.label} {f.required && <Pill tone="blue">{t("Pflicht")}</Pill>}
                 {f.description && <div className="muted small-text">{f.description}</div>}
                 {f.options && f.options.length > 0 && <div className="muted small-text">{f.options.join(" · ")}</div>}
               </td>
@@ -184,15 +184,15 @@ function FormCard({ form, manage, onEdit, onConfirm }: { form: Form; manage: boo
       </table>
       {form.versions.length > 1 && (
         <Row>
-          <button className="link" onClick={() => setHistory(!history)}>{history ? "Versionen ausblenden" : `${form.versions.length} Versionen anzeigen`}</button>
+          <button className="link" onClick={() => setHistory(!history)}>{history ? t("Versionen ausblenden") : t("{n} Versionen anzeigen", { n: form.versions.length })}</button>
         </Row>
       )}
       {history && form.versions.map((v) => (
         <Row key={v.version}>
           <span>
-            Version {v.version} · {v.published_at.slice(0, 10)} · {v.fields.length} Felder
-            {v.confirmed && <> <Pill tone="green">bestätigt</Pill></>}
-            {v.after_confirmation && <> <Pill tone="yellow">nach der Bestätigung</Pill></>}
+            {tn("Version {version} · {date} · {n} Feld", "Version {version} · {date} · {n} Felder", v.fields.length, { version: v.version, date: formatDate(v.published_at.slice(0, 10)) })}
+            {v.confirmed && <> <Pill tone="green">{t("bestätigt")}</Pill></>}
+            {v.after_confirmation && <> <Pill tone="yellow">{t("nach der Bestätigung")}</Pill></>}
           </span>
           <span className="muted">{v.change_note}</span>
         </Row>
@@ -224,7 +224,7 @@ export function FormsTab({ review, run }: { review: ReviewDetail; run: Run }) {
           run(async () => {
             await api.publishForm(review.id, data);
             setEditing(null);
-          }, "Formular veröffentlicht. Schick den Mitgliedern unter „Austausch“ ein neues Paket.")
+          }, t("Formular veröffentlicht. Schick den Mitgliedern unter „Austausch“ ein neues Paket."))
         }
       />
     );
@@ -234,19 +234,20 @@ export function FormsTab({ review, run }: { review: ReviewDetail; run: Run }) {
     <>
       {error && <Banner kind="error" onClose={() => setError("")}>{error}</Banner>}
       {view.forms.length === 0 && (
-        <Empty icon="list" title={`Noch kein Formular für das ${view.term}`}>
+        <Empty icon="list" title={t("Noch kein Formular für das {term}", { term: view.term })}>
           <p>
-            Das Formular legt fest, was aus jeder Quelle festgehalten wird.
-            {manage ? " Im Pilot stimmt ihr es ab; danach bestätigt die Leitung es." : " Die Leitung veröffentlicht es."}
+            {manage
+              ? t("Das Formular legt fest, was aus jeder Quelle festgehalten wird. Im Pilot stimmt ihr es ab; danach bestätigt die Leitung es.")
+              : t("Das Formular legt fest, was aus jeder Quelle festgehalten wird. Die Leitung veröffentlicht es.")}
           </p>
           {manage && (
             <div className="inline-actions center">
               {view.starters.map((s) => (
                 <button key={s.purpose} className="primary" onClick={() => setEditing({ form: null, name: s.name, purpose: s.purpose, fields: s.fields.map((f) => toDraft(f, false)) })}>
-                  Mit dem Formular der Vorlage beginnen
+                  {t("Mit dem Formular der Vorlage beginnen")}
                 </button>
               ))}
-              <button onClick={() => setEditing({ form: null, name: `${view.term}-Formular`, purpose: "charting", fields: [] })}>Leeres Formular</button>
+              <button onClick={() => setEditing({ form: null, name: t("{term}-Formular", { term: view.term }), purpose: "charting", fields: [] })}>{t("Leeres Formular")}</button>
             </div>
           )}
         </Empty>
@@ -260,7 +261,7 @@ export function FormsTab({ review, run }: { review: ReviewDetail; run: Run }) {
             const current = latest(form);
             setEditing({ form, name: current.name, purpose: form.purpose, fields: current.fields.map((f) => toDraft(f, true)) });
           }}
-          onConfirm={() => run(() => api.confirmForm(review.id, form.id), "Formular bestätigt.")}
+          onConfirm={() => run(() => api.confirmForm(review.id, form.id), t("Formular bestätigt."))}
         />
       ))}
     </>

@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
-use ort_core::{Identity, PublicIdentity};
+use ort_core::{tr, Identity, PublicIdentity};
 
 const KEYCHAIN_SERVICE: &str = "open-review-tool";
 
@@ -32,21 +32,21 @@ impl IdentityStore {
     pub fn load(&self) -> Result<Option<Identity>, String> {
         let Ok(text) = std::fs::read_to_string(self.public_path()) else { return Ok(None) };
         let public: PublicIdentity =
-            serde_json::from_str(&text).map_err(|e| format!("identity.json ist beschädigt: {e}"))?;
+            serde_json::from_str(&text).map_err(|e| tr!("identity.json ist beschädigt: {}", e))?;
         let secret = self.read_secret(&public)?;
         let identity = Identity::from_secret(public.actor_id, &public.name, &secret).map_err(|e| e.to_string())?;
         if identity.public_key() != public.public_key {
-            return Err("Der private Schlüssel passt nicht zu identity.json.".into());
+            return Err(tr!("Der private Schlüssel passt nicht zu identity.json."));
         }
         Ok(Some(identity))
     }
 
     pub fn create(&self, name: &str) -> Result<Identity, String> {
         if name.trim().is_empty() {
-            return Err("Bitte einen Namen eingeben.".into());
+            return Err(tr!("Bitte einen Namen eingeben."));
         }
         if self.public_path().exists() {
-            return Err("Auf diesem Rechner gibt es schon eine Identität.".into());
+            return Err(tr!("Auf diesem Rechner gibt es schon eine Identität."));
         }
         let identity = Identity::generate(name).map_err(|e| e.to_string())?;
         self.write_secret(&identity)?;
@@ -57,13 +57,13 @@ impl IdentityStore {
 
     fn read_secret(&self, public: &PublicIdentity) -> Result<Vec<u8>, String> {
         let encoded = if self.file_keys {
-            std::fs::read_to_string(self.key_path()).map_err(|e| format!("identity.key fehlt: {e}"))?
+            std::fs::read_to_string(self.key_path()).map_err(|e| tr!("identity.key fehlt: {}", e))?
         } else {
             keyring::Entry::new(KEYCHAIN_SERVICE, &public.actor_id.to_string())
                 .and_then(|entry| entry.get_password())
-                .map_err(|e| format!("Privater Schlüssel nicht im Schlüsselbund gefunden: {e}"))?
+                .map_err(|e| tr!("Privater Schlüssel nicht im Schlüsselbund gefunden: {}", e))?
         };
-        B64.decode(encoded.trim()).map_err(|_| "Privater Schlüssel ist beschädigt.".to_string())
+        B64.decode(encoded.trim()).map_err(|_| tr!("Privater Schlüssel ist beschädigt."))
     }
 
     fn write_secret(&self, identity: &Identity) -> Result<(), String> {
@@ -73,7 +73,7 @@ impl IdentityStore {
         } else {
             keyring::Entry::new(KEYCHAIN_SERVICE, &identity.actor_id.to_string())
                 .and_then(|entry| entry.set_password(&encoded))
-                .map_err(|e| format!("Schlüssel konnte nicht im Schlüsselbund gespeichert werden: {e}"))
+                .map_err(|e| tr!("Schlüssel konnte nicht im Schlüsselbund gespeichert werden: {}", e))
         }
     }
 }

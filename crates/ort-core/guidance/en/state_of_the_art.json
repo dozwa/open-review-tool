@@ -1,0 +1,143 @@
+{
+  "key": "state_of_the_art",
+  "title": "State-of-the-art review",
+  "summary": "Summary of the six-step approach by Barry, Merkebu and Varpio in our own words. There is no binding standard for this type of review. The original is authoritative.",
+  "sources": [
+    {
+      "key": "barry2022",
+      "citation": "Barry ES, Merkebu J, Varpio L. State-of-the-art literature review methodology: A six-step approach for knowledge synthesis. Perspect Med Educ 2022;11(5):281–288.",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC9582072/",
+      "license": "CC BY 4.0",
+      "accessed": "2026-11-19"
+    }
+  ],
+  "entries": [
+    {
+      "id": "purpose",
+      "title": "What this type of review is for",
+      "source": "barry2022",
+      "section": "Background",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC9582072/",
+      "text": [
+        "A state-of-the-art review interprets where a field stands today, how it got there and where it might be heading. The synthesis is the team's interpretation and not a complete picture of the literature."
+      ],
+      "points": [],
+      "stations": [],
+      "areas": [
+        "report"
+      ]
+    },
+    {
+      "id": "question",
+      "title": "Question and field",
+      "source": "barry2022",
+      "section": "Steps 1 and 3",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC9582072/",
+      "text": [
+        "The starting point is a preliminary review question and the field in which to search. Once the timeframe is settled, topic and questions are adapted to it. The revised version belongs in the report."
+      ],
+      "points": [],
+      "stations": [
+        "protocol"
+      ],
+      "areas": [
+        "criteria",
+        "registration"
+      ]
+    },
+    {
+      "id": "timeframe",
+      "title": "Timeframe",
+      "source": "barry2022",
+      "section": "Step 2",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC9582072/",
+      "text": [
+        "The team gains an overview of the literature and looks for turning points in the history of the field. From these it justifies the year or event from which the current state begins. The justification is reported."
+      ],
+      "points": [],
+      "stations": [
+        "protocol"
+      ],
+      "areas": [
+        "criteria"
+      ]
+    },
+    {
+      "id": "search",
+      "title": "Search",
+      "source": "barry2022",
+      "section": "Step 4",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC9582072/",
+      "text": [
+        "The search is tried out and revised step by step."
+      ],
+      "points": [
+        "The team chooses the databases; a librarian is consulted.",
+        "Literature from before the timeframe is part of it too, so that it becomes visible how the current state came about.",
+        "The search strategy is disclosed in the report or in the appendix."
+      ],
+      "stations": [
+        "search"
+      ],
+      "areas": [
+        "search"
+      ]
+    },
+    {
+      "id": "selection",
+      "title": "Selection",
+      "source": "barry2022",
+      "section": "Steps 4 and 5",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC9582072/",
+      "text": [
+        "The approach prescribes neither a number of people nor fixed inclusion and exclusion criteria. The team does not have to analyse every work it finds; it draws on sources from across the whole breadth of the literature."
+      ],
+      "points": [],
+      "stations": [
+        "title_abstract",
+        "fulltext"
+      ],
+      "areas": []
+    },
+    {
+      "id": "analysis",
+      "title": "Analysis",
+      "source": "barry2022",
+      "section": "Step 5",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC9582072/",
+      "text": [
+        "The analysis starts from the material and is at the same time shaped by the team's point of view."
+      ],
+      "points": [
+        "Read the sources and record which ones support the emerging premises and which contradict them.",
+        "Build a timeline of the field from the sources.",
+        "Test your own interpretation against further sources and against opposing positions.",
+        "Report how the team dealt with differing interpretations."
+      ],
+      "stations": [
+        "analysis"
+      ],
+      "areas": [
+        "forms"
+      ]
+    },
+    {
+      "id": "reflexivity",
+      "title": "Reflexivity and report",
+      "source": "barry2022",
+      "section": "Step 6",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC9582072/",
+      "text": [
+        "The team describes how its own perspective has shaped the interpretation. This reflexivity is regarded as a sign of rigour.",
+        "The approach requires neither a reporting standard nor a flow diagram. The report should contain the revised review question, the justification of the timeframe, the search strategy, how differing interpretations were handled and the reflexivity statement."
+      ],
+      "points": [],
+      "stations": [
+        "report"
+      ],
+      "areas": [
+        "report"
+      ]
+    }
+  ]
+}

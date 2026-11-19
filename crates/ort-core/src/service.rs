@@ -27,6 +27,7 @@ use crate::projection::{FinalDecision, MaybeMode, ReviewState, StageState, Verif
 use crate::search::{Search, SearchVersion, Searches, SEARCH_TYPES};
 use crate::sources;
 use crate::store::{AssignmentRow, BatchRow, RecordRow, Store};
+use crate::tr;
 use crate::workflow::{self, Facts, GateResult, SchemaElement, StationView, Template, Workflow, WORKFLOW_TYPES};
 
 pub const ROLES: [&str; 4] = ["owner", "admin", "reviewer", "viewer"];
@@ -485,11 +486,11 @@ fn str_list(value: Option<&Value>) -> Vec<String> {
 }
 
 pub(crate) fn require<'a>(state: &'a ReviewState, me: &Uuid, allowed: &[&str]) -> Result<&'a str> {
-    let role = state.role_of(me).ok_or_else(|| forbidden("Du bist nicht Mitglied dieses Reviews."))?;
+    let role = state.role_of(me).ok_or_else(|| forbidden(tr!("Du bist nicht Mitglied dieses Reviews.")))?;
     if allowed.contains(&role) {
         Ok(role)
     } else {
-        Err(forbidden("Dafür fehlt dir die Berechtigung."))
+        Err(forbidden(tr!("Dafür fehlt dir die Berechtigung.")))
     }
 }
 
@@ -506,7 +507,7 @@ fn clean_reasons<'a>(primary_reason: Option<&'a str>, reasons: &[String]) -> (Op
 }
 
 fn parse_record_id(record_id: &str) -> Result<Uuid> {
-    Uuid::parse_str(record_id).map_err(|_| invalid("Ungültige Record-ID."))
+    Uuid::parse_str(record_id).map_err(|_| invalid(tr!("Ungültige Record-ID.")))
 }
 
 impl Review {
@@ -519,10 +520,10 @@ impl Review {
     /// Legt ein Review an und kopiert die gewählte mitgelieferte Vorlage ins Log.
     pub fn create_with(path: &Path, me: Identity, title: &str, template: Option<&str>) -> Result<Review> {
         if title.trim().is_empty() {
-            return Err(invalid("Titel fehlt."));
+            return Err(invalid(tr!("Titel fehlt.")));
         }
         if path.exists() {
-            return Err(conflict("Für dieses Review gibt es schon eine Datei."));
+            return Err(conflict(tr!("Für dieses Review gibt es schon eine Datei.")));
         }
         let template = Self::builtin(template)?;
         Self::init(Store::open(path)?, me, title, template)
@@ -538,14 +539,14 @@ impl Review {
     }
 
     fn builtin(key: Option<&str>) -> Result<Option<Template>> {
-        key.map(|k| workflow::builtin_template(k).ok_or_else(|| invalid(format!("Unbekannte Vorlage „{k}“."))))
+        key.map(|k| workflow::builtin_template(k).ok_or_else(|| invalid(tr!("Unbekannte Vorlage „{}“.", k))))
             .transpose()
     }
 
     fn init(store: Store, me: Identity, title: &str, template: Option<Template>) -> Result<Review> {
         let title = title.trim();
         if title.is_empty() {
-            return Err(invalid("Titel fehlt."));
+            return Err(invalid(tr!("Titel fehlt.")));
         }
         let review = Review { store, me };
         let review_id = Uuid::new_v4();
@@ -576,7 +577,7 @@ impl Review {
 
     pub fn open(path: &Path, me: Identity) -> Result<Review> {
         if !path.exists() {
-            return Err(not_found("Review-Datei nicht gefunden."));
+            return Err(not_found(tr!("Review-Datei nicht gefunden.")));
         }
         let store = Store::open(path)?;
         store.review_id()?;
@@ -612,7 +613,7 @@ impl Review {
 
     fn stage_state(&self, stage_id: &Uuid) -> Result<StageState> {
         StageState::build(stage_id, &self.store.stage_events(stage_id)?)
-            .ok_or_else(|| not_found("Stufe nicht gefunden."))
+            .ok_or_else(|| not_found(tr!("Stufe nicht gefunden.")))
     }
 
     // ------------------------------------------------------------ Ablauf
@@ -723,13 +724,16 @@ impl Review {
     }
 
     pub fn station(&self, key: &str) -> Result<StationView> {
-        self.stations()?.into_iter().find(|s| s.key == key).ok_or_else(|| not_found("Diese Station gibt es nicht."))
+        self.stations()?
+            .into_iter()
+            .find(|s| s.key == key)
+            .ok_or_else(|| not_found(tr!("Diese Station gibt es nicht.")))
     }
 
     /// Eingaben für die nächste Stufe einer Station, wie die Vorlage sie vorsieht.
     pub fn stage_defaults(&self, station: &str) -> Result<OpenStage> {
         let view = self.station(station)?;
-        let d = view.defaults.ok_or_else(|| invalid("Diese Station arbeitet nicht mit Stufen."))?;
+        let d = view.defaults.ok_or_else(|| invalid(tr!("Diese Station arbeitet nicht mit Stufen.")))?;
         Ok(OpenStage {
             name: d.name,
             kind: view.key.clone(),
@@ -757,7 +761,7 @@ impl Review {
         Template::parse(template).map_err(invalid)?;
         let current = self.workflow()?;
         if current.published() && change_note.trim().is_empty() {
-            return Err(invalid("Eine geänderte Vorlage braucht eine Begründung."));
+            return Err(invalid(tr!("Eine geänderte Vorlage braucht eine Begründung.")));
         }
         let version = current.version + 1;
         self.append(
@@ -774,17 +778,17 @@ impl Review {
         require(&state, &self.me.actor_id, &MANAGE_ROLES)?;
         let reason = reason.trim();
         if reason.is_empty() {
-            return Err(invalid("Übersteuern braucht eine Begründung."));
+            return Err(invalid(tr!("Übersteuern braucht eine Begründung.")));
         }
         let view = self.station(station)?;
         if !view.blocking {
-            return Err(invalid(format!("Die Station „{}“ sperrt nichts.", view.label)));
+            return Err(invalid(tr!("Die Station „{}“ sperrt nichts.", view.label)));
         }
         if view.state == "done" {
-            return Err(conflict(format!("Die Station „{}“ ist bereits abgeschlossen.", view.label)));
+            return Err(conflict(tr!("Die Station „{}“ ist bereits abgeschlossen.", view.label)));
         }
         if view.rounds.iter().any(|r| !r.closed) {
-            return Err(conflict("Erst die laufende Stufe dieser Station schließen."));
+            return Err(conflict(tr!("Erst die laufende Stufe dieser Station schließen.")));
         }
         let round = view.rounds.last().map_or(0, |r| r.round);
         self.append("GateOverridden", None, json!({"station": view.key, "round": round, "reason": reason}))?;
@@ -797,7 +801,7 @@ impl Review {
         require(&state, &self.me.actor_id, &MANAGE_ROLES)?;
         let stage = self.stage_state(stage_id)?;
         if stage.blind_active() {
-            return Err(forbidden("Die Stufe ist verblindet. Das Gate ist erst nach dem Entblinden einsehbar."));
+            return Err(forbidden(tr!("Die Stufe ist verblindet. Das Gate ist erst nach dem Entblinden einsehbar.")));
         }
         self.evaluate_gate(&self.workflow()?, &stage)
     }
@@ -813,7 +817,7 @@ impl Review {
     }
 
     pub fn name_of(&self, actor: &Uuid) -> Result<String> {
-        Ok(self.store.person_name(actor)?.unwrap_or_else(|| format!("Unbekannt ({})", &actor.to_string()[..8])))
+        Ok(self.store.person_name(actor)?.unwrap_or_else(|| tr!("Unbekannt ({})", &actor.to_string()[..8])))
     }
 
     pub fn list_item(&self) -> Result<ReviewListItem> {
@@ -847,16 +851,16 @@ impl Review {
         let state = self.state()?;
         require(&state, &self.me.actor_id, &MANAGE_ROLES)?;
         if !ROLES.contains(&role) {
-            return Err(invalid("Unbekannte Rolle."));
+            return Err(invalid(tr!("Unbekannte Rolle.")));
         }
         parse_public_key(&person.public_key)?;
         if let Some(current) = state.members.get(&person.actor_id) {
             if current.public_key != person.public_key {
-                return Err(conflict("Diese Person ist schon mit einem anderen Schlüssel Mitglied."));
+                return Err(conflict(tr!("Diese Person ist schon mit einem anderen Schlüssel Mitglied.")));
             }
             let owners = state.members.values().filter(|m| m.role == "owner").count();
             if current.role == "owner" && role != "owner" && owners == 1 {
-                return Err(invalid("Ein Review braucht mindestens einen Owner."));
+                return Err(invalid(tr!("Ein Review braucht mindestens einen Owner.")));
             }
         }
         let tx = self.store.conn().unchecked_transaction()?;
@@ -874,7 +878,7 @@ impl Review {
 
     pub fn set_member_role(&self, actor_id: &Uuid, role: &str) -> Result<()> {
         let state = self.state()?;
-        let member = state.members.get(actor_id).ok_or_else(|| not_found("Diese Person ist kein Mitglied."))?;
+        let member = state.members.get(actor_id).ok_or_else(|| not_found(tr!("Diese Person ist kein Mitglied.")))?;
         let person = PublicIdentity {
             actor_id: *actor_id,
             name: self.name_of(actor_id)?,
@@ -899,7 +903,7 @@ impl Review {
         for item in data.get("items").and_then(Value::as_array).into_iter().flatten() {
             let element = text(item, "element");
             if !element.is_empty() && !schema.iter().any(|s| s.key == element) {
-                return Err(invalid(format!("Das Element „{element}“ gibt es im Kriterienschema der Vorlage nicht.")));
+                return Err(invalid(tr!("Das Element „{}“ gibt es im Kriterienschema der Vorlage nicht.", element)));
             }
             items.push(json!({
                 "code": text(item, "code"), "element": element, "kind": text(item, "kind"),
@@ -907,11 +911,11 @@ impl Review {
             }));
         }
         if items.is_empty() {
-            return Err(invalid("Mindestens ein Kriterium ist nötig."));
+            return Err(invalid(tr!("Mindestens ein Kriterium ist nötig.")));
         }
         let change_note = text(data, "change_note");
         if previous.version > 0 && change_note.is_empty() {
-            return Err(invalid("Was hat sich an den Kriterien geändert? Die Angabe fehlt."));
+            return Err(invalid(tr!("Was hat sich an den Kriterien geändert? Die Angabe fehlt.")));
         }
         let payload = json!({
             "version": previous.version + 1,
@@ -942,19 +946,19 @@ impl Review {
         let (source, origin, search) = match from.search_id {
             Some(id) => {
                 let searches = self.search_state()?;
-                let search = searches.get(&id).ok_or_else(|| not_found("Diese Suche gibt es nicht."))?;
+                let search = searches.get(&id).ok_or_else(|| not_found(tr!("Diese Suche gibt es nicht.")))?;
                 let version = match from.search_version {
                     Some(n) => search.version(n),
                     None => search.latest(),
                 }
-                .ok_or_else(|| not_found("Diese Suchversion gibt es nicht."))?;
+                .ok_or_else(|| not_found(tr!("Diese Suchversion gibt es nicht.")))?;
                 (version.source.clone(), version.origin.clone(), Some((id, version.version)))
             }
             None => {
                 if !catalog::ORIGINS.contains(&from.origin.as_str()) {
-                    return Err(invalid(
-                        "Woher stammen die Treffer? Wähle eine Suche oder die Herkunft: Datenbank, Register, Zitationssuche oder andere.",
-                    ));
+                    return Err(invalid(tr!(
+                        "Woher stammen die Treffer? Wähle eine Suche oder die Herkunft: Datenbank, Register, Zitationssuche oder andere."
+                    )));
                 }
                 (from.source.trim().to_string(), from.origin.clone(), None)
             }
@@ -1157,30 +1161,30 @@ impl Review {
         let searches = self.search_state()?;
         let (id, version, previous) = match data.get("search_id").and_then(Value::as_str).filter(|s| !s.is_empty()) {
             Some(raw) => {
-                let id = Uuid::parse_str(raw).map_err(|_| invalid("Ungültige ID der Suche."))?;
-                let search = searches.get(&id).ok_or_else(|| not_found("Diese Suche gibt es nicht."))?;
+                let id = Uuid::parse_str(raw).map_err(|_| invalid(tr!("Ungültige ID der Suche.")))?;
+                let search = searches.get(&id).ok_or_else(|| not_found(tr!("Diese Suche gibt es nicht.")))?;
                 let last = search.latest().map_or(0, |v| v.version);
                 (id, last + 1, Some(last))
             }
             None => (Uuid::new_v4(), 1, None),
         };
         if text("source").is_empty() {
-            return Err(invalid("Die Quelle fehlt, z. B. MEDLINE oder ClinicalTrials.gov."));
+            return Err(invalid(tr!("Die Quelle fehlt, z. B. MEDLINE oder ClinicalTrials.gov.")));
         }
         if text("query").is_empty() {
-            return Err(invalid("Der Suchstring fehlt."));
+            return Err(invalid(tr!("Der Suchstring fehlt.")));
         }
         if !catalog::ORIGINS.contains(&text("origin").as_str()) {
-            return Err(invalid("Die Herkunft fehlt: Datenbank, Register, Zitationssuche oder andere."));
+            return Err(invalid(tr!("Die Herkunft fehlt: Datenbank, Register, Zitationssuche oder andere.")));
         }
         if !catalog::is_date(&text("searched_on")) {
-            return Err(invalid("Das Datum der Suche fehlt oder hat nicht die Form JJJJ-MM-TT."));
+            return Err(invalid(tr!("Das Datum der Suche fehlt oder hat nicht die Form JJJJ-MM-TT.")));
         }
         if number("hit_limit").is_some_and(|n| n < 1) || number("hits").is_some_and(|n| n < 0) {
-            return Err(invalid("Trefferzahl und Trefferlimit dürfen nicht negativ sein."));
+            return Err(invalid(tr!("Trefferzahl und Trefferlimit dürfen nicht negativ sein.")));
         }
         if version > 1 && text("change_note").is_empty() {
-            return Err(invalid("Was hat sich an der Suche geändert? Die Notiz zur Änderung fehlt."));
+            return Err(invalid(tr!("Was hat sich an der Suche geändert? Die Notiz zur Änderung fehlt.")));
         }
         self.append(
             "SearchVersionPublished",
@@ -1192,7 +1196,7 @@ impl Review {
                 "hit_limit": number("hit_limit"), "hits": number("hits"), "change_note": text("change_note"),
             }),
         )?;
-        self.search_state()?.get(&id).cloned().ok_or_else(|| not_found("Diese Suche gibt es nicht."))
+        self.search_state()?.get(&id).cloned().ok_or_else(|| not_found(tr!("Diese Suche gibt es nicht.")))
     }
 
     /// Vermerkt ein Peer-Review der Suche, z. B. nach PRESS. Im Log steht kein Name: entweder ein
@@ -1209,16 +1213,16 @@ impl Review {
         require(&state, &self.me.actor_id, &MANAGE_ROLES)?;
         let searches = self.search_state()?;
         if searches.get(search_id).and_then(|s| s.version(version)).is_none() {
-            return Err(not_found("Diese Suchversion gibt es nicht."));
+            return Err(not_found(tr!("Diese Suchversion gibt es nicht.")));
         }
         if note.trim().is_empty() {
-            return Err(invalid("Der Vermerk fehlt: Wer hat geprüft (Rolle) und mit welchem Ergebnis?"));
+            return Err(invalid(tr!("Der Vermerk fehlt: Wer hat geprüft (Rolle) und mit welchem Ergebnis?")));
         }
         if !catalog::is_date(reviewed_on) {
-            return Err(invalid("Das Datum der Prüfung fehlt oder hat nicht die Form JJJJ-MM-TT."));
+            return Err(invalid(tr!("Das Datum der Prüfung fehlt oder hat nicht die Form JJJJ-MM-TT.")));
         }
         if reviewer.is_some_and(|r| !state.members.contains_key(&r)) {
-            return Err(not_found("Diese Person ist kein Mitglied des Reviews."));
+            return Err(not_found(tr!("Diese Person ist kein Mitglied des Reviews.")));
         }
         self.append(
             "SearchPeerReviewed",
@@ -1289,13 +1293,13 @@ impl Review {
         let state = self.state()?;
         require(&state, &self.me.actor_id, &MANAGE_ROLES)?;
         if pairs.is_empty() {
-            return Err(invalid("Kein Paar gewählt."));
+            return Err(invalid(tr!("Kein Paar gewählt.")));
         }
         for pair in pairs {
             for id in [&pair.a, &pair.b] {
-                let record = self.store.record(id)?.ok_or_else(|| not_found("Eintrag nicht gefunden."))?;
+                let record = self.store.record(id)?.ok_or_else(|| not_found(tr!("Eintrag nicht gefunden.")))?;
                 if record.duplicate_of.is_some() {
-                    return Err(invalid(format!(
+                    return Err(invalid(tr!(
                         "„{}“ ist schon beim Import als Dublette erkannt.",
                         record.title.chars().take(60).collect::<String>()
                     )));
@@ -1341,7 +1345,7 @@ impl Review {
     pub fn detail(&self) -> Result<ReviewDetail> {
         let state = self.state()?;
         let role =
-            state.role_of(&self.me.actor_id).ok_or_else(|| forbidden("Du bist nicht Mitglied dieses Reviews."))?;
+            state.role_of(&self.me.actor_id).ok_or_else(|| forbidden(tr!("Du bist nicht Mitglied dieses Reviews.")))?;
         let (n_records, n_exact, n_resolved) = self.duplicate_counts(&self.resolutions()?)?;
         let events = self.import_events()?;
         let imports = self
@@ -1377,14 +1381,16 @@ impl Review {
         let workflow = self.workflow()?;
         let stages = self.stage_states(state)?;
         let stations = workflow.stations(&self.facts(state, &workflow, &stages)?, &stages);
+        // Texte der Vorlage in der geltenden Sprache; im Log bleibt sie, wie sie veröffentlicht wurde.
+        let shown = workflow.template.localized();
         Ok(WorkflowView {
             published: workflow.published(),
             version: workflow.version,
-            template_key: workflow.template.key,
-            template_name: workflow.template.name,
-            review_type: workflow.template.review_type,
-            terms: workflow.template.terms,
-            criteria_schema: workflow.template.criteria_schema,
+            template_key: shown.key,
+            template_name: shown.name,
+            review_type: shown.review_type,
+            terms: shown.terms,
+            criteria_schema: shown.criteria_schema,
             stations,
         })
     }
@@ -1404,14 +1410,14 @@ impl Review {
         let state = self.state()?;
         require(&state, &self.me.actor_id, &MANAGE_ROLES)?;
         if !matches!(params.maybe_as.as_deref(), None | Some("include") | Some("exclude")) {
-            return Err(invalid("maybe_as muss leer, include oder exclude sein."));
+            return Err(invalid(tr!("maybe_as muss leer, include oder exclude sein.")));
         }
         let name = params.name.trim();
         if name.is_empty() {
-            return Err(invalid("Name der Stufe fehlt."));
+            return Err(invalid(tr!("Name der Stufe fehlt.")));
         }
         if params.min_reviewers < 1 {
-            return Err(invalid("Mindestens eine Stimme je Record ist nötig."));
+            return Err(invalid(tr!("Mindestens eine Stimme je Record ist nötig.")));
         }
 
         // Station, Sperren und Regeln aus der Vorlage
@@ -1421,69 +1427,80 @@ impl Review {
         let key = match (&params.station, workflow.published()) {
             (Some(key), _) => key.clone(),
             (None, false) => workflow.template.default_station().map(|s| s.key.clone()).unwrap_or_default(),
-            (None, true) => return Err(invalid("Zu welcher Station gehört die Stufe? Die Angabe fehlt.")),
+            (None, true) => return Err(invalid(tr!("Zu welcher Station gehört die Stufe? Die Angabe fehlt."))),
         };
-        let station = workflow.template.station(&key).ok_or_else(|| not_found("Diese Station gibt es nicht."))?;
+        let station = workflow.template.station(&key).ok_or_else(|| not_found(tr!("Diese Station gibt es nicht.")))?;
         let is_form = station.kind == "form";
         if !is_form && station.kind != "screening" {
-            return Err(invalid(format!("Die Station „{}“ arbeitet nicht mit Stufen.", station.label)));
+            return Err(invalid(tr!("Die Station „{}“ arbeitet nicht mit Stufen.", station.label)));
         }
         // Formular-Stufen arbeiten mit der geltenden Version; die Nummer beim Öffnen steht im Log.
         let form = match is_form {
             true => Some(self.form_for(station, params.form_id.as_ref())?),
             false => None,
         };
-        let view = views.iter().find(|v| v.key == key).ok_or_else(|| not_found("Diese Station gibt es nicht."))?;
+        let view = views.iter().find(|v| v.key == key).ok_or_else(|| not_found(tr!("Diese Station gibt es nicht.")))?;
         if let Some(blocker) = view.blocked_by.first() {
-            return Err(conflict(format!(
+            return Err(conflict(tr!(
                 "Die Station „{}“ ist gesperrt: „{}“ ist noch nicht abgeschlossen. Die Leitung kann das mit einer Begründung übersteuern.",
                 station.label, blocker.label
             )));
         }
         if !station.free_rounds && view.rounds.iter().any(|r| !r.closed) {
-            return Err(conflict(format!("In der Station „{}“ ist noch eine Stufe offen.", station.label)));
+            return Err(conflict(tr!("In der Station „{}“ ist noch eine Stufe offen.", station.label)));
         }
         let round = view.rounds.last().map_or(0, |r| r.round) + 1;
         let rules = workflow.template.rules_for(station);
         let decision_rule = params.decision_rule.clone().unwrap_or_else(|| rules.decision_rule.value.clone());
         let conflict_rule = params.conflict_rule.clone().unwrap_or_else(|| rules.conflict_rule.value.clone());
         if !workflow::DECISION_RULES.contains(&decision_rule.as_str()) {
-            return Err(invalid("Unbekannte Auswahlregel."));
+            return Err(invalid(tr!("Unbekannte Auswahlregel.")));
         }
         if is_form && decision_rule == "liberal" {
-            return Err(invalid("Extrahiert wird doppelt oder einfach mit Prüfung."));
+            return Err(invalid(tr!("Extrahiert wird doppelt oder einfach mit Prüfung.")));
         }
         if !workflow::CONFLICT_RULES.contains(&conflict_rule.as_str()) {
-            return Err(invalid("Unbekannte Klärungsregel."));
+            return Err(invalid(tr!("Unbekannte Klärungsregel.")));
         }
-        let fixed = |editable: bool, same: bool, what: &str| -> Result<()> {
+        let label = &station.label;
+        let fixed = |editable: bool, same: bool, message: &dyn Fn() -> String| -> Result<()> {
             if editable || same {
                 Ok(())
             } else {
-                Err(invalid(format!("Die Vorlage legt {what} für die Station „{}“ fest.", station.label)))
+                Err(invalid(message()))
             }
         };
-        fixed(rules.decision_rule.editable, decision_rule == rules.decision_rule.value, "die Auswahlregel")?;
-        fixed(rules.conflict_rule.editable, conflict_rule == rules.conflict_rule.value, "die Klärungsregel")?;
-        fixed(rules.min_reviewers.editable, params.min_reviewers == rules.min_reviewers.value, "die Zahl der Stimmen")?;
-        fixed(rules.maybe_as.editable, params.maybe_as == rules.maybe_as.value, "die Maybe-Regel")?;
-        fixed(rules.blind.editable, params.blind == rules.blind.value, "die Verblindung")?;
+        fixed(rules.decision_rule.editable, decision_rule == rules.decision_rule.value, &|| {
+            tr!("Die Vorlage legt die Auswahlregel für die Station „{}“ fest.", label)
+        })?;
+        fixed(rules.conflict_rule.editable, conflict_rule == rules.conflict_rule.value, &|| {
+            tr!("Die Vorlage legt die Klärungsregel für die Station „{}“ fest.", label)
+        })?;
+        fixed(rules.min_reviewers.editable, params.min_reviewers == rules.min_reviewers.value, &|| {
+            tr!("Die Vorlage legt die Zahl der Stimmen für die Station „{}“ fest.", label)
+        })?;
+        fixed(rules.maybe_as.editable, params.maybe_as == rules.maybe_as.value, &|| {
+            tr!("Die Vorlage legt die Maybe-Regel für die Station „{}“ fest.", label)
+        })?;
+        fixed(rules.blind.editable, params.blind == rules.blind.value, &|| {
+            tr!("Die Vorlage legt die Verblindung für die Station „{}“ fest.", label)
+        })?;
         let verify = if decision_rule == "single_verified" {
             if params.blind {
-                return Err(invalid(
-                    "Bei „eine Stimme mit Prüfung“ sieht die zweite Person die Ausschlüsse. Die Stufe kann deshalb nicht verblindet sein.",
-                ));
+                return Err(invalid(tr!(
+                    "Bei „eine Stimme mit Prüfung“ sieht die zweite Person die Ausschlüsse. Die Stufe kann deshalb nicht verblindet sein."
+                )));
             }
             let mut verify = params.verify.clone().unwrap_or(Verify { scope: "all".into(), percent: None, seed: None });
             match verify.scope.as_str() {
                 "all" => (verify.percent, verify.seed) = (None, None),
                 "sample" => {
                     if !verify.percent.is_some_and(|p| (1..=100).contains(&p)) {
-                        return Err(invalid("Der Anteil der Stichprobe muss zwischen 1 und 100 Prozent liegen."));
+                        return Err(invalid(tr!("Der Anteil der Stichprobe muss zwischen 1 und 100 Prozent liegen.")));
                     }
                     verify.seed = Some(verify.seed.unwrap_or_else(|| rand::thread_rng().gen_range(1..2_147_483_647)));
                 }
-                _ => return Err(invalid("Die Prüfung gilt für alle Ausschlüsse oder für eine Stichprobe.")),
+                _ => return Err(invalid(tr!("Die Prüfung gilt für alle Ausschlüsse oder für eine Stichprobe."))),
             }
             Some(verify)
         } else {
@@ -1492,15 +1509,15 @@ impl Review {
         let criteria = Criteria::from_payload(state.criteria.as_ref());
         let reason_required = params.reason_required.unwrap_or(station.reason_required);
         if station.reason_required && !reason_required {
-            return Err(invalid(format!(
+            return Err(invalid(tr!(
                 "Die Vorlage verlangt in der Station „{}“ für jeden Ausschluss einen Hauptgrund.",
                 station.label
             )));
         }
         if reason_required && criteria.reason_codes().is_empty() {
-            return Err(invalid(
-                "In dieser Stufe braucht jeder Ausschluss einen Hauptgrund. Dafür fehlen Ausschlusskriterien mit Kürzel.",
-            ));
+            return Err(invalid(tr!(
+                "In dieser Stufe braucht jeder Ausschluss einen Hauptgrund. Dafür fehlen Ausschlusskriterien mit Kürzel."
+            )));
         }
         let source_stage = params.source_stage.or(view.defaults.as_ref().and_then(|d| d.source_stage));
 
@@ -1512,9 +1529,9 @@ impl Review {
                 let per_type = sample_scope.then(|| params.sample_size.unwrap_or(PILOT_PER_TYPE));
                 self.form_stage_ids(per_type, &mut seed)?
             }
-            _ if is_form => return Err(invalid("Eine Formular-Stufe bekommt alle Quellen oder eine Stichprobe.")),
+            _ if is_form => return Err(invalid(tr!("Eine Formular-Stufe bekommt alle Quellen oder eine Stichprobe."))),
             "from_stage" => {
-                let source_id = source_stage.ok_or_else(|| invalid("Quellstufe fehlt."))?;
+                let source_id = source_stage.ok_or_else(|| invalid(tr!("Quellstufe fehlt.")))?;
                 let source = self.stage_state(&source_id)?;
                 // Speist eine Station mit festen Runden, zählen alle ihre Runden: Was eine frühere
                 // Runde eingeschlossen hat, geht nicht verloren, wenn später eine weitere dazukam.
@@ -1563,7 +1580,7 @@ impl Review {
                 }
                 ids
             }
-            _ => return Err(invalid("Unbekannter Umfang der Stufe.")),
+            _ => return Err(invalid(tr!("Unbekannter Umfang der Stufe."))),
         };
         // Stationen mit festen Runden legen nichts doppelt vor: Eine weitere Runde bekommt nur, was in
         // keiner früheren war, etwa die Treffer der Zitationssuche. Stichproben ziehen jedes Mal neu.
@@ -1586,11 +1603,11 @@ impl Review {
             .collect();
         if ids.is_empty() {
             return Err(invalid(match (station.requires_fulltext, earlier.is_empty()) {
-                _ if is_form && earlier.is_empty() => "Es gibt noch keine eingeschlossenen Quellen.",
-                (true, true) => "Für diese Stufe ist noch kein Volltext beschafft.",
-                (true, false) => "Seit der letzten Runde ist kein weiterer Volltext beschafft worden.",
-                (false, true) => "Für diese Stufe gibt es keine Records.",
-                (false, false) => "Seit der letzten Runde ist nichts Neues dazugekommen.",
+                _ if is_form && earlier.is_empty() => tr!("Es gibt noch keine eingeschlossenen Quellen."),
+                (true, true) => tr!("Für diese Stufe ist noch kein Volltext beschafft."),
+                (true, false) => tr!("Seit der letzten Runde ist kein weiterer Volltext beschafft worden."),
+                (false, true) => tr!("Für diese Stufe gibt es keine Records."),
+                (false, false) => tr!("Seit der letzten Runde ist nichts Neues dazugekommen."),
             }));
         }
         let stage_id = Uuid::new_v4();
@@ -1626,7 +1643,7 @@ impl Review {
         require(&state, &self.me.actor_id, &MANAGE_ROLES)?;
         let stage = self.stage_state(stage_id)?;
         if !stage.blind_active() {
-            return Err(conflict("Die Stufe ist nicht verblindet."));
+            return Err(conflict(tr!("Die Stufe ist nicht verblindet.")));
         }
         self.append("StageUnblinded", Some(*stage_id), json!({}))?;
         Ok(())
@@ -1638,7 +1655,7 @@ impl Review {
         require(&state, &self.me.actor_id, &MANAGE_ROLES)?;
         let stage = self.stage_state(stage_id)?;
         if stage.closed {
-            return Err(conflict("Die Stufe ist bereits geschlossen."));
+            return Err(conflict(tr!("Die Stufe ist bereits geschlossen.")));
         }
         let label = format!("Abschluss {}", stage.config.name);
         let workflow = self.workflow()?;
@@ -1669,7 +1686,7 @@ impl Review {
     fn require_assigned(&self, stage_id: &Uuid, record_id: &str) -> Result<Uuid> {
         let id = parse_record_id(record_id)?;
         if !self.store.is_assigned(stage_id, &id)? {
-            return Err(not_found("Der Record gehört nicht zu dieser Stufe."));
+            return Err(not_found(tr!("Der Record gehört nicht zu dieser Stufe.")));
         }
         Ok(id)
     }
@@ -1700,13 +1717,13 @@ impl Review {
         require(&state, &self.me.actor_id, &WRITE_ROLES)?;
         let stage = self.stage_state(stage_id)?;
         if stage.config.form_id.is_some() {
-            return Err(invalid("Diese Stufe arbeitet mit einem Formular, nicht mit Stimmen."));
+            return Err(invalid(tr!("Diese Stufe arbeitet mit einem Formular, nicht mit Stimmen.")));
         }
         if stage.closed {
-            return Err(conflict("Die Stufe ist geschlossen."));
+            return Err(conflict(tr!("Die Stufe ist geschlossen.")));
         }
         if !DECISIONS.contains(&decision) {
-            return Err(invalid("Entscheidung muss include, exclude oder maybe sein."));
+            return Err(invalid(tr!("Entscheidung muss include, exclude oder maybe sein.")));
         }
         let record = self.require_assigned(stage_id, record_id)?.to_string();
         let previous = self.my_votes(&stage).get(&record).cloned();
@@ -1739,10 +1756,10 @@ impl Review {
         require(&state, &self.me.actor_id, &WRITE_ROLES)?;
         let stage = self.stage_state(stage_id)?;
         if stage.config.form_id.is_some() {
-            return Err(invalid("Diese Stufe arbeitet mit einem Formular, nicht mit Stimmen."));
+            return Err(invalid(tr!("Diese Stufe arbeitet mit einem Formular, nicht mit Stimmen.")));
         }
         if stage.closed {
-            return Err(conflict("Die Stufe ist geschlossen."));
+            return Err(conflict(tr!("Die Stufe ist geschlossen.")));
         }
         let record = self.require_assigned(stage_id, record_id)?.to_string();
         self.append("RecordFlaggedUndecidable", Some(*stage_id), json!({"record_id": record, "note": note}))?;
@@ -1764,23 +1781,23 @@ impl Review {
         require(&state, &self.me.actor_id, &WRITE_ROLES)?;
         let stage = self.stage_state(stage_id)?;
         if stage.config.form_id.is_some() {
-            return Err(invalid("Diese Stufe arbeitet mit einem Formular, nicht mit Stimmen."));
+            return Err(invalid(tr!("Diese Stufe arbeitet mit einem Formular, nicht mit Stimmen.")));
         }
         if stage.closed {
-            return Err(conflict("Die Stufe ist geschlossen."));
+            return Err(conflict(tr!("Die Stufe ist geschlossen.")));
         }
         if stage.blind_active() {
-            return Err(forbidden("Die Stufe ist verblindet. Ein Konsens ist erst nach dem Entblinden möglich."));
+            return Err(forbidden(tr!("Die Stufe ist verblindet. Ein Konsens ist erst nach dem Entblinden möglich.")));
         }
         if !matches!(decision, "include" | "exclude") {
-            return Err(invalid("Ein Konsens muss include oder exclude sein."));
+            return Err(invalid(tr!("Ein Konsens muss include oder exclude sein.")));
         }
         let record = self.require_assigned(stage_id, record_id)?.to_string();
         let third_person = stage.config.conflict_rule == "third_person";
         if third_person && stage.votes.contains_key(&(record.clone(), self.me.actor_id)) {
-            return Err(forbidden(
-                "In dieser Stufe entscheidet eine dritte Person. Du hast zu diesem Eintrag selbst abgestimmt.",
-            ));
+            return Err(forbidden(tr!(
+                "In dieser Stufe entscheidet eine dritte Person. Du hast zu diesem Eintrag selbst abgestimmt."
+            )));
         }
         let method = match method {
             "" if third_person => "third_person",
@@ -1807,7 +1824,7 @@ impl Review {
 
     fn record_item(&self, id: &str) -> Result<RecordItem> {
         let id = parse_record_id(id)?;
-        self.store.record(&id)?.map(RecordItem::from).ok_or_else(|| not_found("Record nicht gefunden."))
+        self.store.record(&id)?.map(RecordItem::from).ok_or_else(|| not_found(tr!("Record nicht gefunden.")))
     }
 
     /// Fortschritt der eigenen Arbeit. Bei `liberal` und `single_verified` zählt nur, was von dieser
@@ -1831,7 +1848,7 @@ impl Review {
         let role = require(&state, &self.me.actor_id, &ROLES)?.to_string();
         let stage = self.stage_state(stage_id)?;
         let criteria = stage_criteria(&state, &stage);
-        let template = self.workflow()?.template;
+        let template = self.workflow()?.template.localized();
         Ok(StageDetail {
             progress: self.progress(&stage)?,
             stage: stage_view(&stage),
@@ -1872,22 +1889,20 @@ impl Review {
         let person = filter.person.unwrap_or(me);
         let wanted = filter.decision.as_deref().filter(|d| !d.is_empty());
         if !matches!(wanted, None | Some("open" | "include" | "exclude" | "maybe" | "conflict")) {
-            return Err(invalid("Unbekannter Filter für die Entscheidung."));
+            return Err(invalid(tr!("Unbekannter Filter für die Entscheidung.")));
         }
         if blind {
             let locked = if wanted == Some("conflict") {
-                Some("Konflikte")
+                Some(tr!("Die Stufe ist verblindet. Konflikte sind erst nach dem Entblinden sichtbar."))
             } else if person != me {
-                Some("Stimmen anderer Personen")
+                Some(tr!("Die Stufe ist verblindet. Stimmen anderer Personen sind erst nach dem Entblinden sichtbar."))
             } else if filter.votes_min.is_some() || filter.votes_max.is_some() {
-                Some("Die Zahl der Stimmen")
+                Some(tr!("Die Stufe ist verblindet. Die Zahl der Stimmen sind erst nach dem Entblinden sichtbar."))
             } else {
                 None
             };
-            if let Some(what) = locked {
-                return Err(forbidden(format!(
-                    "Die Stufe ist verblindet. {what} sind erst nach dem Entblinden sichtbar."
-                )));
+            if let Some(message) = locked {
+                return Err(forbidden(message));
             }
         }
         let finals = if blind { BTreeMap::new() } else { stage.final_decisions() };
@@ -1972,7 +1987,7 @@ impl Review {
         require(&state, &self.me.actor_id, &ROLES)?;
         let stage = self.stage_state(stage_id)?;
         if stage.blind_active() {
-            return Err(forbidden("Die Stufe ist verblindet. Konflikte sind erst nach dem Entblinden sichtbar."));
+            return Err(forbidden(tr!("Die Stufe ist verblindet. Konflikte sind erst nach dem Entblinden sichtbar.")));
         }
         let mut out = Vec::new();
         for (record, decision) in stage.final_decisions() {
@@ -2054,7 +2069,7 @@ impl Review {
     pub fn final_decisions(&self, stage_id: &Uuid) -> Result<BTreeMap<String, FinalDecision>> {
         let stage = self.stage_state(stage_id)?;
         if stage.blind_active() {
-            return Err(forbidden("Die Stufe ist verblindet."));
+            return Err(forbidden(tr!("Die Stufe ist verblindet.")));
         }
         Ok(stage.final_decisions())
     }
@@ -2064,7 +2079,7 @@ impl Review {
         require(&state, &self.me.actor_id, &ROLES)?;
         let stage = self.stage_state(stage_id)?;
         if stage.blind_active() {
-            return Err(forbidden("Die Stufe ist verblindet. Der Export ist erst nach dem Entblinden möglich."));
+            return Err(forbidden(tr!("Die Stufe ist verblindet. Der Export ist erst nach dem Entblinden möglich.")));
         }
         let finals = stage.final_decisions();
         let mut out = String::from("record_id,title,authors,year,journal,doi,status,decision,n_votes\n");
@@ -2106,19 +2121,21 @@ impl Review {
                 let expected_seq = prev.map_or(1, |p| p.seq + 1);
                 let mut problem = None;
                 if e.seq != expected_seq {
-                    problem = Some(format!(
-                        "Lücke in der Kette {stream} von {}: erwartet {expected_seq}, gefunden {}.",
+                    problem = Some(tr!(
+                        "Lücke in der Kette {} von {}: erwartet {}, gefunden {}.",
+                        stream,
                         &actor.to_string()[..8],
+                        expected_seq,
                         e.seq
                     ));
                 } else if e.prev_hash != prev.map(|p| p.hash.clone()) {
-                    problem = Some(format!("Vorgänger-Hash passt nicht bei {} ({}).", e.event_id, e.event_type));
+                    problem = Some(tr!("Vorgänger-Hash passt nicht bei {} ({}).", e.event_id, e.event_type));
                 } else if let Some(key) = &key {
                     if let Err(err) = e.verify(key) {
                         problem = Some(err.to_string());
                     }
                 } else {
-                    problem = Some(format!("Kein Schlüssel für die Person {}.", &actor.to_string()[..8]));
+                    problem = Some(tr!("Kein Schlüssel für die Person {}.", &actor.to_string()[..8]));
                 }
                 if let Some(p) = problem {
                     bad.insert(e.event_id);

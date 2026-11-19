@@ -19,7 +19,9 @@ use uuid::Uuid;
 use crate::agreement;
 use crate::event::Event;
 use crate::forms::{check_starter, Starter, PURPOSES};
+use crate::i18n;
 use crate::projection::{order_key, MaybeMode, StageState};
+use crate::tr;
 
 pub const STATION_KINDS: [&str; 4] = ["setup", "screening", "form", "report"];
 pub const DECISION_RULES: [&str; 3] = ["unanimous", "liberal", "single_verified"];
@@ -41,7 +43,12 @@ const FORM_CHECKS: [&str; 4] = ["form_confirmed", "all_extracted", "no_open_diff
 const BUILT_TOOLS: [&str; 6] = ["protocol", "search", "import", "fulltext", "citation", "bundling"];
 pub const WORKFLOW_TYPES: [&str; 3] = ["WorkflowVersionPublished", "GateEvaluated", "GateOverridden"];
 
-const BUILTIN: [&str; 2] = [include_str!("../templates/jbi_scoping.json"), include_str!("../templates/free.json")];
+const BUILTIN: [&str; 4] = [
+    include_str!("../templates/jbi_scoping.json"),
+    include_str!("../templates/rapid_review.json"),
+    include_str!("../templates/state_of_the_art.json"),
+    include_str!("../templates/free.json"),
+];
 pub const FREE_TEMPLATE: &str = "free";
 
 // ---------------------------------------------------------------- Vorlage
@@ -164,16 +171,16 @@ fn check_rules(
     conflict_rule: Option<&str>,
 ) -> Check {
     if decision_rule.is_some_and(|r| !DECISION_RULES.contains(&r)) {
-        return Err(format!("Unbekannte Auswahlregel „{}“.", decision_rule.unwrap_or_default()));
+        return Err(tr!("Unbekannte Auswahlregel „{}“.", decision_rule.unwrap_or_default()));
     }
     if min_reviewers.is_some_and(|n| n < 1) {
-        return Err("Mindestens eine Stimme je Eintrag ist nötig.".into());
+        return Err(tr!("Mindestens eine Stimme je Eintrag ist nötig."));
     }
     if maybe_as.is_some_and(|m| !matches!(m, "include" | "exclude")) {
-        return Err("Die Maybe-Regel muss leer, include oder exclude sein.".into());
+        return Err(tr!("Die Maybe-Regel muss leer, include oder exclude sein."));
     }
     if conflict_rule.is_some_and(|r| !CONFLICT_RULES.contains(&r)) {
-        return Err(format!("Unbekannte Klärungsregel „{}“.", conflict_rule.unwrap_or_default()));
+        return Err(tr!("Unbekannte Klärungsregel „{}“.", conflict_rule.unwrap_or_default()));
     }
     Ok(())
 }
@@ -182,14 +189,14 @@ impl Template {
     /// Liest eine Vorlage und prüft, dass diese App-Version jeden Teil versteht.
     pub fn parse(value: &Value) -> std::result::Result<Template, String> {
         let template: Template =
-            serde_json::from_value(value.clone()).map_err(|e| format!("Die Vorlage ist nicht lesbar: {e}."))?;
+            serde_json::from_value(value.clone()).map_err(|e| tr!("Die Vorlage ist nicht lesbar: {}.", e))?;
         template.check()?;
         Ok(template)
     }
 
     fn check(&self) -> Check {
         if self.key.trim().is_empty() || self.name.trim().is_empty() {
-            return Err("Der Vorlage fehlen Schlüssel oder Name.".into());
+            return Err(tr!("Der Vorlage fehlen Schlüssel oder Name."));
         }
         let r = &self.rules;
         check_rules(
@@ -199,20 +206,20 @@ impl Template {
             Some(&r.conflict_rule.value),
         )?;
         if self.stations.is_empty() {
-            return Err("Die Vorlage hat keine Stationen.".into());
+            return Err(tr!("Die Vorlage hat keine Stationen."));
         }
         let mut seen: BTreeSet<&str> = BTreeSet::new();
         let mut screening: BTreeSet<&str> = BTreeSet::new();
         for s in &self.stations {
             let name = &s.key;
             if name.trim().is_empty() || s.label.trim().is_empty() {
-                return Err("Einer Station fehlen Schlüssel oder Name.".into());
+                return Err(tr!("Einer Station fehlen Schlüssel oder Name."));
             }
             if !seen.insert(name) {
-                return Err(format!("Die Station „{name}“ steht doppelt in der Vorlage."));
+                return Err(tr!("Die Station „{}“ steht doppelt in der Vorlage.", name));
             }
             if !STATION_KINDS.contains(&s.kind.as_str()) {
-                return Err(format!("Station „{name}“: unbekannte Art „{}“.", s.kind));
+                return Err(tr!("Station „{}“: unbekannte Art „{}“.", name, s.kind));
             }
             let allowed: &[&str] = match s.kind.as_str() {
                 "setup" => &SETUP_CHECKS,
@@ -222,13 +229,13 @@ impl Template {
             };
             for g in &s.gate {
                 if !allowed.contains(&g.check.as_str()) {
-                    return Err(format!("Station „{name}“: unbekannte Prüfung „{}“.", g.check));
+                    return Err(tr!("Station „{}“: unbekannte Prüfung „{}“.", name, g.check));
                 }
                 if g.check == "agreement_min" && !g.percent.is_some_and(|p| (1..=100).contains(&p)) {
-                    return Err(format!("Station „{name}“: Die Schwelle muss zwischen 1 und 100 Prozent liegen."));
+                    return Err(tr!("Station „{}“: Die Schwelle muss zwischen 1 und 100 Prozent liegen.", name));
                 }
                 if g.check == "min_writers" && !g.n.is_some_and(|n| n >= 1) {
-                    return Err(format!("Station „{name}“: Die Mindestzahl an Personen fehlt."));
+                    return Err(tr!("Station „{}“: Die Mindestzahl an Personen fehlt.", name));
                 }
             }
             if let Some(o) = &s.rules {
@@ -238,26 +245,27 @@ impl Template {
                     o.maybe_as.as_ref().and_then(|r| r.value.as_deref()),
                     o.conflict_rule.as_ref().map(|r| r.value.as_str()),
                 )
-                .map_err(|e| format!("Station „{name}“: {e}"))?;
+                .map_err(|e| tr!("Station „{}“: {}", name, e))?;
             }
             if s.form.as_deref().is_some_and(|f| !PURPOSES.contains(&f)) {
-                return Err(format!("Station „{name}“: unbekannter Zweck des Formulars."));
+                return Err(tr!("Station „{}“: unbekannter Zweck des Formulars.", name));
             }
             if let Some(input) = &s.input {
                 match input.scope.as_str() {
                     "all" | "sample" => {}
                     "from_station" => {
                         if !input.station.as_deref().is_some_and(|k| screening.contains(k)) {
-                            return Err(format!(
-                                "Station „{name}“: Die Eingangsstation muss eine frühere Screening-Station sein."
+                            return Err(tr!(
+                                "Station „{}“: Die Eingangsstation muss eine frühere Screening-Station sein.",
+                                name
                             ));
                         }
                     }
-                    other => return Err(format!("Station „{name}“: unbekannter Umfang „{other}“.")),
+                    other => return Err(tr!("Station „{}“: unbekannter Umfang „{}“.", name, other)),
                 }
             }
             if s.requires_fulltext && s.input.as_ref().is_none_or(|i| i.scope != "from_station") {
-                return Err(format!("Station „{name}“: Volltexte setzen eine Eingangsstation voraus."));
+                return Err(tr!("Station „{}“: Volltexte setzen eine Eingangsstation voraus.", name));
             }
             if s.kind == "screening" {
                 screening.insert(name);
@@ -301,9 +309,73 @@ impl Template {
         rules
     }
 
+    /// Begriff der Vorlage in der geltenden Sprache, z. B. „Einträge“ oder „Quellen“. Nur für die
+    /// Anzeige: Was ins Log geht, nimmt den Begriff aus `terms`.
     pub fn term<'a>(&'a self, key: &'a str) -> &'a str {
-        self.terms.get(key).map_or(key, String::as_str)
+        self.terms.get(key).map_or(key, |t| shown_term(t))
     }
+
+    /// Texte für Menschen außer den Begriffen: Namen, Beschreibungen und Beschriftungen.
+    fn texts_mut(&mut self) -> Vec<&mut String> {
+        let mut out = vec![&mut self.name, &mut self.description];
+        out.extend(self.criteria_schema.iter_mut().chain(&mut self.source_types).map(|e| &mut e.label));
+        for station in &mut self.stations {
+            out.extend([&mut station.label, &mut station.description]);
+        }
+        for starter in &mut self.forms {
+            out.extend(starter_texts_mut(starter));
+        }
+        out
+    }
+
+    /// Kopie der Vorlage für die Anzeige: Texte der mitgelieferten Vorlagen in der geltenden Sprache,
+    /// eigene Texte unverändert. Die Kopie darf nie ins Log: Dort steht die Vorlage, wie sie
+    /// veröffentlicht wurde, und die mitgelieferten Vorlagen immer in der deutschen Fassung.
+    pub fn localized(&self) -> Template {
+        let mut out = self.clone();
+        for term in out.terms.values_mut() {
+            *term = shown_term(term).to_string();
+        }
+        for text in out.texts_mut() {
+            *text = shown(text).to_string();
+        }
+        out
+    }
+}
+
+/// Vorsatz, unter dem die Begriffe (`terms`) der mitgelieferten Vorlagen im Katalog stehen, z. B.
+/// „Begriff: Quelle“. Begriffe stehen mitten im Satz und brauchen in anderen Sprachen oft eine
+/// andere Schreibung als dasselbe Wort als Überschrift.
+const TERM_CONTEXT: &str = "Begriff: ";
+
+/// Text einer mitgelieferten Vorlage in der geltenden Sprache. Eigene Texte haben keinen
+/// Katalogeintrag und bleiben, wie sie sind.
+fn shown(source: &str) -> &str {
+    i18n::catalog(i18n::current()).and_then(|c| c.get(source)).map_or(source, String::as_str)
+}
+
+fn shown_term(term: &str) -> &str {
+    let entry = i18n::catalog(i18n::current()).and_then(|c| c.get(&format!("{TERM_CONTEXT}{term}")));
+    entry.map_or(term, String::as_str)
+}
+
+fn starter_texts_mut(starter: &mut Starter) -> Vec<&mut String> {
+    let mut out = vec![&mut starter.name];
+    for field in &mut starter.fields {
+        out.extend([&mut field.label, &mut field.description, &mut field.group, &mut field.analysis]);
+        out.extend(field.options.iter_mut());
+    }
+    out
+}
+
+/// Startformular für die Anzeige, siehe [`Template::localized`]. Die Leitung veröffentlicht daraus
+/// ihr erstes Formular; es steht dann so im Log, wie sie es bestätigt hat.
+pub fn localized_starter(starter: &Starter) -> Starter {
+    let mut out = starter.clone();
+    for text in starter_texts_mut(&mut out) {
+        *text = shown(text).to_string();
+    }
+    out
 }
 
 /// Mitgelieferte Vorlagen, in der Reihenfolge der Auswahl beim Anlegen.
@@ -334,6 +406,7 @@ pub struct TemplateInfo {
 pub fn template_infos() -> Vec<TemplateInfo> {
     builtin_templates()
         .into_iter()
+        .map(|t| t.localized())
         .map(|t| TemplateInfo {
             stations: t.stations.iter().map(|s| s.label.clone()).collect(),
             key: t.key,
@@ -417,7 +490,7 @@ pub fn evaluate_gate(station: &Station, stage: &StageState, assigned: &[String])
 /// Eine Zahl in Hundertstel als Text mit einer Nachkommastelle, z. B. 6800 → „68,0“.
 fn tenths(x100: i64) -> String {
     let t = (x100 + 5) / 10;
-    format!("{},{}", t / 10, t % 10)
+    tr!("{},{}", t / 10, t % 10)
 }
 
 // ---------------------------------------------------------------- Zustand
@@ -583,58 +656,60 @@ impl Workflow {
 
     fn setup_check(&self, g: &GateCheck, facts: &Facts) -> CheckView {
         let (label, passed, detail) = match g.check.as_str() {
-            "criteria_published" => ("Kriterien veröffentlicht".to_string(), facts.criteria_published, String::new()),
+            "criteria_published" => (tr!("Kriterien veröffentlicht"), facts.criteria_published, String::new()),
             "min_writers" => {
                 let n = g.n.unwrap_or(1);
                 (
-                    format!("Mindestens {n} Personen mit Schreibrecht"),
+                    tr!("Mindestens {} Personen mit Schreibrecht", n),
                     facts.n_writers >= n,
-                    format!("{} vorhanden", facts.n_writers),
+                    tr!("{} vorhanden", facts.n_writers),
                 )
             }
             "search_documented" => (
-                "Suche dokumentiert".to_string(),
+                tr!("Suche dokumentiert"),
                 facts.n_searches > 0,
                 match facts.n_searches {
-                    1 => "1 Suche".to_string(),
-                    n => format!("{n} Suchen"),
+                    1 => tr!("1 Suche"),
+                    n => tr!("{} Suchen", n),
                 },
             ),
             "all_fulltext_status" => (
-                "Jeder Volltext beschafft oder als nicht beschaffbar vermerkt".to_string(),
+                tr!("Jeder Volltext beschafft oder als nicht beschaffbar vermerkt"),
                 facts.fulltext_needed > 0
                     && facts.fulltext_retrieved + facts.fulltext_unavailable >= facts.fulltext_needed,
-                format!(
+                tr!(
                     "{} von {} beschafft, {} nicht beschaffbar",
-                    facts.fulltext_retrieved, facts.fulltext_needed, facts.fulltext_unavailable
+                    facts.fulltext_retrieved,
+                    facts.fulltext_needed,
+                    facts.fulltext_unavailable
                 ),
             ),
             "citation_search_documented" => (
-                "Zitationssuche festgehalten".to_string(),
+                tr!("Zitationssuche festgehalten"),
                 facts.n_citation_searches > 0,
                 match facts.n_citation_searches {
-                    0 => "noch keine Suche und kein Import mit dieser Herkunft".to_string(),
-                    1 => "1 Suche oder Import".to_string(),
-                    n => format!("{n} Suchen oder Importe"),
+                    0 => tr!("noch keine Suche und kein Import mit dieser Herkunft"),
+                    1 => tr!("1 Suche oder Import"),
+                    n => tr!("{} Suchen oder Importe", n),
                 },
             ),
             "all_records_assigned" => (
-                format!("Alle {} einer Runde zugeteilt", self.template.term("records")),
+                tr!("Alle {} einer Runde zugeteilt", self.template.term("records")),
                 facts.unassigned_records == 0,
-                format!("{} ohne Runde", facts.unassigned_records),
+                tr!("{} ohne Runde", facts.unassigned_records),
             ),
             "source_types_set" => (
-                format!("Jede eingeschlossene {} hat eine Quellenart", self.template.term("source")),
+                tr!("Jede eingeschlossene {} hat eine Quellenart", self.template.term("source")),
                 facts.n_sources > 0 && facts.sources_without_type == 0,
-                format!("{} von {} ohne Quellenart", facts.sources_without_type, facts.n_sources),
+                tr!("{} von {} ohne Quellenart", facts.sources_without_type, facts.n_sources),
             ),
             "no_unresolved_duplicates" => (
-                "Mögliche Dubletten entschieden".to_string(),
+                tr!("Mögliche Dubletten entschieden"),
                 facts.open_duplicates == 0,
-                format!("{} offen", facts.open_duplicates),
+                tr!("{} offen", facts.open_duplicates),
             ),
             _ => (
-                "Treffer importiert".to_string(),
+                tr!("Treffer importiert"),
                 facts.n_records > 0,
                 format!("{} {}", facts.n_records, self.template.term("records")),
             ),
@@ -645,18 +720,18 @@ impl Workflow {
     fn screening_check(&self, g: &GateCheck, result: Option<&CheckResult>) -> CheckView {
         let records = self.template.term("records");
         let label = match g.check.as_str() {
-            "agreement_min" => format!("Übereinstimmung mindestens {} %", g.percent.unwrap_or(100)),
-            "all_decided" => format!("Alle {records} entschieden"),
-            _ => "Keine offenen Konflikte".to_string(),
+            "agreement_min" => tr!("Übereinstimmung mindestens {} %", g.percent.unwrap_or(100)),
+            "all_decided" => tr!("Alle {} entschieden", records),
+            _ => tr!("Keine offenen Konflikte"),
         };
         let detail = match (g.check.as_str(), result) {
             (_, None) => String::new(),
             ("agreement_min", Some(r)) => match r.percent_x100 {
-                Some(p) => format!("{} % bei {} doppelt bewerteten {records}n", tenths(p), r.denominator),
-                None => format!("keine doppelt bewerteten {records}"),
+                Some(p) => tr!("{} % bei {} doppelt bewerteten {}n", tenths(p), r.denominator, records),
+                None => tr!("keine doppelt bewerteten {}", records),
             },
-            ("all_decided", Some(r)) => format!("{} von {}", r.numerator, r.denominator),
-            (_, Some(r)) => format!("{} offen", r.numerator),
+            ("all_decided", Some(r)) => tr!("{} von {}", r.numerator, r.denominator),
+            (_, Some(r)) => tr!("{} offen", r.numerator),
         };
         CheckView { check: g.check.clone(), label, passed: result.map(|r| r.passed), detail }
     }
@@ -669,21 +744,21 @@ impl Workflow {
         let (label, passed, detail) = match (g.check.as_str(), result) {
             ("form_confirmed", _) => {
                 let confirmed = facts.forms_confirmed.contains(station.form.as_deref().unwrap_or("charting"));
-                ("Formular von der Leitung bestätigt".to_string(), Some(confirmed), String::new())
+                (tr!("Formular von der Leitung bestätigt"), Some(confirmed), String::new())
             }
             ("all_sources_assigned", _) => {
                 let left = facts.sources_without_round.get(&station.key).copied().unwrap_or(0);
-                (format!("Alle {sources} einer Runde zugeteilt"), Some(left == 0), format!("{left} ohne Runde"))
+                (tr!("Alle {} einer Runde zugeteilt", sources), Some(left == 0), tr!("{} ohne Runde", left))
             }
             ("all_extracted", r) => (
-                format!("Alle {sources} extrahiert"),
+                tr!("Alle {} extrahiert", sources),
                 r.map(|r| r.passed),
-                r.map(|r| format!("{} von {}", r.numerator, r.denominator)).unwrap_or_default(),
+                r.map(|r| tr!("{} von {}", r.numerator, r.denominator)).unwrap_or_default(),
             ),
             (_, r) => (
-                "Keine offenen Abweichungen".to_string(),
+                tr!("Keine offenen Abweichungen"),
                 r.map(|r| r.passed),
-                r.map(|r| format!("{} offen", r.numerator)).unwrap_or_default(),
+                r.map(|r| tr!("{} offen", r.numerator)).unwrap_or_default(),
             ),
         };
         CheckView { check: g.check.clone(), label, passed, detail }
@@ -772,10 +847,12 @@ impl Workflow {
                         .map(|s| s.config.id)
                 });
                 StageDefaults {
+                    // Ein Vorschlag in der Sprache der Person, die die Stufe öffnet. Mit der Stufe kommt
+                    // der Name ins Log und bleibt dann, wie er ist.
                     name: if round > 1 && !station.free_rounds {
-                        format!("{} (Runde {round})", station.label)
+                        tr!("{} (Runde {})", shown(&station.label), round)
                     } else {
-                        station.label.clone()
+                        shown(&station.label).to_string()
                     },
                     round,
                     scope: match input.map(|i| i.scope.as_str()) {
@@ -792,8 +869,8 @@ impl Workflow {
             out.push(StationView {
                 key: station.key.clone(),
                 kind: station.kind.clone(),
-                label: station.label.clone(),
-                description: station.description.clone(),
+                label: shown(&station.label).to_string(),
+                description: shown(&station.description).to_string(),
                 tool: station.tool.clone(),
                 state,
                 available,
@@ -806,7 +883,7 @@ impl Workflow {
                 defaults,
             });
             if blocking && !done {
-                blockers.push(StationRef { key: station.key.clone(), label: station.label.clone() });
+                blockers.push(StationRef { key: station.key.clone(), label: shown(&station.label).to_string() });
             }
         }
         out
@@ -821,7 +898,10 @@ mod tests {
     #[test]
     fn builtin_templates_are_valid_and_differ() {
         let templates = builtin_templates();
-        assert_eq!(templates.iter().map(|t| t.key.as_str()).collect::<Vec<_>>(), ["jbi_scoping", "free"]);
+        assert_eq!(
+            templates.iter().map(|t| t.key.as_str()).collect::<Vec<_>>(),
+            ["jbi_scoping", "rapid_review", "state_of_the_art", "free"]
+        );
         let jbi = &templates[0];
         assert_eq!(jbi.stations.len(), 12);
         let pilot = jbi.station("pilot_title_abstract").unwrap();
@@ -829,7 +909,17 @@ mod tests {
         // Der Pilot bleibt einstimmig, auch wenn das Review sonst eine andere Regel wählt.
         assert!(!jbi.rules_for(pilot).decision_rule.editable);
         assert!(jbi.rules_for(jbi.station("title_abstract").unwrap()).decision_rule.editable);
-        assert!(templates[1].stations.iter().all(|s| s.gate.is_empty()), "der freie Ablauf sperrt nichts");
+        // Der Rapid Review kürzt ab, aber nicht im Pilot: Dort bleiben zwei unabhängige Stimmen.
+        let rapid = &templates[1];
+        assert_eq!(rapid.rules.decision_rule.value, "single_verified");
+        let pilot = rapid.station("pilot_title_abstract").unwrap();
+        let rules = rapid.rules_for(pilot);
+        assert_eq!((rules.decision_rule.value.as_str(), rules.decision_rule.editable), ("unanimous", false));
+        assert_eq!((rules.min_reviewers.value, rules.blind.value, pilot.gate[0].percent), (2, true, Some(80)));
+        for free in &templates[2..] {
+            assert!(free.stations.iter().all(|s| s.gate.is_empty()), "{} sperrt nichts", free.key);
+            assert_eq!(free.rules.min_reviewers.value, 1);
+        }
     }
 
     #[test]
@@ -859,6 +949,46 @@ mod tests {
             assert!(err.contains(expected), "{pointer}: {err}");
         }
         assert!(Template::parse(&json!({"key": "x"})).unwrap_err().contains("nicht lesbar"));
+    }
+
+    /// Jeder Text der mitgelieferten Vorlagen steht in jedem Katalog; Begriffe unter ihrem Vorsatz.
+    #[test]
+    fn template_texts_are_translated() {
+        let mut missing = Vec::new();
+        for language in &i18n::LANGUAGES[1..] {
+            let catalog = i18n::catalog(language.code).unwrap();
+            for mut t in builtin_templates() {
+                let mut texts: Vec<String> = t.terms.values().map(|term| format!("{TERM_CONTEXT}{term}")).collect();
+                texts.extend(t.texts_mut().into_iter().map(|text| text.clone()).filter(|text| !text.is_empty()));
+                for text in texts.into_iter().filter(|text| !catalog.contains_key(text)) {
+                    missing.push(format!("{} [{}]: {text}", t.key, language.code));
+                }
+            }
+        }
+        assert!(missing.is_empty(), "Ohne Übersetzung:\n{}", missing.join("\n"));
+    }
+
+    #[test]
+    fn view_is_translated_and_the_template_is_not() {
+        // Auf Deutsch ist die Ansicht die Vorlage, wie sie im Log steht.
+        for t in builtin_templates() {
+            assert_eq!(t.localized(), t);
+        }
+        i18n::with("en", || {
+            let mut own = builtin_template("jbi_scoping").unwrap();
+            own.name = "Unser Ablauf".into();
+            own.stations[0].label = "Eigene Station".into();
+            own.terms.insert("records".into(), "Dokumente".into());
+            let shown = own.localized();
+            // Eigene Texte haben keinen Katalogeintrag und bleiben stehen.
+            assert_eq!((shown.name.as_str(), shown.stations[0].label.as_str()), ("Unser Ablauf", "Eigene Station"));
+            assert_eq!(shown.term("records"), "Dokumente");
+            // Schlüssel und Regeln ändern sich nie, und die Vorlage selbst bleibt deutsch.
+            let keys = |t: &Template| t.stations.iter().map(|s| s.key.clone()).collect::<Vec<_>>();
+            assert_eq!((keys(&shown), &shown.rules), (keys(&own), &own.rules));
+            assert_eq!(builtin_template("jbi_scoping").unwrap().stations[1].label, "Suche");
+            assert_eq!(Workflow::build(&[]).template.name, "Freier Ablauf");
+        });
     }
 
     #[test]

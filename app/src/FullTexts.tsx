@@ -8,6 +8,7 @@ import {
   api, canManage, canVote, errorText, FileProblem, FileSuggestion, FullTextOverview, FullTextRow, ReviewDetail,
   ZoteroLibrary, ZoteroSuggestion,
 } from "./api";
+import { formatNumber, formatPercent, t, tn, tx } from "./i18n";
 import { PdfView } from "./PdfView";
 import { Banner, Empty, Group, Icon, Pill, Segmented, Stat } from "./ui";
 
@@ -15,13 +16,13 @@ type Run = (action: () => Promise<string | void>, done?: string) => Promise<void
 type Filter = "open" | "retrieved" | "unavailable" | "all";
 
 const BASIS: Record<string, string> = {
-  doi_metadata: "DOI in der Datei",
-  doi_filename: "DOI im Dateinamen",
-  title: "Titel im Dateinamen",
-  author_year: "Autor und Jahr im Dateinamen",
-  doi: "gleiche DOI",
+  doi_metadata: t("DOI in der Datei"),
+  doi_filename: t("DOI im Dateinamen"),
+  title: t("Titel im Dateinamen"),
+  author_year: t("Autor und Jahr im Dateinamen"),
+  doi: t("gleiche DOI"),
 };
-const PROBLEM: Record<string, string> = { missing: "Datei fehlt", changed: "Datei wurde ersetzt oder geändert" };
+const PROBLEM: Record<string, string> = { missing: t("Datei fehlt"), changed: t("Datei wurde ersetzt oder geändert") };
 
 function statusOf(row: FullTextRow): Filter {
   return row.fulltext ? row.fulltext.status : "open";
@@ -43,10 +44,10 @@ export function FullTextPreview({ reviewId, recordId, title, onClose }: { review
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
   return (
-    <div className="pdf-overlay" role="dialog" aria-label={`Volltext: ${title}`}>
+    <div className="pdf-overlay" role="dialog" aria-label={t("Volltext: {title}", { title })}>
       <div className="pdf-overlay-head">
         <strong>{title}</strong>
-        <button className="small" onClick={onClose}><Icon name="x" size={13} /> Schließen</button>
+        <button className="small" onClick={onClose}><Icon name="x" size={13} /> {t("Schließen")}</button>
       </div>
       {error && <Banner kind="error" onClose={() => setError("")}>{error}</Banner>}
       <PdfView load={load} onExternal={() => api.openFulltext(reviewId, recordId).catch((e) => setError(errorText(e)))} />
@@ -69,7 +70,7 @@ function Suggestions<T extends { record_id: string }>({ items, describe, onConfi
     setOff(next);
   };
   if (items.length === 0) {
-    return <p className="muted ft-none">Nichts gefunden, das zu einem offenen Eintrag passt. <button className="link" onClick={onDismiss}>Schließen</button></p>;
+    return <p className="muted ft-none">{t("Nichts gefunden, das zu einem offenen Eintrag passt.")} <button className="link" onClick={onDismiss}>{t("Schließen")}</button></p>;
   }
   return (
     <div className="ft-suggestions">
@@ -80,7 +81,7 @@ function Suggestions<T extends { record_id: string }>({ items, describe, onConfi
             <input type="checkbox" checked={!off.has(item.record_id)} onChange={() => toggle(item.record_id)} />
             <span>
               <span className="ft-file">{d.from}</span>
-              <span className="ft-arrow">gehört zu</span>
+              <span className="ft-arrow">{t("gehört zu")}</span>
               <span className="ft-title">{(item as unknown as { title: string }).title}</span>
               <span className="ft-meta"><Pill tone={d.sure ? "green" : "yellow"}>{d.basis}</Pill>{d.note && <span className="muted"> {d.note}</span>}</span>
             </span>
@@ -88,9 +89,9 @@ function Suggestions<T extends { record_id: string }>({ items, describe, onConfi
         );
       })}
       <div className="ft-confirm">
-        <span className="muted">Unsichere Vorschläge sind nicht angehakt. Nichts gilt, bevor du bestätigst.</span>
-        <button onClick={onDismiss}>Verwerfen</button>
-        <button className="primary" disabled={chosen.length === 0} onClick={() => onConfirm(chosen)}>{chosen.length} bestätigen</button>
+        <span className="muted">{t("Unsichere Vorschläge sind nicht angehakt. Nichts gilt, bevor du bestätigst.")}</span>
+        <button onClick={onDismiss}>{t("Verwerfen")}</button>
+        <button className="primary" disabled={chosen.length === 0} onClick={() => onConfirm(chosen)}>{t("{n} bestätigen", { n: chosen.length })}</button>
       </div>
     </div>
   );
@@ -141,24 +142,24 @@ export function FullTextTab({ review, run }: { review: ReviewDetail; run: Run })
   const count = (f: Filter) => data.rows.filter((r) => f === "all" || statusOf(r) === f).length;
 
   async function chooseFolder() {
-    const path = await open({ multiple: false, directory: true, title: "Ordner mit den Volltexten" });
-    if (typeof path === "string") await run(() => api.setFulltextFolder(review.id, path), "Ordner verknüpft.");
+    const path = await open({ multiple: false, directory: true, title: t("Ordner mit den Volltexten") });
+    if (typeof path === "string") await run(() => api.setFulltextFolder(review.id, path), t("Ordner verknüpft."));
   }
 
   async function chooseFile(row: FullTextRow) {
     const path = await open({ multiple: false, directory: false, defaultPath: data?.folder ?? undefined, filters: [{ name: "PDF", extensions: ["pdf"] }] });
-    if (typeof path === "string") await run(async () => void (await api.assignFulltexts(review.id, [{ record_id: row.record_id, path }])), "Volltext zugeordnet.");
+    if (typeof path === "string") await run(async () => void (await api.assignFulltexts(review.id, [{ record_id: row.record_id, path }])), t("Volltext zugeordnet."));
   }
 
   const confirmFiles = (chosen: FileSuggestion[]) => {
     setFiles(null);
-    return run(async () => void (await api.assignFulltexts(review.id, chosen.map((s) => ({ record_id: s.record_id, path: s.path })))), `${chosen.length} Volltexte zugeordnet.`);
+    return run(async () => void (await api.assignFulltexts(review.id, chosen.map((s) => ({ record_id: s.record_id, path: s.path })))), tn("{n} Volltext zugeordnet.", "{n} Volltexte zugeordnet.", chosen.length));
   };
   const confirmZotero = (chosen: ZoteroSuggestion[]) => {
     setZotero(null);
     return run(async () => {
       const n = await api.confirmZotero(review.id, chosen.map((s) => ({ record_id: s.record_id, item_key: s.item_key, attachment_key: s.attachment_key })));
-      return `${chosen.length} Einträge Zotero zugeordnet, ${n} davon mit PDF.`;
+      return t("{n} Einträge Zotero zugeordnet, {pdf} davon mit PDF.", { n: chosen.length, pdf: n });
     });
   };
   const linkZotero = () => {
@@ -168,43 +169,43 @@ export function FullTextTab({ review, run }: { review: ReviewDetail; run: Run })
     setLibraries(null);
     return run(() => api.linkZotero(review.id, {
       library_type: lib.library_type, library_id: lib.library_id, collection_key: col?.key ?? null, name: col ? `${lib.name} › ${col.name}` : lib.name,
-    }), "Zotero verknüpft.");
+    }), t("Zotero verknüpft."));
   };
   const saveReason = (row: FullTextRow) => {
     const text = reason;
     setReasonFor("");
     setReason("");
-    return run(() => api.fulltextUnavailable(review.id, row.record_id, text), "Als nicht beschaffbar vermerkt.");
+    return run(() => api.fulltextUnavailable(review.id, row.record_id, text), t("Als nicht beschaffbar vermerkt."));
   };
 
   return (
     <>
       {error && <Banner kind="error" onClose={() => setError("")}>{error}</Banner>}
       <div className="stats compact">
-        <Stat label="Brauchen einen Volltext" value={data.needed} detail="eingeschlossen nach Titel und Abstract" />
-        <Stat label="Beschafft" value={data.retrieved} tone="inc" />
-        <Stat label="Nicht beschaffbar" value={data.unavailable} tone="may" />
-        <Stat label="Offen" value={open_} tone="pen" />
+        <Stat label={t("Brauchen einen Volltext")} value={data.needed} detail={t("eingeschlossen nach Titel und Abstract")} />
+        <Stat label={t("Beschafft")} value={data.retrieved} tone="inc" />
+        <Stat label={t("Nicht beschaffbar")} value={data.unavailable} tone="may" />
+        <Stat label={t("Offen")} value={open_} tone="pen" />
       </div>
 
       <Group
-        title="Ordner"
-        footer="Wo der Ordner liegt, gilt nur für diesen Rechner und steht nicht im Log. Liegt er in einer geteilten Ablage, verknüpft jede Person ihn bei sich; zugeordnet wird nur einmal. Die App liest die Dateien und ändert nichts daran."
+        title={t("Ordner")}
+        footer={t("Wo der Ordner liegt, gilt nur für diesen Rechner und steht nicht im Log. Liegt er in einer geteilten Ablage, verknüpft jede Person ihn bei sich; zugeordnet wird nur einmal. Die App liest die Dateien und ändert nichts daran.")}
         action={
           <span className="ft-actions">
-            {data.folder && write && <button className="small" disabled={!!busy} onClick={() => look("ordner", () => api.fulltextSuggestions(review.id), setFiles)}><Icon name="search" size={13} /> {busy === "ordner" ? "Sucht …" : "Im Ordner suchen"}</button>}
-            {data.folder && <button className="small" disabled={!!busy} onClick={() => look("pruefen", () => api.verifyFulltexts(review.id), setProblems)}><Icon name="shield" size={13} /> {busy === "pruefen" ? "Prüft …" : "Dateien prüfen"}</button>}
-            <button className="small" onClick={chooseFolder}>{data.folder ? "Anderen Ordner wählen" : "Ordner wählen"}</button>
-            {data.folder && <button className="small" onClick={() => run(() => api.setFulltextFolder(review.id, null), "Verknüpfung gelöst.")}>Lösen</button>}
+            {data.folder && write && <button className="small" disabled={!!busy} onClick={() => look("ordner", () => api.fulltextSuggestions(review.id), setFiles)}><Icon name="search" size={13} /> {busy === "ordner" ? t("Sucht …") : t("Im Ordner suchen")}</button>}
+            {data.folder && <button className="small" disabled={!!busy} onClick={() => look("pruefen", () => api.verifyFulltexts(review.id), setProblems)}><Icon name="shield" size={13} /> {busy === "pruefen" ? t("Prüft …") : t("Dateien prüfen")}</button>}
+            <button className="small" onClick={chooseFolder}>{data.folder ? t("Anderen Ordner wählen") : t("Ordner wählen")}</button>
+            {data.folder && <button className="small" onClick={() => run(() => api.setFulltextFolder(review.id, null), t("Verknüpfung gelöst."))}>{t("Lösen")}</button>}
           </span>
         }
       >
         <p className="ft-folder">
-          {data.folder ? <><Icon name="file" size={14} /> <code>{data.folder}</code> {!data.folder_found && <Pill tone="red">nicht erreichbar</Pill>}</> : <span className="muted">Auf diesem Rechner ist kein Ordner verknüpft.</span>}
+          {data.folder ? <><Icon name="file" size={14} /> <code>{data.folder}</code> {!data.folder_found && <Pill tone="red">{t("nicht erreichbar")}</Pill>}</> : <span className="muted">{t("Auf diesem Rechner ist kein Ordner verknüpft.")}</span>}
         </p>
-        {files && <Suggestions items={files} onConfirm={confirmFiles} onDismiss={() => setFiles(null)} describe={(s) => ({ from: s.path, basis: BASIS[s.basis], sure: s.basis !== "author_year" && s.similarity >= 95, note: s.basis === "title" && s.similarity < 100 ? `${s.similarity} % gleich` : undefined })} />}
+        {files && <Suggestions items={files} onConfirm={confirmFiles} onDismiss={() => setFiles(null)} describe={(s) => ({ from: s.path, basis: BASIS[s.basis], sure: s.basis !== "author_year" && s.similarity >= 95, note: s.basis === "title" && s.similarity < 100 ? t("{percent} gleich", { percent: formatPercent(s.similarity) }) : undefined })} />}
         {problems && (problems.length === 0
-          ? <p className="muted ft-none">Alle zugeordneten Dateien sind vorhanden und unverändert. <button className="link" onClick={() => setProblems(null)}>Schließen</button></p>
+          ? <p className="muted ft-none">{t("Alle zugeordneten Dateien sind vorhanden und unverändert.")} <button className="link" onClick={() => setProblems(null)}>{t("Schließen")}</button></p>
           : (
             <ul className="ft-problems">
               {problems.map((p) => <li key={p.record_id}><Pill tone="red">{PROBLEM[p.problem]}</Pill> <code>{p.path}</code> <span className="muted">{p.title}</span></li>)}
@@ -214,86 +215,86 @@ export function FullTextTab({ review, run }: { review: ReviewDetail; run: Run })
 
       <Group
         title="Zotero"
-        footer="Gelesen wird über die lokale Schnittstelle von Zotero (ab Version 7; in den Zotero-Einstellungen unter „Erweitert“ einschalten). Die App schreibt nichts nach Zotero. Eine eigene Bibliothek kennt nur dieser Rechner; für das Team eignet sich eine Gruppenbibliothek."
+        footer={t("Gelesen wird über die lokale Schnittstelle von Zotero (ab Version 7; in den Zotero-Einstellungen unter „Erweitert“ einschalten). Die App schreibt nichts nach Zotero. Eine eigene Bibliothek kennt nur dieser Rechner; für das Team eignet sich eine Gruppenbibliothek.")}
         action={manage && (
           <span className="ft-actions">
-            {data.zotero && <button className="small" disabled={!!busy} onClick={() => look("zotero", () => api.zoteroSuggestions(review.id), setZotero)}><Icon name="search" size={13} /> {busy === "zotero" ? "Liest Zotero …" : "In Zotero suchen"}</button>}
+            {data.zotero && <button className="small" disabled={!!busy} onClick={() => look("zotero", () => api.zoteroSuggestions(review.id), setZotero)}><Icon name="search" size={13} /> {busy === "zotero" ? t("Liest Zotero …") : t("In Zotero suchen")}</button>}
             <button className="small" disabled={!!busy} onClick={() => look("bibliotheken", api.zoteroLibraries, (list) => { setLibraries(list); setLibrary(list[0] ? `${list[0].library_type}:${list[0].library_id}` : ""); setCollection(""); })}>
-              {busy === "bibliotheken" ? "Fragt Zotero …" : data.zotero ? "Andere Bibliothek wählen" : "Bibliothek wählen"}
+              {busy === "bibliotheken" ? t("Fragt Zotero …") : data.zotero ? t("Andere Bibliothek wählen") : t("Bibliothek wählen")}
             </button>
           </span>
         )}
       >
-        <p className="ft-folder">{data.zotero ? <>Verknüpft mit <strong>{data.zotero.name}</strong> <Pill>{data.zotero.library_type === "group" ? "Gruppenbibliothek" : "eigene Bibliothek"}</Pill></> : <span className="muted">Keine Bibliothek verknüpft.</span>}</p>
+        <p className="ft-folder">{data.zotero ? <>{tx("Verknüpft mit {name}", { name: <strong>{data.zotero.name}</strong> })} <Pill>{data.zotero.library_type === "group" ? t("Gruppenbibliothek") : t("eigene Bibliothek")}</Pill></> : <span className="muted">{t("Keine Bibliothek verknüpft.")}</span>}</p>
         {libraries && (
           <div className="ft-link">
-            <select value={library} onChange={(e) => { setLibrary(e.target.value); setCollection(""); }} aria-label="Bibliothek">
+            <select value={library} onChange={(e) => { setLibrary(e.target.value); setCollection(""); }} aria-label={t("Bibliothek")}>
               {libraries.map((l) => <option key={`${l.library_type}:${l.library_id}`} value={`${l.library_type}:${l.library_id}`}>{l.name}</option>)}
             </select>
-            <select value={collection} onChange={(e) => setCollection(e.target.value)} aria-label="Collection">
-              <option value="">ganze Bibliothek</option>
+            <select value={collection} onChange={(e) => setCollection(e.target.value)} aria-label={t("Collection")}>
+              <option value="">{t("ganze Bibliothek")}</option>
               {(libraries.find((l) => `${l.library_type}:${l.library_id}` === library)?.collections ?? []).map((c) => <option key={c.key} value={c.key}>{c.name}</option>)}
             </select>
-            <button onClick={() => setLibraries(null)}>Abbrechen</button>
-            <button className="primary" onClick={linkZotero} disabled={!library}>Verknüpfen</button>
+            <button onClick={() => setLibraries(null)}>{t("Abbrechen")}</button>
+            <button className="primary" onClick={linkZotero} disabled={!library}>{t("Verknüpfen")}</button>
           </div>
         )}
-        {zotero && <Suggestions items={zotero} onConfirm={confirmZotero} onDismiss={() => setZotero(null)} describe={(s) => ({ from: s.item_title || s.item_key, basis: BASIS[s.basis], sure: true, note: s.attachment_key ? undefined : "ohne PDF in Zotero: bleibt offen" })} />}
+        {zotero && <Suggestions items={zotero} onConfirm={confirmZotero} onDismiss={() => setZotero(null)} describe={(s) => ({ from: s.item_title || s.item_key, basis: BASIS[s.basis], sure: true, note: s.attachment_key ? undefined : t("ohne PDF in Zotero: bleibt offen") })} />}
       </Group>
 
-      <Group title="Einträge" action={<input className="ft-query" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Titel oder Autor" aria-label="Einträge filtern" />}>
+      <Group title={t("Einträge")} action={<input className="ft-query" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("Titel oder Autor")} aria-label={t("Einträge filtern")} />}>
         <div className="ft-filter">
           <Segmented<Filter>
-            label="Status"
+            label={t("Status")}
             value={filter}
             onChange={setFilter}
             options={[
-              { value: "open", label: `Offen (${count("open")})` },
-              { value: "retrieved", label: `Beschafft (${count("retrieved")})` },
-              { value: "unavailable", label: `Nicht beschaffbar (${count("unavailable")})` },
-              { value: "all", label: `Alle (${count("all")})` },
+              { value: "open", label: t("Offen ({n})", { n: count("open") }) },
+              { value: "retrieved", label: t("Beschafft ({n})", { n: count("retrieved") }) },
+              { value: "unavailable", label: t("Nicht beschaffbar ({n})", { n: count("unavailable") }) },
+              { value: "all", label: t("Alle ({n})", { n: count("all") }) },
             ]}
           />
         </div>
         {data.rows.length === 0 && (
-          <Empty icon="file" title="Noch nichts zu beschaffen">Sobald Titel und Abstract entblindet oder abgeschlossen sind, stehen hier die eingeschlossenen Einträge.</Empty>
+          <Empty icon="file" title={t("Noch nichts zu beschaffen")}>{t("Sobald Titel und Abstract entblindet oder abgeschlossen sind, stehen hier die eingeschlossenen Einträge.")}</Empty>
         )}
         {rows.map((row) => {
           const ft = row.fulltext;
           return (
             <div className="ft-row" key={row.record_id}>
               <div className="ft-row-main">
-                <p className="ft-row-title">{row.title || "(ohne Titel)"}</p>
+                <p className="ft-row-title">{row.title || t("(ohne Titel)")}</p>
                 <p className="muted">
                   {byline(row.authors, row.year)}{row.doi && ` · DOI ${row.doi}`}
-                  {!row.needed && " · gehört nicht (mehr) zu den Eingeschlossenen"}
+                  {!row.needed && ` · ${t("gehört nicht (mehr) zu den Eingeschlossenen")}`}
                 </p>
                 {ft?.status === "retrieved" && (
                   <p className="ft-where">
-                    <Pill tone={row.file === "missing" ? "red" : "green"}>{row.file === "missing" ? "Datei fehlt hier" : ft.origin === "zotero" ? "Zotero" : "Ordner"}</Pill>{" "}
-                    <code>{ft.origin === "zotero" ? `Anhang ${ft.zotero_key}` : ft.path}</code> <span className="muted">{(ft.size / 1024 / 1024).toLocaleString("de-DE", { maximumFractionDigits: 1 })} MB</span>
+                    <Pill tone={row.file === "missing" ? "red" : "green"}>{row.file === "missing" ? t("Datei fehlt hier") : ft.origin === "zotero" ? "Zotero" : t("Ordner")}</Pill>{" "}
+                    <code>{ft.origin === "zotero" ? t("Anhang {key}", { key: ft.zotero_key }) : ft.path}</code> <span className="muted">{formatNumber(ft.size / 1024 / 1024, 1)} MB</span>
                   </p>
                 )}
-                {ft?.status === "unavailable" && <p className="ft-where"><Pill tone="yellow">Nicht beschaffbar</Pill> {ft.reason}</p>}
-                {!ft && row.zotero_item && <p className="ft-where"><Pill>Zotero</Pill> <span className="muted">zugeordnet, dort ohne PDF</span></p>}
+                {ft?.status === "unavailable" && <p className="ft-where"><Pill tone="yellow">{t("Nicht beschaffbar")}</Pill> {ft.reason}</p>}
+                {!ft && row.zotero_item && <p className="ft-where"><Pill>Zotero</Pill> <span className="muted">{t("zugeordnet, dort ohne PDF")}</span></p>}
                 {reasonFor === row.record_id && (
                   <form className="ft-reason" onSubmit={(e) => { e.preventDefault(); saveReason(row); }}>
-                    <input autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Grund, z. B. Fernleihe erfolglos, Autorin nicht erreichbar" aria-label="Grund" required />
-                    <button type="button" onClick={() => setReasonFor("")}>Abbrechen</button>
-                    <button className="primary" type="submit">Vermerken</button>
+                    <input autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t("Grund, z. B. Fernleihe erfolglos, Autorin nicht erreichbar")} aria-label={t("Grund")} required />
+                    <button type="button" onClick={() => setReasonFor("")}>{t("Abbrechen")}</button>
+                    <button className="primary" type="submit">{t("Vermerken")}</button>
                   </form>
                 )}
               </div>
               <div className="ft-row-actions">
-                {ft?.status === "retrieved" && <button className="small" onClick={() => setPreview(row)}><Icon name="eye" size={13} /> Ansehen</button>}
-                {write && data.folder && <button className="small" onClick={() => chooseFile(row)}>{ft?.status === "retrieved" ? "Andere Datei" : "Datei zuordnen"}</button>}
-                {write && !ft && <button className="small" onClick={() => { setReasonFor(row.record_id); setReason(""); }}>Nicht beschaffbar</button>}
-                {write && ft && <button className="small" onClick={() => run(() => api.resetFulltext(review.id, row.record_id), "Zurückgenommen; der Eintrag ist wieder offen.")}>Zurücknehmen</button>}
+                {ft?.status === "retrieved" && <button className="small" onClick={() => setPreview(row)}><Icon name="eye" size={13} /> {t("Ansehen")}</button>}
+                {write && data.folder && <button className="small" onClick={() => chooseFile(row)}>{ft?.status === "retrieved" ? t("Andere Datei") : t("Datei zuordnen")}</button>}
+                {write && !ft && <button className="small" onClick={() => { setReasonFor(row.record_id); setReason(""); }}>{t("Nicht beschaffbar")}</button>}
+                {write && ft && <button className="small" onClick={() => run(() => api.resetFulltext(review.id, row.record_id), t("Zurückgenommen; der Eintrag ist wieder offen."))}>{t("Zurücknehmen")}</button>}
               </div>
             </div>
           );
         })}
-        {data.rows.length > 0 && rows.length === 0 && <p className="muted ft-none">Kein Eintrag passt zu diesem Filter.</p>}
+        {data.rows.length > 0 && rows.length === 0 && <p className="muted ft-none">{t("Kein Eintrag passt zu diesem Filter.")}</p>}
       </Group>
 
       {preview && <FullTextPreview reviewId={review.id} recordId={preview.record_id} title={preview.title} onClose={() => setPreview(null)} />}

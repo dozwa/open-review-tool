@@ -2,6 +2,8 @@
 
 import React from "react";
 
+import { formatPercent, LanguageCode, LANGUAGES, t } from "./i18n";
+
 const ICONS: Record<string, React.ReactNode> = {
   stack: <><path d="m12 3 9 5-9 5-9-5 9-5Z" /><path d="m3 13 9 5 9-5" /></>,
   exchange: <><path d="M7 4 3 8l4 4" /><path d="M3 8h13" /><path d="m17 20 4-4-4-4" /><path d="M21 16H8" /></>,
@@ -24,6 +26,9 @@ const ICONS: Record<string, React.ReactNode> = {
   check: <path d="m5 12 4.5 4.5L19 7" />,
   x: <><path d="M6 6l12 12" /><path d="M18 6 6 18" /></>,
   help: <><circle cx="12" cy="12" r="9" /><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6" /><circle cx="12" cy="17" r=".6" /></>,
+  globe: <><circle cx="12" cy="12" r="9" /><path d="M3 12h18" /><path d="M12 3c2.6 2.8 3.9 5.8 3.9 9s-1.300 6.2-3.9 9c-2.6-2.8-3.9-5.800-3.9-9S9.400 5.800 12 3Z" /></>,
+  book: <><path d="M5 4.5h10.5a3 3 0 0 1 3 3V20H8a3 3 0 0 1-3-3V4.5Z" /><path d="M5 17a3 3 0 0 1 3-3h10.5" /></>,
+  pen: <><path d="m4 20 1-4.5L16.5 4a2.1 2.1 0 0 1 3 3L8 18.5 4 20Z" /><path d="m14.5 6 3 3" /></>,
   csv: <><path d="M14 3H6v18h12V7l-4-4Z" /><path d="M9 13h6" /><path d="M9 17h6" /></>,
 };
 
@@ -46,11 +51,13 @@ export function Icon({ name, size = 16 }: { name: keyof typeof ICONS | string; s
   );
 }
 
-export function PageHeader({ title, subtitle, children, back }: {
+export function PageHeader({ title, subtitle, children, back, help }: {
   title: string;
   subtitle?: React.ReactNode;
   children?: React.ReactNode;
   back?: React.ReactNode;
+  /** Steht ganz rechts oben, etwa das „?“ zur Leitlinie. */
+  help?: React.ReactNode;
 }) {
   return (
     <header className="page-header">
@@ -60,7 +67,7 @@ export function PageHeader({ title, subtitle, children, back }: {
           <h1>{title}</h1>
           {subtitle && <p className="subtitle">{subtitle}</p>}
         </div>
-        {children && <div className="toolbar">{children}</div>}
+        {(children || help) && <div className="toolbar">{children}{help}</div>}
       </div>
     </header>
   );
@@ -90,15 +97,17 @@ export function Row({ children, className = "" }: { children: React.ReactNode; c
   return <div className={`row ${className}`}>{children}</div>;
 }
 
+// Farbe einer Pille nach ihrem Text, in der Sprache der Oberfläche und klein geschrieben.
 const TONE: Record<string, string> = {
-  verblindet: "violet", entblindet: "blue", offen: "green", geschlossen: "gray",
+  [t("Verblindet").toLowerCase()]: "violet", [t("Entblindet").toLowerCase()]: "blue",
+  [t("Offen").toLowerCase()]: "green", [t("Geschlossen").toLowerCase()]: "gray",
   owner: "blue", admin: "blue", reviewer: "green", viewer: "gray",
-  fertig: "green", fehlgeschlagen: "red", läuft: "yellow",
+  [t("fertig")]: "green", [t("fehlgeschlagen")]: "red", [t("läuft")]: "yellow",
 };
 
 export function Pill({ children, tone }: { children: React.ReactNode; tone?: string }) {
-  const t = tone ?? TONE[String(children).toLowerCase()] ?? "gray";
-  return <span className={`pill pill-${t}`}>{children}</span>;
+  const resolved = tone ?? TONE[String(children).toLowerCase()] ?? "gray";
+  return <span className={`pill pill-${resolved}`}>{children}</span>;
 }
 
 export function Banner({ kind, children, onClose }: { kind: "error" | "notice"; children: React.ReactNode; onClose?: () => void }) {
@@ -107,7 +116,7 @@ export function Banner({ kind, children, onClose }: { kind: "error" | "notice"; 
       <Icon name={kind === "error" ? "x" : "check"} />
       <span>{children}</span>
       {onClose && (
-        <button className="plain" onClick={onClose} aria-label="Schließen">
+        <button className="plain" onClick={onClose} aria-label={t("Schließen")}>
           <Icon name="x" size={14} />
         </button>
       )}
@@ -165,17 +174,17 @@ export function Avatar({ name, size = 28 }: { name: string; size?: number }) {
 export const DECISION_PARTS = [
   { key: "include", label: "Include", tone: "inc" },
   { key: "maybe", label: "Maybe", tone: "may" },
-  { key: "needs_clarification", label: "Zur Klärung", tone: "cla" },
-  { key: "disagreement", label: "Widerspruch", tone: "dis" },
+  { key: "needs_clarification", label: t("Zur Klärung"), tone: "cla" },
+  { key: "disagreement", label: t("Widerspruch"), tone: "dis" },
   { key: "exclude", label: "Exclude", tone: "exc" },
-  { key: "pending", label: "Offen", tone: "pen" },
+  { key: "pending", label: t("Offen"), tone: "pen" },
 ] as const;
 
 export function DecisionBar({ counts }: { counts: Record<string, number> }) {
   const total = DECISION_PARTS.reduce((s, p) => s + (counts[p.key] ?? 0), 0);
   const label = DECISION_PARTS.map((p) => `${p.label} ${counts[p.key] ?? 0}`).join(", ");
   return (
-    <div className="decision-bar" role="img" aria-label={`Entscheidungen: ${label}`}>
+    <div className="decision-bar" role="img" aria-label={t("Entscheidungen: {list}", { list: label })}>
       {total > 0 &&
         DECISION_PARTS.filter((p) => (counts[p.key] ?? 0) > 0).map((p) => {
           const n = counts[p.key] ?? 0;
@@ -184,7 +193,7 @@ export function DecisionBar({ counts }: { counts: Record<string, number> }) {
               key={p.key}
               className={`seg seg-${p.tone}`}
               style={{ flexGrow: n }}
-              title={`${p.label}: ${n} (${Math.round((n / total) * 100)} %)`}
+              title={`${p.label}: ${n} (${formatPercent(Math.round((n / total) * 100))})`}
             />
           );
         })}
@@ -207,4 +216,13 @@ export function Stat({ label, value, detail, tone }: { label: string; value: Rea
 
 export function Kbd({ children }: { children: React.ReactNode }) {
   return <kbd>{children}</kbd>;
+}
+
+/** Auswahl einer Sprache der App. */
+export function LanguageSelect({ value, onChange, label }: { value: LanguageCode; onChange: (code: LanguageCode) => void; label: string }) {
+  return (
+    <select className="language-select" value={value} aria-label={label} title={label} onChange={(e) => onChange(e.target.value as LanguageCode)}>
+      {LANGUAGES.map((l) => <option key={l.code} value={l.code}>{l.name}</option>)}
+    </select>
+  );
 }

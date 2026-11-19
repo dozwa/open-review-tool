@@ -1,0 +1,343 @@
+{
+  "key": "jbi_scoping",
+  "title": "JBI Scoping Review",
+  "summary": "Summary of the JBI Manual for Evidence Synthesis, chapter 10 (scoping reviews), in our own words. The original is authoritative; every entry points to its section.",
+  "sources": [
+    {
+      "key": "jbi",
+      "citation": "JBI Manual for Evidence Synthesis, chapter 10: Scoping reviews. JBI, 2024 edition.",
+      "url": "https://jbi-global.atlassian.net/wiki/spaces/MANUAL",
+      "license": "",
+      "accessed": "2026-11-19"
+    },
+    {
+      "key": "peters2020",
+      "citation": "Peters MDJ, Marnie C, Tricco AC, et al. Updated methodological guidance for the conduct of scoping reviews. JBI Evid Synth 2020;18(10):2119–2126.",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/33038124/",
+      "license": "",
+      "accessed": "2026-11-19"
+    }
+  ],
+  "entries": [
+    {
+      "id": "protocol",
+      "title": "Protocol",
+      "source": "jbi",
+      "section": "10.2.2–10.2.5",
+      "url": "https://jbi-global.atlassian.net/wiki/spaces/MANUAL/pages/355862729",
+      "text": [
+        "A protocol comes before the review. It sets out the review question, the criteria by population, concept and context, the source types that are eligible and the planned approach to searching, selection, extraction and presentation."
+      ],
+      "points": [
+        "Criteria follow PCC; the source type is a criterion of its own.",
+        "Record who takes on which task.",
+        "Record how disagreement is resolved."
+      ],
+      "stations": [
+        "protocol"
+      ],
+      "areas": [
+        "criteria",
+        "members",
+        "registration"
+      ]
+    },
+    {
+      "id": "registration",
+      "title": "Registering the protocol",
+      "source": "peters2020",
+      "section": "",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/33038124/",
+      "text": [
+        "The protocol should be publicly available before the review starts, through a registry such as the Open Science Framework or as a publication. PROSPERO does not accept scoping reviews.",
+        "Anything that later departs from the protocol is named in the report, with reasons."
+      ],
+      "points": [],
+      "stations": [
+        "protocol"
+      ],
+      "areas": [
+        "registration",
+        "report"
+      ]
+    },
+    {
+      "id": "search",
+      "title": "Search",
+      "source": "jbi",
+      "section": "10.2.6",
+      "url": "https://jbi-global.atlassian.net/wiki/spaces/MANUAL/pages/355862749",
+      "text": [
+        "The search is as thorough as for a systematic review; for the details the chapter refers to section 2.4 of the manual. The search may evolve along the way, and every version is recorded."
+      ],
+      "points": [
+        "Plan for grey literature.",
+        "For web searches, decide in advance how many hits will be looked at.",
+        "The stopping rule is part of the protocol.",
+        "Document the search string, date and limits for each source."
+      ],
+      "stations": [
+        "search"
+      ],
+      "areas": [
+        "search"
+      ]
+    },
+    {
+      "id": "selection_steps",
+      "title": "Selection in six steps",
+      "source": "jbi",
+      "section": "10.2.7",
+      "url": "https://jbi-global.atlassian.net/wiki/spaces/MANUAL/pages/355862769",
+      "text": [
+        "Selection runs in a fixed order and is reported so that every number can be traced."
+      ],
+      "points": [
+        "Collect the hits from all sources.",
+        "Remove duplicates and count them.",
+        "Check titles and abstracts.",
+        "Check full texts.",
+        "Record the exclusion reasons at full text and report them as an appendix.",
+        "Search citations forwards and backwards until nothing new turns up."
+      ],
+      "stations": [
+        "import",
+        "title_abstract",
+        "fulltext"
+      ],
+      "areas": [
+        "imports"
+      ]
+    },
+    {
+      "id": "reviewers",
+      "title": "How many people select",
+      "source": "jbi",
+      "section": "10.2.7",
+      "url": "https://jbi-global.atlassian.net/wiki/spaces/MANUAL/pages/355862769",
+      "text": [
+        "Ideally two people screen every record independently. Shortened procedures are also permitted; the report names them as a limitation. When in doubt, include."
+      ],
+      "points": [
+        "One person screens, a second checks a sample.",
+        "One person screens, a second checks all exclusions.",
+        "One vote is enough to include, an exclusion needs two votes.",
+        "One person entirely alone is considered defensible only for rapid reviews."
+      ],
+      "stations": [
+        "title_abstract",
+        "fulltext"
+      ],
+      "areas": []
+    },
+    {
+      "id": "pilot",
+      "title": "Piloting the selection",
+      "source": "jbi",
+      "section": "10.2.7.1",
+      "url": "https://jbi-global.atlassian.net/wiki/spaces/MANUAL/pages/2049540102",
+      "text": [
+        "Before selection begins, the whole team tests the criteria on a random sample of 25 titles and abstracts."
+      ],
+      "points": [
+        "Everyone screens the same records independently.",
+        "Discuss the differences, adjust the criteria and guidance notes.",
+        "Selection only starts once agreement reaches 75%; otherwise another round follows."
+      ],
+      "stations": [
+        "pilot_title_abstract"
+      ],
+      "areas": [
+        "criteria"
+      ]
+    },
+    {
+      "id": "disagreement",
+      "title": "Resolving disagreement",
+      "source": "jbi",
+      "section": "10.2.7.1",
+      "url": "https://jbi-global.atlassian.net/wiki/spaces/MANUAL/pages/2049540102",
+      "text": [
+        "The two people resolve their differences by discussion, or a third person decides. This third person has neither screened nor extracted the record themselves. The chosen approach is stated in the protocol and in the report."
+      ],
+      "points": [],
+      "stations": [
+        "pilot_title_abstract",
+        "title_abstract",
+        "fulltext",
+        "charting"
+      ],
+      "areas": []
+    },
+    {
+      "id": "fulltext",
+      "title": "Full texts and exclusion reasons",
+      "source": "jbi",
+      "section": "10.2.7",
+      "url": "https://jbi-global.atlassian.net/wiki/spaces/MANUAL/pages/355862769",
+      "text": [
+        "The full text is retrieved for every record that passes title and abstract. What cannot be retrieved is counted and reported. Every record excluded at full text gets a reason; the list belongs in the appendix."
+      ],
+      "points": [],
+      "stations": [
+        "fulltext_retrieval",
+        "fulltext"
+      ],
+      "areas": [
+        "fulltext"
+      ]
+    },
+    {
+      "id": "citation_search",
+      "title": "Citation search",
+      "source": "jbi",
+      "section": "10.2.7",
+      "url": "https://jbi-global.atlassian.net/wiki/spaces/MANUAL/pages/355862769",
+      "text": [
+        "The reference lists of the included sources and the works that cite them are searched. New hits go through the same selection. This is repeated until nothing new is added."
+      ],
+      "points": [],
+      "stations": [
+        "citation_search"
+      ],
+      "areas": []
+    },
+    {
+      "id": "double_counting",
+      "title": "Avoiding double counting",
+      "source": "jbi",
+      "section": "10.2.10.1",
+      "url": "https://jbi-global.atlassian.net/wiki/spaces/MANUAL/pages/2050392084",
+      "text": [
+        "Several publications on the same sample count as one source. Where evidence syntheses are included, the report discloses where they overlap with included primary studies."
+      ],
+      "points": [],
+      "stations": [
+        "bundling"
+      ],
+      "areas": [
+        "sources"
+      ]
+    },
+    {
+      "id": "appraisal",
+      "title": "Critical appraisal",
+      "source": "jbi",
+      "section": "10.2.8",
+      "url": "https://jbi-global.atlassian.net/wiki/spaces/MANUAL/pages/355862791",
+      "text": [
+        "An appraisal of methodological quality is not part of a scoping review. If you need one all the same, report it descriptively and add the instrument to the extraction table."
+      ],
+      "points": [],
+      "stations": [
+        "charting"
+      ],
+      "areas": [
+        "forms"
+      ]
+    },
+    {
+      "id": "extraction",
+      "title": "Extraction",
+      "source": "jbi",
+      "section": "10.2.9",
+      "url": "https://jbi-global.atlassian.net/wiki/spaces/MANUAL/pages/355862811",
+      "text": [
+        "Extraction uses a form that gives instructions for every field: name, description, format and possible values. Closed answers are preferable to open ones.",
+        "Ideally two people extract independently. If only one person extracts and a second checks, this has to be named as a limitation."
+      ],
+      "points": [],
+      "stations": [
+        "charting"
+      ],
+      "areas": [
+        "forms"
+      ]
+    },
+    {
+      "id": "form_changes",
+      "title": "Changes to the form",
+      "source": "jbi",
+      "section": "10.2.9.1",
+      "url": "https://jbi-global.atlassian.net/wiki/spaces/MANUAL/pages/2051637250",
+      "text": [
+        "The form is adjusted during the pilot. Later changes are deviations from the protocol and are reported with reasons."
+      ],
+      "points": [],
+      "stations": [
+        "charting_pilot",
+        "charting"
+      ],
+      "areas": [
+        "forms"
+      ]
+    },
+    {
+      "id": "extraction_pilot",
+      "title": "Piloting the extraction",
+      "source": "jbi",
+      "section": "10.2.9.2",
+      "url": "https://jbi-global.atlassian.net/wiki/spaces/MANUAL/pages/2051473426",
+      "text": [
+        "Everyone who extracts works independently through at least two or three sources per source type. The group then discusses the form. The manual lists five questions to check for this, among them the time one source takes."
+      ],
+      "points": [],
+      "stations": [
+        "charting_pilot"
+      ],
+      "areas": []
+    },
+    {
+      "id": "analysis",
+      "title": "Analysis and presentation",
+      "source": "jbi",
+      "section": "10.2.10–10.2.11",
+      "url": "https://jbi-global.atlassian.net/wiki/spaces/MANUAL/pages/2050523146",
+      "text": [
+        "For every question and every field, decide in advance in which format the data come, how they are analysed and how they are presented. Frequencies and a simple content analysis are usual. A meta-analysis has no place in a scoping review."
+      ],
+      "points": [],
+      "stations": [
+        "charting",
+        "report"
+      ],
+      "areas": [
+        "forms",
+        "report"
+      ]
+    },
+    {
+      "id": "reporting",
+      "title": "Report",
+      "source": "jbi",
+      "section": "10.3",
+      "url": "https://jbi-global.atlassian.net/wiki/spaces/MANUAL/pages/355862853",
+      "text": [
+        "Reporting follows PRISMA-ScR, with a flow diagram, the search strategy for each source and the deviations from the protocol. A new version of the checklist has been announced for 2026."
+      ],
+      "points": [],
+      "stations": [
+        "report"
+      ],
+      "areas": [
+        "report"
+      ]
+    },
+    {
+      "id": "update",
+      "title": "Update",
+      "source": "jbi",
+      "section": "10.4",
+      "url": "https://jbi-global.atlassian.net/wiki/spaces/MANUAL/pages/355863308",
+      "text": [
+        "For an update the search is repeated. Criteria and approach stay the same; whatever does change is documented."
+      ],
+      "points": [],
+      "stations": [],
+      "areas": [
+        "search",
+        "report"
+      ]
+    }
+  ]
+}

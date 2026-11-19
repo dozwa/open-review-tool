@@ -11,6 +11,7 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 
 use crate::error::{invalid, Result};
+use crate::tr;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct Item {
@@ -46,7 +47,7 @@ pub fn detect_format(filename: &str, text: &str) -> Result<&'static str> {
     if text.lines().any(|l| l.starts_with("TY  - ")) {
         return Ok("ris");
     }
-    Err(invalid("Format nicht erkannt. Unterstützt werden RIS, BibTeX und das PubMed-Format (nbib)."))
+    Err(invalid(tr!("Format nicht erkannt. Unterstützt werden RIS, BibTeX und das PubMed-Format (nbib).")))
 }
 
 pub fn parse(format: &str, text: &str) -> Result<Vec<Item>> {
@@ -54,7 +55,7 @@ pub fn parse(format: &str, text: &str) -> Result<Vec<Item>> {
         "ris" => Ok(parse_ris(text)),
         "bibtex" => parse_bibtex(text),
         "nbib" => Ok(parse_nbib(text)),
-        other => Err(invalid(format!("Unbekanntes Format: {other}"))),
+        other => Err(invalid(tr!("Unbekanntes Format: {}", other))),
     }
 }
 
@@ -300,7 +301,7 @@ pub fn parse_bibtex(text: &str) -> Result<Vec<Item>> {
                 skip_ws(&chars, &mut i);
             }
             if i >= chars.len() {
-                return Err(invalid(format!("BibTeX-Eintrag {key} ist nicht abgeschlossen.")));
+                return Err(invalid(tr!("BibTeX-Eintrag {} ist nicht abgeschlossen.", key)));
             }
             if chars[i] == close {
                 i += 1;
@@ -313,7 +314,7 @@ pub fn parse_bibtex(text: &str) -> Result<Vec<Item>> {
             let name: String = chars[name_start..i].iter().collect::<String>().to_lowercase();
             skip_ws(&chars, &mut i);
             if i >= chars.len() || chars[i] != '=' {
-                return Err(invalid(format!("BibTeX-Eintrag {key}: nach dem Feld „{name}“ fehlt „=“.")));
+                return Err(invalid(tr!("BibTeX-Eintrag {}: nach dem Feld „{}“ fehlt „=“.", key, name)));
             }
             i += 1;
             let value = read_value(&chars, &mut i, close)?;
@@ -349,7 +350,7 @@ fn read_value(chars: &[char], i: &mut usize, close: char) -> Result<String> {
     loop {
         skip_ws(chars, i);
         if *i >= chars.len() {
-            return Err(invalid("BibTeX: Feldwert ist nicht abgeschlossen."));
+            return Err(invalid(tr!("BibTeX: Feldwert ist nicht abgeschlossen.")));
         }
         match chars[*i] {
             '{' => {
@@ -369,7 +370,7 @@ fn read_value(chars: &[char], i: &mut usize, close: char) -> Result<String> {
                     *i += 1;
                 }
                 if *i >= chars.len() {
-                    return Err(invalid("BibTeX: geschweifte Klammer nicht geschlossen."));
+                    return Err(invalid(tr!("BibTeX: geschweifte Klammer nicht geschlossen.")));
                 }
                 *i += 1;
             }
@@ -386,7 +387,7 @@ fn read_value(chars: &[char], i: &mut usize, close: char) -> Result<String> {
                     *i += 1;
                 }
                 if *i >= chars.len() {
-                    return Err(invalid("BibTeX: Anführungszeichen nicht geschlossen."));
+                    return Err(invalid(tr!("BibTeX: Anführungszeichen nicht geschlossen.")));
                 }
                 *i += 1;
             }

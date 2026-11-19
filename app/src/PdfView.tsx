@@ -8,6 +8,7 @@ import workerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
 import "pdfjs-dist/web/pdf_viewer.css";
 
 import { errorText } from "./api";
+import { formatPercent, t, tn } from "./i18n";
 import { Banner, Icon } from "./ui";
 
 GlobalWorkerOptions.workerSrc = workerUrl;
@@ -204,20 +205,20 @@ export function PdfView({ load, onExternal }: { load: () => Promise<ArrayBuffer>
   return (
     <div className="pdf-view">
       <div className="pdf-bar">
-        <span className="pdf-pages">{doc ? `Seite ${page} von ${doc.numPages}` : "Lädt …"}</span>
+        <span className="pdf-pages">{doc ? t("Seite {page} von {total}", { page, total: doc.numPages }) : t("Lädt …")}</span>
         <span className="pdf-zoom">
-          <button className="small" onClick={() => step(-1)} aria-label="Verkleinern" disabled={!doc}>−</button>
-          <button className="small" onClick={() => setZoom(null)} aria-pressed={zoom === null} disabled={!doc} title="An die Breite anpassen">{Math.round(scale * 100)} %</button>
-          <button className="small" onClick={() => step(1)} aria-label="Vergrößern" disabled={!doc}>+</button>
+          <button className="small" onClick={() => step(-1)} aria-label={t("Verkleinern")} disabled={!doc}>−</button>
+          <button className="small" onClick={() => setZoom(null)} aria-pressed={zoom === null} disabled={!doc} title={t("An die Breite anpassen")}>{formatPercent(Math.round(scale * 100))}</button>
+          <button className="small" onClick={() => step(1)} aria-label={t("Vergrößern")} disabled={!doc}>+</button>
         </span>
         <form className="pdf-search" onSubmit={search} role="search">
-          <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Im Volltext suchen" aria-label="Im Volltext suchen" disabled={!doc} />
-          {found && <span className="pdf-found">{found.total === 0 ? "nichts gefunden" : `${found.total} Treffer auf ${found.pages.length} ${found.pages.length === 1 ? "Seite" : "Seiten"}`}</span>}
-          {searching && <span className="pdf-found">sucht …</span>}
+          <input value={input} onChange={(e) => setInput(e.target.value)} placeholder={t("Im Volltext suchen")} aria-label={t("Im Volltext suchen")} disabled={!doc} />
+          {found && <span className="pdf-found">{found.total === 0 ? t("nichts gefunden") : tn("{total} Treffer auf {n} Seite", "{total} Treffer auf {n} Seiten", found.pages.length, { total: found.total })}</span>}
+          {searching && <span className="pdf-found">{t("sucht …")}</span>}
         </form>
-        {onExternal && <button className="small" onClick={onExternal} title="Im Standardprogramm öffnen"><Icon name="file" size={13} /> Extern öffnen</button>}
+        {onExternal && <button className="small" onClick={onExternal} title={t("Im Standardprogramm öffnen")}><Icon name="file" size={13} /> {t("Extern öffnen")}</button>}
       </div>
-      <div className="pdf-scroll" ref={scroller} onScroll={onScroll} tabIndex={0} aria-label="Volltext">
+      <div className="pdf-scroll" ref={scroller} onScroll={onScroll} tabIndex={0} aria-label={t("Volltext")}>
         {doc && Array.from({ length: doc.numPages }, (_, i) => (
           <PdfPage key={i + 1} doc={doc} n={i + 1} scale={scale} base={base} query={query} root={scroller} />
         ))}

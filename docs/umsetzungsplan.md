@@ -90,6 +90,7 @@ funktioniert damit für das ganze Team. Die App zeigt Volltexte an, verändert d
 | `FormValueRecorded`, `FormEntryCompleted` | Stufe, verblindbar | alle mit Schreibrecht | 7 |
 | `FormConsensusRecorded` | main | alle mit Schreibrecht, erst nach dem Entblinden | 7 |
 | `ProtocolRegistered` | main | Leitung | 8 |
+| `ProtocolDrafted` | main | Leitung | nach 9 |
 
 Geänderte Payloads: `ReviewCreated` bekommt `review_type`. `StageInstanceOpened` bekommt `station`, `round`,
 `decision_rule`, `verify`, `reason_required`, `form_id` und `form_version`. `VoteCast` und `ConsensusRecorded`
@@ -423,9 +424,58 @@ Stand 19.11.2026: umgesetzt bis auf das Rückschreiben nach Zotero. Festlegungen
 
 **Ziel:** Der Scoping Review ist vollständig. Vor der Erweiterung steht ein echter Review von Anfang bis Ende.
 
+## Leitlinien und Registrierung (nach Meilenstein 9)
+
+Stand 19.11.2026: umgesetzt. Festlegungen beim Bau:
+
+- Leitlinien liegen je Vorlage als Zusammenfassung in eigenen Worten im Kern (`guidance/*.json`), mit Quelle,
+  Abrufdatum und Adresse je Abschnitt. Keine wörtliche Kopie. Ein Eintrag nennt Stationen und Bereiche; ein Test
+  prüft, dass jede Station mit Stufen einen Eintrag hat.
+- Das „?“ steht oben rechts auf jedem Bildschirm eines Reviews und zeigt die Einträge zur offenen Station, sonst
+  zum offenen Bereich. Der Bereich „Leitlinie“ zeigt alles, auch die Leitlinien der anderen Vorlagen.
+- Registrierung vorbereiten: Formular „Generalized Systematic Review Registration“ von OSF mit 65 Feldern auf
+  sechs Seiten. Vorschläge aus dem Review sind eine Projektion; eigene Texte stehen als `ProtocolDrafted` im Log.
+  Export als Markdown mit den Feldnamen des Registers. Die App reicht nichts ein.
+- Offen: Leitlinien für Systematic, Umbrella und qualitative Reviews (mit 10 und 11); weitere Formulare
+  (PROSPERO, JBI-Protokollvorlage); Vorschläge auf Englisch.
+
+## Mehrsprachigkeit (nach Meilenstein 9)
+
+Stand 19.11.2026: umgesetzt für Deutsch und Englisch. Festlegungen beim Bau:
+
+- Die Sprache ist eine Einstellung der Person und steht nie im Log. Inhalte bleiben, wie sie geschrieben wurden.
+- Der deutsche Text im Quelltext ist der Schlüssel; je Sprache ein Katalog im Kern und einer in der Oberfläche,
+  Leitlinien und Registrierungsformular als eigene Dateien je Sprache.
+- Mitgelieferte Vorlagen stehen deutsch im Log und werden bei der Anzeige übersetzt.
+- Bericht und Vorbereitung der Registrierung haben eine eigene Ausgabesprache.
+- Offen: Mehrzahlformen im Kern für Sprachen mit mehr als zwei Formen (der Kern bildet ganze Sätze je Fall für
+  Einzahl und Mehrzahl); Übersetzung von README und Doku.
+
 ## Erweiterung um weitere Review-Typen
 
 ### 9 Vorlagen ohne neue Bausteine (S)
+
+Stand 19.11.2026: umgesetzt. Gelesen wurden die aktualisierten Empfehlungen der Cochrane Rapid Reviews Methods
+Group (Garritty et al., BMJ 2024;384:e076335) und der Sechs-Schritte-Ansatz für State-of-the-Art-Reviews (Barry,
+Merkebu, Varpio, Perspect Med Educ 2022). Festlegungen beim Bau:
+
+- Beide Vorlagen sind je eine JSON-Datei und ein Eintrag in `BUILTIN`. Am Kern ändert sich sonst nichts; der
+  Ablauftest (`walk`) läuft mit allen vier Vorlagen.
+- Rapid Review: Kriterien nach PICO mit eigenem Element für Einschränkungen (Empfehlung 3), Begriff „Studien“.
+  Pilot und doppelte Bewertung einer Stichprobe in einer Station (Empfehlungen 8 und 9), `unanimous` fest,
+  verblindet, Gate 80 % Übereinstimmung. Die Leitlinie nennt Kappa ab 0,8 als Beispiel; das Gate kennt nur die
+  Prozent-Übereinstimmung. Danach `single_verified` in Titel/Abstract und Volltext; die Leitung kann beim Öffnen
+  zwei unabhängige Stimmen wählen. Extraktion: Pilot doppelt, danach eine Person mit Prüfung (Empfehlungen 11 und
+  12). Verzerrungsrisiko als Felder des Extraktionsformulars, geprüft von der zweiten Person (Empfehlung 16).
+- Was die Leitlinie nennt und die Vorlage nur als Hinweis führt: mindestens zwei Datenbanken, PRESS, Pilot am
+  Volltext. Nicht abgebildet: GRADE, Einbindung der Nutzenden.
+- Keine Zitationssuche als Station (Empfehlung 7: ergänzende Suchen nur begründet). Damit spätere Importe nicht
+  liegen bleiben, prüft die Station „Studien bündeln“ `all_records_assigned`.
+- Keine Checkliste: Die Leitlinie verweist auf PRISMA 2020, die erst mit Meilenstein 10 kommt.
+- State of the Art: Elemente Thema und Feld, Zeitraum, Quellenart. Stationen in fester Reihenfolge, aber ohne
+  Gate; eine Stimme, nicht verblindet. Formular „Auswertung“ mit Einordnung zum Zeitraum, Beitrag, Annahmen,
+  Wendepunkt, Verhältnis zur eigenen Deutung.
+- Die Limitation bei abgekürzter Auswahl und Extraktion stand schon im Methodentext (Meilensteine 5 und 8).
 
 - „Rapid Review“ (Auswahlregel `liberal` oder `single_verified`, Limitation im Methodentext) und „State of the
   Art“ (eine Stimme, keine Gates). Voraussetzung: Leitlinie gelesen.

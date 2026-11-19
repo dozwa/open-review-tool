@@ -1,0 +1,251 @@
+{
+  "key": "rapid_review",
+  "name": "Rapid Review",
+  "review_type": "rapid",
+  "description": "Abgekürzter Ablauf nach den Empfehlungen der Cochrane Rapid Reviews Methods Group (2024): doppelte Bewertung einer Stichprobe mit mindestens 80 % Übereinstimmung, danach eine Stimme je Eintrag mit Prüfung der Ausschlüsse, Extraktion durch eine Person mit Prüfung. Jede Abkürzung steht als Limitation im Methodentext.",
+  "terms": {
+    "record": "Eintrag",
+    "records": "Einträge",
+    "source": "Studie",
+    "sources": "Studien",
+    "extraction": "Datenextraktion"
+  },
+  "criteria_schema": [
+    { "key": "population", "label": "Population" },
+    { "key": "intervention", "label": "Intervention" },
+    { "key": "comparator", "label": "Vergleich" },
+    { "key": "outcome", "label": "Endpunkte" },
+    { "key": "design", "label": "Studiendesign" },
+    { "key": "limits", "label": "Einschränkungen" }
+  ],
+  "source_types": [
+    { "key": "systematic_review", "label": "Systematischer Review" },
+    { "key": "rct", "label": "Randomisierte kontrollierte Studie" },
+    { "key": "nrsi", "label": "Nicht randomisierte Interventionsstudie" },
+    { "key": "other", "label": "Sonstiges" }
+  ],
+  "rules": {
+    "decision_rule": { "value": "single_verified", "editable": true },
+    "min_reviewers": { "value": 1, "editable": true },
+    "maybe_as": { "value": "include", "editable": true },
+    "conflict_rule": { "value": "discussion", "editable": true },
+    "blind": { "value": false, "editable": true }
+  },
+  "stations": [
+    {
+      "key": "protocol",
+      "kind": "setup",
+      "label": "Protokoll und Team",
+      "description": "Frage und Kriterien nach PICO festhalten, jede Einschränkung (Zeitraum, Sprache, Setting, Studiendesign) begründen, das Protokoll registrieren und das Team zusammenstellen.",
+      "tool": "protocol",
+      "gate": [{ "check": "criteria_published" }, { "check": "min_writers", "n": 2 }]
+    },
+    {
+      "key": "search",
+      "kind": "setup",
+      "label": "Suche",
+      "description": "Mindestens zwei Datenbanken. Die Hauptstrategie prüft eine zweite Person, möglichst mit der PRESS-Checkliste. Graue Literatur und ergänzende Suchen nur mit Begründung.",
+      "tool": "search",
+      "gate": [{ "check": "search_documented" }]
+    },
+    {
+      "key": "import",
+      "kind": "setup",
+      "label": "Import und Dubletten",
+      "description": "Treffer je Suche einlesen. Gleiche Einträge werden erkannt, mögliche Dubletten einzeln entschieden.",
+      "tool": "import",
+      "gate": [{ "check": "records_imported" }, { "check": "no_unresolved_duplicates" }]
+    },
+    {
+      "key": "pilot_title_abstract",
+      "kind": "screening",
+      "label": "Pilot und doppelte Bewertung",
+      "description": "Zwei Personen bewerten unabhängig eine Zufallsstichprobe, empfohlen etwa 20 % der Einträge. Ab 80 % Übereinstimmung geht es mit einer Stimme je Eintrag weiter; sonst Kriterien klären und eine weitere Runde öffnen. Die Leitlinie nennt als Beispiel Kappa ab 0,8; Kappa steht neben der Übereinstimmung.",
+      "input": { "scope": "sample", "sample_size": 50 },
+      "rules": {
+        "decision_rule": { "value": "unanimous", "editable": false },
+        "min_reviewers": { "value": 2, "editable": true },
+        "blind": { "value": true, "editable": true }
+      },
+      "gate": [{ "check": "agreement_min", "percent": 80 }]
+    },
+    {
+      "key": "title_abstract",
+      "kind": "screening",
+      "label": "Titel/Abstract",
+      "description": "Eine Person bewertet jeden Eintrag, eine zweite prüft die Ausschlüsse. Wer mehr Zeit hat, wählt beim Öffnen zwei unabhängige Stimmen.",
+      "input": { "scope": "all" },
+      "gate": [{ "check": "all_decided" }, { "check": "no_open_conflicts" }]
+    },
+    {
+      "key": "fulltext_retrieval",
+      "kind": "setup",
+      "label": "Volltexte beschaffen",
+      "description": "Jeder eingeschlossene Eintrag ist beschafft oder mit Grund nicht beschaffbar.",
+      "tool": "fulltext",
+      "gate": [{ "check": "all_fulltext_status" }]
+    },
+    {
+      "key": "fulltext",
+      "kind": "screening",
+      "label": "Volltext-Screening",
+      "description": "Eine Person prüft jeden Volltext, eine zweite alle ausgeschlossenen. Jeder Ausschluss braucht genau einen Hauptgrund. Später beschaffte Volltexte laufen als weitere Runde.",
+      "input": { "scope": "from_station", "station": "title_abstract" },
+      "reason_required": true,
+      "requires_fulltext": true,
+      "gate": [{ "check": "all_decided" }, { "check": "no_open_conflicts" }]
+    },
+    {
+      "key": "bundling",
+      "kind": "setup",
+      "label": "Studien bündeln",
+      "description": "Berichte derselben Studie zu einer Studie zusammenfassen und jeder Studie ihr Design geben. Einträge aus späteren Importen laufen vorher als weitere Runde durch die Auswahl.",
+      "tool": "bundling",
+      "gate": [{ "check": "all_records_assigned" }, { "check": "source_types_set" }]
+    },
+    {
+      "key": "extraction_pilot",
+      "kind": "form",
+      "label": "Extraktions-Pilot",
+      "description": "Je Studiendesign zwei Studien, die alle unabhängig extrahieren. Danach das Formular abstimmen, auf die wichtigsten Angaben kürzen und bestätigen.",
+      "input": { "scope": "sample", "sample_size": 2 },
+      "rules": {
+        "decision_rule": { "value": "unanimous", "editable": false },
+        "min_reviewers": { "value": 2, "editable": true },
+        "blind": { "value": true, "editable": true }
+      },
+      "gate": [{ "check": "form_confirmed" }]
+    },
+    {
+      "key": "extraction",
+      "kind": "form",
+      "label": "Datenextraktion und Bewertung",
+      "description": "Eine Person extrahiert jede Studie und beurteilt das Verzerrungsrisiko, eine zweite prüft die Angaben und das Urteil. Später dazugekommene Studien laufen als weitere Runde.",
+      "gate": [{ "check": "all_sources_assigned" }, { "check": "all_extracted" }, { "check": "no_open_differences" }]
+    },
+    {
+      "key": "report",
+      "kind": "report",
+      "label": "Auswertung und Bericht",
+      "description": "Flussdiagramm, Tabellen und Methodentext. Die abgekürzten Schritte und ihre Folgen stehen bei den Limitationen. Berichtet wird nach PRISMA, soweit es passt."
+    }
+  ],
+  "forms": [
+    {
+      "purpose": "charting",
+      "name": "Extraktionsformular",
+      "fields": [
+        {
+          "key": "design",
+          "label": "Studiendesign",
+          "description": "Zum Beispiel RCT, Kohortenstudie, systematischer Review.",
+          "type": "text",
+          "required": true,
+          "group": "Studie",
+          "analysis": "Häufigkeit je Design"
+        },
+        {
+          "key": "country",
+          "label": "Land",
+          "description": "",
+          "type": "text",
+          "required": false,
+          "group": "Studie",
+          "analysis": ""
+        },
+        {
+          "key": "population",
+          "label": "Population",
+          "description": "Wer wurde untersucht? Kurz, mit den wichtigsten Merkmalen.",
+          "type": "text",
+          "required": true,
+          "group": "PICO",
+          "analysis": ""
+        },
+        {
+          "key": "sample_size",
+          "label": "Stichprobengröße",
+          "description": "Zahl der Teilnehmenden, falls berichtet.",
+          "type": "integer",
+          "required": false,
+          "group": "PICO",
+          "analysis": ""
+        },
+        {
+          "key": "intervention",
+          "label": "Intervention",
+          "description": "",
+          "type": "text",
+          "required": true,
+          "group": "PICO",
+          "analysis": ""
+        },
+        {
+          "key": "comparator",
+          "label": "Vergleich",
+          "description": "",
+          "type": "text",
+          "required": true,
+          "group": "PICO",
+          "analysis": ""
+        },
+        {
+          "key": "outcomes",
+          "label": "Endpunkte",
+          "description": "Nur die Endpunkte, die für die Entscheidung am wichtigsten sind, mit ihrer Definition.",
+          "type": "text",
+          "required": true,
+          "group": "Ergebnisse",
+          "analysis": ""
+        },
+        {
+          "key": "results",
+          "label": "Ergebnisse zu den Endpunkten",
+          "description": "Zahlen so, wie sie in der Quelle stehen.",
+          "type": "text",
+          "required": true,
+          "group": "Ergebnisse",
+          "analysis": ""
+        },
+        {
+          "key": "rob_tool",
+          "label": "Instrument der Bewertung",
+          "description": "Ein geprüftes Instrument, das zum Studiendesign passt.",
+          "type": "text",
+          "required": true,
+          "group": "Verzerrungsrisiko",
+          "analysis": ""
+        },
+        {
+          "key": "rob_judgement",
+          "label": "Gesamturteil",
+          "description": "Urteil für die wichtigsten Endpunkte.",
+          "type": "choice",
+          "required": true,
+          "group": "Verzerrungsrisiko",
+          "analysis": "Häufigkeit je Urteil",
+          "options": ["gering", "einige Bedenken", "hoch", "unklar"]
+        },
+        {
+          "key": "rob_reason",
+          "label": "Begründung des Urteils",
+          "description": "",
+          "type": "text",
+          "required": true,
+          "group": "Verzerrungsrisiko",
+          "analysis": ""
+        },
+        {
+          "key": "notes",
+          "label": "Anmerkungen",
+          "description": "",
+          "type": "text",
+          "required": false,
+          "group": "Verzerrungsrisiko",
+          "analysis": ""
+        }
+      ]
+    }
+  ],
+  "report": {}
+}

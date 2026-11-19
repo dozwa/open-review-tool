@@ -14,8 +14,10 @@ use uuid::Uuid;
 use crate::catalog;
 use crate::error::{invalid, Result};
 use crate::event::Event;
+use crate::i18n;
 use crate::projection::order_key;
 use crate::service::{require, Review, MANAGE_ROLES};
+use crate::tr;
 use crate::workflow::Workflow;
 
 /// Ereignisse, aus denen Registrierung und Abweichungen entstehen.
@@ -89,25 +91,25 @@ impl Protocol {
                     continue;
                 }
                 "CriteriaVersionPublished" if registered && version(e) > 1 => {
-                    ("criteria", format!("Kriterien geändert (Version {})", version(e)), text(e, "change_note"))
+                    ("criteria", tr!("Kriterien geändert (Version {})", version(e)), text(e, "change_note"))
                 }
                 "SearchVersionPublished" if registered && version(e) > 1 => (
                     "search",
-                    format!("Suche in {} geändert oder wiederholt (Version {})", text(e, "source"), version(e)),
+                    tr!("Suche in {} geändert oder wiederholt (Version {})", text(e, "source"), version(e)),
                     text(e, "change_note"),
                 ),
                 "WorkflowVersionPublished" if registered && version(e) > 1 => {
-                    ("workflow", format!("Ablauf geändert (Version {})", version(e)), text(e, "change_note"))
+                    ("workflow", tr!("Ablauf geändert (Version {})", version(e)), text(e, "change_note"))
                 }
                 "FormVersionPublished" if confirmed.contains(&text(e, "form_id")) => (
                     "form",
-                    format!("Formular „{}“ nach der Bestätigung geändert (Version {})", text(e, "name"), version(e)),
+                    tr!("Formular „{}“ nach der Bestätigung geändert (Version {})", text(e, "name"), version(e)),
                     text(e, "change_note"),
                 ),
                 "GateOverridden" => {
                     let key = text(e, "station");
-                    let label = workflow.template.station(&key).map_or(key.clone(), |s| s.label.clone());
-                    ("gate", format!("„{label}“ ohne erfülltes Gate freigegeben"), text(e, "reason"))
+                    let label = workflow.template.station(&key).map_or(key.clone(), |s| i18n::text(&s.label));
+                    ("gate", tr!("„{}“ ohne erfülltes Gate freigegeben", label), text(e, "reason"))
                 }
                 _ => continue,
             };
@@ -140,8 +142,8 @@ pub struct Evidence {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ChecklistItem {
     pub number: i64,
-    pub section: &'static str,
-    pub topic: &'static str,
+    pub section: String,
+    pub topic: String,
     /// `ready` (Material liegt vor), `open` (das Review kann es liefern, es fehlt aber noch),
     /// `manual` (schreibt das Team selbst) oder `optional`.
     pub status: &'static str,
@@ -158,7 +160,8 @@ pub struct Checklist {
 /// Name der Checkliste, die diese App-Version kennt.
 pub const PRISMA_SCR: &str = "PRISMA-ScR";
 
-/// Punkte der PRISMA-ScR in eigenen Worten: Nummer, Abschnitt, Thema.
+/// Punkte der PRISMA-ScR in eigenen Worten: Nummer, Abschnitt, Thema. Abschnitt und Thema werden bei
+/// der Ausgabe übersetzt; die Übersetzungen stehen im Katalog.
 const PRISMA_SCR_ITEMS: [(i64, &str, &str); 22] = [
     (1, "Titel", "Bericht als Scoping Review kennzeichnen"),
     (2, "Zusammenfassung", "Strukturierte Zusammenfassung"),
@@ -190,82 +193,84 @@ pub fn checklist(workflow: &Workflow, have: &Evidence) -> Option<Checklist> {
     if name != PRISMA_SCR {
         return None;
     }
-    let extraction = workflow.template.term("extraction");
-    let sources = workflow.template.term("sources");
-    let state = |ready: bool, found: &str, missing: &str| match ready {
-        true => ("ready", found.to_string()),
-        false => ("open", missing.to_string()),
+    let extraction = i18n::text(workflow.template.term("extraction"));
+    let sources = i18n::text(workflow.template.term("sources"));
+    let state = |ready: bool, found: String, missing: String| match ready {
+        true => ("ready", found),
+        false => ("open", missing),
     };
-    let own = |hint: &str| ("manual", hint.to_string());
+    let own = |hint: String| ("manual", hint);
     let items = PRISMA_SCR_ITEMS
         .iter()
         .map(|(number, section, topic)| {
             let (status, material) = match number {
-                4 => own("Schreibt ihr selbst. Die Elemente der Fragestellung stehen in den Kriterien."),
+                4 => own(tr!("Schreibt ihr selbst. Die Elemente der Fragestellung stehen in den Kriterien.")),
                 5 => state(
                     have.registered,
-                    "Registrierung und Abweichungen stehen im Bericht unter „Protokoll“.",
-                    "Registrierung im Bericht unter „Protokoll“ eintragen. Gibt es kein Protokoll, gehört das in den Text.",
+                    tr!("Registrierung und Abweichungen stehen im Bericht unter „Protokoll“."),
+                    tr!("Registrierung im Bericht unter „Protokoll“ eintragen. Gibt es kein Protokoll, gehört das in den Text."),
                 ),
                 6 => state(
                     have.criteria_version > 0,
-                    &format!("Reiter „Kriterien“, Version {}.", have.criteria_version),
-                    "Kriterien veröffentlichen.",
+                    tr!("Reiter „Kriterien“, Version {}.", have.criteria_version),
+                    tr!("Kriterien veröffentlichen."),
                 ),
                 7 => state(
                     have.n_searches > 0,
-                    "Suchanhang: Quellen und Tag der Suche.",
-                    "Suchen im Reiter „Suche“ festhalten.",
+                    tr!("Suchanhang: Quellen und Tag der Suche."),
+                    tr!("Suchen im Reiter „Suche“ festhalten."),
                 ),
                 8 => state(
                     have.n_searches > 0,
-                    "Suchanhang: Suchstring, Grenzen und Treffer je Quelle.",
-                    "Suchen im Reiter „Suche“ festhalten.",
+                    tr!("Suchanhang: Suchstring, Grenzen und Treffer je Quelle."),
+                    tr!("Suchen im Reiter „Suche“ festhalten."),
                 ),
                 9 => state(
                     have.selection_started,
-                    "Methodentext, Abschnitte zur Auswahl.",
-                    "Entsteht mit der ersten Stufe der Auswahl.",
+                    tr!("Methodentext, Abschnitte zur Auswahl."),
+                    tr!("Entsteht mit der ersten Stufe der Auswahl."),
                 ),
                 10 => state(
                     have.charting_started,
-                    &format!("Methodentext, Abschnitt „{extraction}“."),
-                    &format!("Entsteht mit der ersten Stufe im {extraction}."),
+                    tr!("Methodentext, Abschnitt „{}“.", extraction),
+                    tr!("Entsteht mit der ersten Stufe im {}.", extraction),
                 ),
                 11 => state(
                     have.form_published,
-                    "Die Felder des Formulars stehen im Methodentext.",
-                    "Formular veröffentlichen.",
+                    tr!("Die Felder des Formulars stehen im Methodentext."),
+                    tr!("Formular veröffentlichen."),
                 ),
                 12 | 16 => (
                     "optional",
-                    "In dieser Vorlage nicht vorgesehen. Wer bewertet, beschreibt Vorgehen und Ergebnis im Text.".to_string(),
+                    tr!("In dieser Vorlage nicht vorgesehen. Wer bewertet, beschreibt Vorgehen und Ergebnis im Text."),
                 ),
                 13 if have.analysis_planned => {
-                    ("ready", "Die Auswertung je Feld steht im Formular und im Methodentext.".to_string())
+                    ("ready", tr!("Die Auswertung je Feld steht im Formular und im Methodentext."))
                 }
-                13 => own("Schreibt ihr selbst. Im Formular lässt sich je Feld festhalten, wie es ausgewertet wird."),
+                13 => own(tr!(
+                    "Schreibt ihr selbst. Im Formular lässt sich je Feld festhalten, wie es ausgewertet wird."
+                )),
                 14 => state(
                     have.has_levels,
-                    "Flussdiagramm und ausgeschlossene Volltexte mit Grund.",
-                    "Entsteht mit der ersten Stufe der Auswahl.",
+                    tr!("Flussdiagramm und ausgeschlossene Volltexte mit Grund."),
+                    tr!("Entsteht mit der ersten Stufe der Auswahl."),
                 ),
                 15 | 17 => state(
                     have.n_charted > 0,
-                    &format!("Tabelle der eingeschlossenen {sources}."),
-                    &format!("Entsteht, sobald {sources} extrahiert und abgeglichen sind."),
+                    tr!("Tabelle der eingeschlossenen {}.", sources),
+                    tr!("Entsteht, sobald {} extrahiert und abgeglichen sind.", sources),
                 ),
                 18 if have.has_choice_fields && have.n_charted > 0 => (
                     "ready",
-                    "Häufigkeiten je Auswahlfeld stehen in der Formular-Stufe. Den Text schreibt ihr selbst.".to_string(),
+                    tr!("Häufigkeiten je Auswahlfeld stehen in der Formular-Stufe. Den Text schreibt ihr selbst."),
                 ),
                 20 if have.n_limitations > 0 => (
                     "ready",
-                    "Methodentext, Abschnitt „Abweichungen und Limitationen“. Das betrifft das Vorgehen; die Grenzen der Evidenz schreibt ihr selbst.".to_string(),
+                    tr!("Methodentext, Abschnitt „Abweichungen und Limitationen“. Das betrifft das Vorgehen; die Grenzen der Evidenz schreibt ihr selbst."),
                 ),
-                _ => own("Schreibt ihr selbst."),
+                _ => own(tr!("Schreibt ihr selbst.")),
             };
-            ChecklistItem { number: *number, section, topic, status, material }
+            ChecklistItem { number: *number, section: i18n::text(section), topic: i18n::text(topic), status, material }
         })
         .collect();
     Some(Checklist { name: name.to_string(), items })
@@ -273,16 +278,16 @@ pub fn checklist(workflow: &Workflow, have: &Evidence) -> Option<Checklist> {
 
 /// Checkliste als Markdown-Tabelle.
 pub fn checklist_markdown(list: &Checklist) -> String {
-    let mut out = format!(
+    let mut out = tr!(
         "# Checkliste {}\n\n| Nr. | Abschnitt | Punkt | Stand | Material |\n| --- | --- | --- | --- | --- |\n",
         list.name
     );
     for item in &list.items {
         let status = match item.status {
-            "ready" => "liegt vor",
-            "open" => "fehlt noch",
-            "optional" => "freiwillig",
-            _ => "selbst schreiben",
+            "ready" => tr!("liegt vor"),
+            "open" => tr!("fehlt noch"),
+            "optional" => tr!("freiwillig"),
+            _ => tr!("selbst schreiben"),
         };
         out.push_str(&format!(
             "| {} | {} | {} | {status} | {} |\n",
@@ -309,10 +314,10 @@ impl Review {
     ) -> Result<Protocol> {
         require(&self.state()?, &self.me().actor_id, &MANAGE_ROLES)?;
         if !catalog::is_date(registered_on) {
-            return Err(invalid("Das Datum der Registrierung fehlt oder hat nicht die Form JJJJ-MM-TT."));
+            return Err(invalid(tr!("Das Datum der Registrierung fehlt oder hat nicht die Form JJJJ-MM-TT.")));
         }
         if registry.trim().is_empty() {
-            return Err(invalid("Wo ist das Protokoll registriert oder abgelegt? Die Angabe fehlt."));
+            return Err(invalid(tr!("Wo ist das Protokoll registriert oder abgelegt? Die Angabe fehlt.")));
         }
         self.append(
             "ProtocolRegistered",

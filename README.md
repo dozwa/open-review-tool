@@ -8,8 +8,9 @@ Zusammenarbeit ohne Server über Austauschdateien.
 > Status (19.11.2026): Mac-App mit Rust und Tauri 2. Der vollständige Ablauf eines Scoping Reviews wird nach
 > `docs/umsetzungsplan.md` in Meilensteinen gebaut; fertig sind 0 (Fundament), 1 (Vorlage und Ablauf),
 > 2 (Kriterien und Screening-Ansicht), 3 (Suche, Import, Dubletten), 4 (Volltext, ohne das Markieren),
-> 5 (Bericht, Teil 1), 6 (Zitationssuche, Bündeln, Quellenart), 7 (Formulare und Charting) und 8 (Bericht,
-> Teil 2 und Update, ohne das Rückschreiben nach Zotero).
+> 5 (Bericht, Teil 1), 6 (Zitationssuche, Bündeln, Quellenart), 7 (Formulare und Charting), 8 (Bericht,
+> Teil 2 und Update, ohne das Rückschreiben nach Zotero) und 9 (Vorlagen „Rapid Review“ und
+> „State-of-the-Art-Review“).
 > Enthalten: Identität mit Schlüssel im Schlüsselbund, Reviews mit Rollen, Review-Typ als Vorlage mit Stationen,
 > Gates und Runden, Kriterien mit Kürzeln und Erläuterungen, Suchen mit Versionen und Peer-Review-Vermerk, Import
 > von RIS, BibTeX und PubMed (nbib) mit Suchversion und Herkunft, exakte und unscharfe Dubletten, Stufen mit drei
@@ -20,7 +21,9 @@ Zusammenarbeit ohne Server über Austauschdateien.
 > Zitationssuche als weitere Runde mit eigenem Zweig im Diagramm, Bündeln von Einträgen zu Quellen mit Quellenart,
 > Formulare mit Versionen, verblindetes Charting doppelt oder einfach mit Prüfung, Abgleich je Feld, Tabelle und
 > Häufigkeiten als CSV, Registrierung des Protokolls mit Liste der Abweichungen, Checkliste PRISMA-ScR mit Stand
-> je Punkt, Methodentext zum Charting, Tabelle der eingeschlossenen Quellen, Update als weitere Runden.
+> je Punkt, Methodentext zum Charting, Tabelle der eingeschlossenen Quellen, Update als weitere Runden,
+> Leitlinien zum Nachschlagen mit „?“ auf jedem Bildschirm, geführte Vorbereitung der Registrierung nach dem
+> OSF-Formular, Deutsch und Englisch für Oberfläche, Meldungen, Vorlagen, Leitlinien und Bericht.
 > Noch nicht enthalten: Markieren im Volltext, Rückschreiben nach Zotero, signierte und notarisierte App.
 
 ## So arbeitet ein Team
@@ -62,8 +65,9 @@ die Schlüsselbund-Sicherung von macOS.
 
 | Pfad | Inhalt |
 | --- | --- |
-| `crates/ort-core/` | Fachkern ohne Oberfläche: Event-Log (`event.rs`, `store.rs`), Register der Ereignistypen (`catalog.rs`), Projektionen, Vorlagen und Ablauf (`workflow.rs`), Kriterien (`criteria.rs`), Suchen (`search.rs`), Dubletten (`duplicates.rs`), Volltexte (`fulltext.rs`), Bericht (`report.rs`), Bündel und Quellenart (`sources.rs`), Übereinstimmung, Import, Fachlogik (`service.rs`), Austausch (`exchange.rs`) |
-| `crates/ort-core/templates/` | Mitgelieferte Vorlagen: „JBI Scoping Review“ und „Freier Ablauf“ |
+| `crates/ort-core/` | Fachkern ohne Oberfläche: Event-Log (`event.rs`, `store.rs`), Register der Ereignistypen (`catalog.rs`), Projektionen, Vorlagen und Ablauf (`workflow.rs`), Kriterien (`criteria.rs`), Suchen (`search.rs`), Dubletten (`duplicates.rs`), Volltexte (`fulltext.rs`), Bericht (`report.rs`), Sprachen (`i18n.rs`, Kataloge in `i18n/`), Leitlinien (`guidance.rs`), Vorbereitung der Registrierung (`registration.rs`), Bündel und Quellenart (`sources.rs`), Übereinstimmung, Import, Fachlogik (`service.rs`), Austausch (`exchange.rs`) |
+| `crates/ort-core/guidance/`, `crates/ort-core/registration/` | Leitlinien je Vorlage als Zusammenfassung mit Verweis auf das Original; Felder des Registrierungsformulars von OSF |
+| `crates/ort-core/templates/` | Mitgelieferte Vorlagen: „JBI Scoping Review“, „Rapid Review“, „State-of-the-Art-Review“ und „Freier Ablauf“ |
 | `crates/ort-core/tests/` | Tests für Log, Projektionen, Referenzwerte, Import, Austausch, Vorlagen und Gates und den Ablauf mit vier Personen |
 | `app/src-tauri/` | Tauri-Hülle: Befehle für die Oberfläche, Identität und Schlüsselbund |
 | `app/src/` | Oberfläche mit React und TypeScript |
@@ -75,14 +79,14 @@ Tauri 2 mit der WebView von macOS, React 18.
 
 ## Wie es geprüft ist
 
-- **Kern:** 130 Tests, dazu 2 für das Lesen der Zotero-Antworten in der App. Darunter die Referenzwerte der früheren SQL-Tests (Cohen's Kappa gegen scikit-learn,
+- **Kern:** 148 Tests, dazu 2 für das Lesen der Zotero-Antworten in der App. Darunter die Referenzwerte der früheren SQL-Tests (Cohen's Kappa gegen scikit-learn,
   Fleiss' Kappa am Wikipedia-Beispiel, Krippendorffs Alpha am publizierten Beispiel mit 0,743, PABAK, Prozent,
   sechs `final_decision`-Szenarien, Maybe-Regel). Die Werte erzeugt `crates/ort-core/tests/fixtures/make_agreement_fixtures.py`.
 - **Austausch:** veränderte Datei, nachträglich neu gehashte Datei ohne Signatur, Außenstehende, Lücken in einer
   Kette, doppeltes Einlesen, Paket für eine andere Person, untergeschobene Records, selbst vergebene Rollen.
 - **Vorlagen und Gates:** Pilot unter 75 % sperrt Titel/Abstract, eine neue Runde oder ein Übersteuern mit
   Begründung öffnet es; `liberal` und `single_verified` gegen Handrechnung; die Prüfstichprobe lässt sich aus Seed
-  und ID nachrechnen; Dritt-Entscheid wird auch beim Einlesen erzwungen; derselbe Durchlauf mit beiden Vorlagen.
+  und ID nachrechnen; Dritt-Entscheid wird auch beim Einlesen erzwungen; derselbe Durchlauf mit allen vier Vorlagen, ohne dass im Test ein Schlüssel einer Station steht.
 - **Kriterien und Gründe:** Volltext-Ausschluss ohne Hauptgrund oder mit unbekanntem Kürzel wird in der App und
   beim Einlesen abgewiesen, ebenso ein solcher Konsens; eine Stufe prüft gegen ihre eigene Kriterienversion;
   Filter nach Konflikt, Person und Stimmenzahl sind verblindet auch bei der Leitung gesperrt.
@@ -198,6 +202,46 @@ Nur für Entwicklung und Tests.
   Pflichtfelder hält das Gate der Station auf. Wiederholbare Gruppen (Arm, Zeitpunkt) gibt es noch nicht. Tabelle
   und Häufigkeiten gelten je Stufe, nicht über alle Runden einer Station. Reviews, die vor diesem Stand mit der
   JBI-Vorlage angelegt wurden, haben für die Charting-Stationen kein Gate im Log; das Charting geht dort trotzdem.
+- **Sprachen:** Die App spricht Deutsch und Englisch (britisch). Die Sprache ist eine Einstellung der Person
+  (Auswahl unten in der Seitenleiste, sonst die Sprache des Systems) und steht nie im Log. Übersetzt wird, was
+  die App selbst sagt: Oberfläche, Fehlermeldungen, Texte der mitgelieferten Vorlagen, Leitlinien,
+  Registrierungsformular, Bericht. Was Menschen schreiben (Kriterien, Suchstrings, Notizen, Formularfelder, Namen
+  von Stufen), bleibt, wie es geschrieben wurde. Die mitgelieferten Vorlagen stehen immer in der deutschen Fassung
+  im Log und werden erst bei der Anzeige übersetzt; zwei Personen können dasselbe Review in verschiedenen Sprachen
+  öffnen. Bericht und Vorbereitung der Registrierung haben eine eigene Ausgabesprache, damit ein Team deutsch
+  arbeiten und englisch berichten kann. Der deutsche Text im Quelltext ist der Schlüssel; eine weitere Sprache
+  braucht `crates/ort-core/i18n/<code>.json`, `app/src/i18n/<code>.ts`, je einen Ordner unter `guidance/` und
+  `registration/` und je einen Eintrag in den Sprachlisten (`i18n::LANGUAGES`, `LANGUAGES` in
+  `app/src/i18n/index.ts`). Fehlt ein englischer Text, schlägt im Kern ein Test fehl und in der Oberfläche die
+  Typprüfung. Nicht übersetzt sind Spaltenköpfe der CSV-Dateien (englische Schlüssel) und der Projekttext selbst
+  (README, Doku, Kommentare bleiben deutsch). Eine Meldung zu einem fehlgeschlagenen Import steht in der Sprache
+  in der Tabelle, die beim Import galt.
+- **Leitlinien:** Zu jeder Vorlage außer dem freien Ablauf liegt eine Zusammenfassung ihrer Leitlinie in der App
+  (`crates/ort-core/guidance/<sprache>/`), in eigenen Worten, mit Quelle, Abrufdatum und Adresse je Abschnitt. Es ist keine
+  wörtliche Kopie: Die Lizenzen der Originale erlauben das nicht durchgehend, und das JBI Manual ändert sich
+  laufend. Maßgeblich bleibt das Original; der Verweis braucht Netz, die Zusammenfassung nicht. Das „?“ oben
+  rechts zeigt die Einträge zur offenen Station oder zum offenen Bereich. Leitlinien für Systematic, Umbrella und
+  qualitative Reviews kommen mit ihren Vorlagen (Meilensteine 10 und 11), weil sie vorher zu lesen sind.
+- **Registrierung vorbereiten:** Die App führt durch die 65 Felder des Formulars „Generalized Systematic Review
+  Registration“ von OSF (van den Akker et al. 2023) und schlägt vor, was das Review schon weiß: Titel, Team,
+  Stationen und Regeln, Kriterien, Suchen, Formularfelder. Vorschläge sind eine Projektion; eigene Texte der
+  Leitung stehen als `ProtocolDrafted` im Log, je Feld gilt der letzte. Die App reicht nichts ein und spricht
+  nicht mit OSF: Die Texte werden kopiert oder als Markdown gespeichert. Feldnamen, Hinweise und Vorschläge erscheinen in der
+  gewählten Ausgabesprache; eigene Texte bleiben, wie sie geschrieben wurden. Namen der Mitwirkenden kommen aus der lokalen Personentabelle und
+  stehen nur dann im Log, wenn die Leitung sie in ein Feld schreibt.
+- **Rapid Review:** Die Vorlage folgt den Empfehlungen der Cochrane Rapid Reviews Methods Group (Garritty et al.,
+  BMJ 2024) mit den vorhandenen Bausteinen. Die doppelt bewertete Stichprobe ist die Pilot-Station (Vorgabe 50
+  Einträge, beim Öffnen änderbar; die Leitlinie nennt etwa 20 %). Gesperrt wird über 80 % Übereinstimmung; die
+  Leitlinie nennt als Beispiel Kappa ab 0,8, Kappa steht daneben. Danach gilt „eine Stimme mit Prüfung“, also
+  strenger als reine Einzelbewertung: Eine zweite Person prüft die Ausschlüsse, alle oder eine Stichprobe. Einen
+  eigenen Piloten am Volltext gibt es nicht. Das Verzerrungsrisiko steht als Abschnitt im Extraktionsformular
+  (Instrument, Gesamturteil, Begründung); eine eigene Bewertungsstation mit Urteilen je Domäne kommt mit dem
+  Systematic Review. Eine Checkliste hat die Vorlage nicht, weil PRISMA 2020 noch nicht eingebaut ist. Die Prüfung
+  „mindestens zwei Datenbanken“ und der Peer-Review der Suche sind Hinweise in der Station, kein Gate.
+- **State-of-the-Art-Review:** Angelehnt an die sechs Schritte von Barry, Merkebu und Varpio (2022). Einen
+  verbindlichen Standard gibt es nicht; die Vorlage gibt nur die Reihenfolge vor, sperrt nichts und verlangt eine
+  Stimme je Eintrag. Die Begründung des Zeitraums und die Reflexion der eigenen Perspektive schreibt das Team
+  selbst; der Methodentext nennt die Einzelbewertung als Limitation.
 - **Eine Stimme mit Prüfung (`single_verified`):** Die Stufe ist nie verblindet, weil die zweite Person die
   Ausschlüsse sehen muss. Wer was schon bewertet hat, weiß eine Person erst nach dem nächsten Paket.
 - **Gründe:** Ausschlussgründe sind die Kürzel der Ausschlusskriterien. Beim Einlesen werden sie nur in Stufen

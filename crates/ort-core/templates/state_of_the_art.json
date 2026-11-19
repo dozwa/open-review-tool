@@ -1,0 +1,157 @@
+{
+  "key": "state_of_the_art",
+  "name": "State-of-the-Art-Review",
+  "review_type": "state_of_the_art",
+  "description": "Übersicht zum aktuellen Stand eines Feldes, angelehnt an die sechs Schritte von Barry, Merkebu und Varpio (2022): Frage und Zeitraum festlegen, suchen, auswählen, auswerten. Eine Stimme je Eintrag, keine Abschlussregeln. Einen verbindlichen Berichtsstandard gibt es nicht.",
+  "terms": {
+    "record": "Eintrag",
+    "records": "Einträge",
+    "source": "Quelle",
+    "sources": "Quellen",
+    "extraction": "Auswertung"
+  },
+  "criteria_schema": [
+    { "key": "field", "label": "Thema und Feld" },
+    { "key": "timeframe", "label": "Zeitraum" },
+    { "key": "source_type", "label": "Quellenart" }
+  ],
+  "rules": {
+    "decision_rule": { "value": "unanimous", "editable": true },
+    "min_reviewers": { "value": 1, "editable": true },
+    "maybe_as": { "value": null, "editable": true },
+    "conflict_rule": { "value": "discussion", "editable": true },
+    "blind": { "value": false, "editable": true }
+  },
+  "stations": [
+    {
+      "key": "protocol",
+      "kind": "setup",
+      "label": "Frage, Feld und Zeitraum",
+      "description": "Fragestellung und Feld beschreiben. Den Zeitraum, der als aktueller Stand gilt, begründen und als Kriterium festhalten.",
+      "tool": "protocol"
+    },
+    {
+      "key": "search",
+      "kind": "setup",
+      "label": "Suche",
+      "description": "Datenbanken wählen und auch Literatur aus der Zeit vor dem Zeitraum suchen. Die Suche wird schrittweise verfeinert; jede Fassung ist eine Version.",
+      "tool": "search"
+    },
+    {
+      "key": "import",
+      "kind": "setup",
+      "label": "Import",
+      "description": "Treffer einlesen; Dubletten werden erkannt und gezählt.",
+      "tool": "import"
+    },
+    {
+      "key": "title_abstract",
+      "kind": "screening",
+      "label": "Titel/Abstract",
+      "description": "Einträge nach Thema, Feld und Zeitraum auswählen. Spätere Treffer laufen als weitere Runde.",
+      "input": { "scope": "all" }
+    },
+    {
+      "key": "fulltext_retrieval",
+      "kind": "setup",
+      "label": "Volltexte beschaffen",
+      "description": "Volltexte der ausgewählten Einträge zuordnen oder als nicht beschaffbar vermerken.",
+      "tool": "fulltext"
+    },
+    {
+      "key": "fulltext",
+      "kind": "screening",
+      "label": "Volltext-Auswahl",
+      "description": "Am Volltext entscheiden, was in die Auswertung kommt.",
+      "input": { "scope": "from_station", "station": "title_abstract" },
+      "requires_fulltext": true
+    },
+    {
+      "key": "analysis",
+      "kind": "form",
+      "label": "Auswertung",
+      "description": "Quellen lesen und festhalten, was sie zum Stand des Feldes beitragen: Annahmen, Wendepunkte und Gegenpositionen.",
+      "form": "charting"
+    },
+    {
+      "key": "report",
+      "kind": "report",
+      "label": "Bericht",
+      "description": "Flussdiagramm, Tabelle und Methodentext. Die Begründung des Zeitraums und die Reflexion der eigenen Perspektive schreibt ihr selbst dazu."
+    }
+  ],
+  "forms": [
+    {
+      "purpose": "charting",
+      "name": "Auswertungsformular",
+      "fields": [
+        {
+          "key": "period",
+          "label": "Einordnung",
+          "description": "Liegt die Quelle im Zeitraum, der als aktueller Stand gilt?",
+          "type": "choice",
+          "required": true,
+          "group": "Einordnung",
+          "analysis": "Zeitleiste",
+          "options": ["vor dem Zeitraum", "im Zeitraum"]
+        },
+        {
+          "key": "contribution",
+          "label": "Beitrag zum Stand des Feldes",
+          "description": "Was trägt die Quelle zur Fragestellung bei?",
+          "type": "text",
+          "required": true,
+          "group": "Inhalt",
+          "analysis": ""
+        },
+        {
+          "key": "premises",
+          "label": "Annahmen und Sichtweisen",
+          "description": "Von welchen Annahmen geht die Quelle aus?",
+          "type": "text",
+          "required": false,
+          "group": "Inhalt",
+          "analysis": "Kategorien bilden"
+        },
+        {
+          "key": "turning_point",
+          "label": "Wendepunkt",
+          "description": "Steht die Quelle für eine Veränderung im Feld? Für welche?",
+          "type": "text",
+          "required": false,
+          "group": "Inhalt",
+          "analysis": "Zeitleiste"
+        },
+        {
+          "key": "stance",
+          "label": "Verhältnis zur eigenen Deutung",
+          "description": "Auch Quellen festhalten, die der entstehenden Deutung widersprechen.",
+          "type": "choice",
+          "required": false,
+          "group": "Deutung",
+          "analysis": "Häufigkeit je Kategorie",
+          "options": ["stützt sie", "widerspricht ihr", "weder noch"]
+        },
+        {
+          "key": "quote",
+          "label": "Belegzitat",
+          "description": "Wörtliche Stelle mit Seitenangabe.",
+          "type": "quote",
+          "required": false,
+          "group": "Deutung",
+          "analysis": ""
+        },
+        {
+          "key": "notes",
+          "label": "Anmerkungen",
+          "description": "",
+          "type": "text",
+          "required": false,
+          "group": "Deutung",
+          "analysis": ""
+        }
+      ]
+    }
+  ],
+  "report": {}
+}

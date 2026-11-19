@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use ort_core::fulltext::{ZoteroItem, ZoteroLink};
 use ort_core::import::{normalize_doi, year_of};
+use ort_core::tr;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -32,16 +33,16 @@ pub struct Library {
 fn get(path: &str) -> Result<String, String> {
     let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(60)).redirects(0).build();
     match agent.get(&format!("{BASE}{path}")).set("Zotero-API-Version", "3").call() {
-        Ok(response) => response.into_string().map_err(|e| format!("Antwort von Zotero nicht lesbar: {e}")),
-        Err(ureq::Error::Status(403, _)) => Err("In Zotero ist die lokale Schnittstelle ausgeschaltet. Schalte sie in den Zotero-Einstellungen unter „Erweitert“ ein: „Anderen Anwendungen auf diesem Computer erlauben, mit Zotero zu kommunizieren“.".into()),
-        Err(ureq::Error::Status(404, _)) => Err("Zotero kennt diese Bibliothek, Collection oder Datei nicht (mehr).".into()),
-        Err(ureq::Error::Status(code, _)) => Err(format!("Zotero meldet einen Fehler ({code}).")),
-        Err(ureq::Error::Transport(_)) => Err("Zotero antwortet nicht. Starte Zotero (ab Version 7) auf diesem Rechner und versuche es erneut.".into()),
+        Ok(response) => response.into_string().map_err(|e| tr!("Antwort von Zotero nicht lesbar: {}", e)),
+        Err(ureq::Error::Status(403, _)) => Err(tr!("In Zotero ist die lokale Schnittstelle ausgeschaltet. Schalte sie in den Zotero-Einstellungen unter „Erweitert“ ein: „Anderen Anwendungen auf diesem Computer erlauben, mit Zotero zu kommunizieren“.")),
+        Err(ureq::Error::Status(404, _)) => Err(tr!("Zotero kennt diese Bibliothek, Collection oder Datei nicht (mehr).")),
+        Err(ureq::Error::Status(code, _)) => Err(tr!("Zotero meldet einen Fehler ({}).", code)),
+        Err(ureq::Error::Transport(_)) => Err(tr!("Zotero antwortet nicht. Starte Zotero (ab Version 7) auf diesem Rechner und versuche es erneut.")),
     }
 }
 
 fn get_json(path: &str) -> Result<Value, String> {
-    serde_json::from_str(&get(path)?).map_err(|e| format!("Antwort von Zotero nicht lesbar: {e}"))
+    serde_json::from_str(&get(path)?).map_err(|e| tr!("Antwort von Zotero nicht lesbar: {}", e))
 }
 
 fn prefix(library_type: &str, library_id: i64) -> String {
@@ -73,6 +74,7 @@ pub fn libraries() -> Result<Vec<Library>, String> {
     let mut out = vec![Library {
         library_type: "user".into(),
         library_id: 0,
+        // Der Name steht nach dem Verknüpfen im Log (`ZoteroLibraryLinked`) und wird deshalb nicht übersetzt.
         name: "Meine Bibliothek".into(),
         collections: collections("/users/0")?,
     }];
@@ -173,11 +175,11 @@ pub fn path_from_file_url(url: &str) -> Option<PathBuf> {
 /// Pfad eines Anhangs auf diesem Rechner, wie Zotero ihn meldet.
 pub fn file_path(link: &ZoteroLink, attachment_key: &str) -> Result<PathBuf, String> {
     if !ort_core::catalog::is_zotero_key(attachment_key) {
-        return Err("Ungültiger Zotero-Schlüssel.".into());
+        return Err(tr!("Ungültiger Zotero-Schlüssel."));
     }
     let prefix = prefix(&link.library_type, link.library_id);
     let url = get(&format!("{prefix}/items/{attachment_key}/file/view/url"))?;
-    path_from_file_url(&url).ok_or_else(|| "Zotero hat für diesen Anhang keine lokale Datei.".to_string())
+    path_from_file_url(&url).ok_or_else(|| tr!("Zotero hat für diesen Anhang keine lokale Datei."))
 }
 
 #[cfg(test)]

@@ -26,6 +26,7 @@ use crate::import::normalize_doi;
 use crate::projection::{order_key, StageState};
 use crate::service::{require, Review, MANAGE_ROLES, ROLES, WRITE_ROLES};
 use crate::store::RecordRow;
+use crate::tr;
 use crate::workflow::Workflow;
 
 pub const FULLTEXT_TYPES: [&str; 3] = ["FullTextStatusSet", "ZoteroLibraryLinked", "ZoteroItemMapped"];
@@ -177,7 +178,7 @@ pub fn scan_folder(root: &Path) -> Result<Vec<FolderFile>> {
             } else if name.to_lowercase().ends_with(".pdf") && catalog::is_relative_path(&relative) {
                 out.push(FolderFile { path: relative, size: meta.len() as i64, doi: String::new() });
                 if out.len() >= MAX_FILES {
-                    return Err(invalid(format!("Der Ordner enthält mehr als {MAX_FILES} PDF-Dateien.")));
+                    return Err(invalid(tr!("Der Ordner enthält mehr als {} PDF-Dateien.", MAX_FILES)));
                 }
             }
         }
@@ -541,9 +542,9 @@ impl Review {
         let value = match folder {
             None => String::new(),
             Some(path) => {
-                let path = path.canonicalize().map_err(|_| invalid("Diesen Ordner gibt es nicht."))?;
+                let path = path.canonicalize().map_err(|_| invalid(tr!("Diesen Ordner gibt es nicht.")))?;
                 if !path.is_dir() {
-                    return Err(invalid("Das ist kein Ordner."));
+                    return Err(invalid(tr!("Das ist kein Ordner.")));
                 }
                 path.to_string_lossy().to_string()
             }
@@ -552,23 +553,24 @@ impl Review {
     }
 
     fn linked_folder(&self) -> Result<PathBuf> {
-        let folder = self.fulltext_folder()?.ok_or_else(|| invalid("Auf diesem Rechner ist kein Ordner verknüpft."))?;
+        let folder =
+            self.fulltext_folder()?.ok_or_else(|| invalid(tr!("Auf diesem Rechner ist kein Ordner verknüpft.")))?;
         folder
             .canonicalize()
-            .map_err(|_| not_found(format!("Der verknüpfte Ordner „{}“ ist nicht erreichbar.", folder.display())))
+            .map_err(|_| not_found(tr!("Der verknüpfte Ordner „{}“ ist nicht erreichbar.", folder.display())))
     }
 
     /// Pfad innerhalb des Ordners als (relativ, absolut). Weist alles ab, was außerhalb liegt.
     fn inside_folder(&self, folder: &Path, path: &str) -> Result<(String, PathBuf)> {
         let given = Path::new(path);
         let joined = if given.is_absolute() { given.to_path_buf() } else { folder.join(given) };
-        let full = joined.canonicalize().map_err(|_| not_found(format!("Die Datei „{path}“ gibt es nicht.")))?;
+        let full = joined.canonicalize().map_err(|_| not_found(tr!("Die Datei „{}“ gibt es nicht.", path)))?;
         let relative = full.strip_prefix(folder).map_err(|_| {
-            invalid("Die Datei liegt nicht im verknüpften Ordner. Lege sie dort ab; die App kopiert nichts.")
+            invalid(tr!("Die Datei liegt nicht im verknüpften Ordner. Lege sie dort ab; die App kopiert nichts."))
         })?;
         let relative = relative.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/");
         if !full.is_file() || !catalog::is_relative_path(&relative) {
-            return Err(invalid("Das ist keine Datei im verknüpften Ordner."));
+            return Err(invalid(tr!("Das ist keine Datei im verknüpften Ordner.")));
         }
         Ok((relative, full))
     }
@@ -646,14 +648,14 @@ impl Review {
     }
 
     fn require_record(&self, id: &Uuid) -> Result<RecordRow> {
-        self.store.record(id)?.ok_or_else(|| not_found("Eintrag nicht gefunden."))
+        self.store.record(id)?.ok_or_else(|| not_found(tr!("Eintrag nicht gefunden.")))
     }
 
     /// Ordnet Dateien aus dem Ordner zu: ein `FullTextStatusSet` je Eintrag mit Pfad und Prüfsumme.
     pub fn assign_fulltexts(&self, list: &[Assign]) -> Result<usize> {
         require(&self.state()?, &self.me.actor_id, &WRITE_ROLES)?;
         if list.is_empty() {
-            return Err(invalid("Keine Zuordnung gewählt."));
+            return Err(invalid(tr!("Keine Zuordnung gewählt.")));
         }
         let folder = self.linked_folder()?;
         let mut payloads = Vec::new();
@@ -679,7 +681,7 @@ impl Review {
         require(&self.state()?, &self.me.actor_id, &WRITE_ROLES)?;
         self.require_record(record_id)?;
         if reason.trim().is_empty() {
-            return Err(invalid("Warum ist der Volltext nicht beschaffbar? Der Grund fehlt."));
+            return Err(invalid(tr!("Warum ist der Volltext nicht beschaffbar? Der Grund fehlt.")));
         }
         let payload = json!({"record_id": record_id.to_string(), "status": "unavailable", "reason": reason.trim()});
         self.append("FullTextStatusSet", None, payload)?;
@@ -690,7 +692,7 @@ impl Review {
     pub fn reset_fulltext(&self, record_id: &Uuid) -> Result<()> {
         require(&self.state()?, &self.me.actor_id, &WRITE_ROLES)?;
         if !self.fulltexts()?.status.contains_key(record_id) {
-            return Err(invalid("Zu diesem Eintrag ist nichts vermerkt."));
+            return Err(invalid(tr!("Zu diesem Eintrag ist nichts vermerkt.")));
         }
         self.append("FullTextStatusSet", None, json!({"record_id": record_id.to_string(), "status": "open"}))?;
         Ok(())
@@ -716,17 +718,17 @@ impl Review {
     pub fn confirm_zotero(&self, list: &[ZoteroConfirm]) -> Result<usize> {
         require(&self.state()?, &self.me.actor_id, &MANAGE_ROLES)?;
         if list.is_empty() {
-            return Err(invalid("Keine Zuordnung gewählt."));
+            return Err(invalid(tr!("Keine Zuordnung gewählt.")));
         }
         if self.fulltexts()?.zotero.is_none() {
-            return Err(invalid("Es ist keine Zotero-Bibliothek verknüpft."));
+            return Err(invalid(tr!("Es ist keine Zotero-Bibliothek verknüpft.")));
         }
         let mut payloads = Vec::new();
         for item in list {
             self.require_record(&item.record_id)?;
             if let (Some(key), Some(file)) = (&item.attachment_key, &item.file) {
                 let (sha256, size) = hash_file(file)
-                    .map_err(|_| not_found(format!("Die Datei aus Zotero ist nicht lesbar: {}", file.display())))?;
+                    .map_err(|_| not_found(tr!("Die Datei aus Zotero ist nicht lesbar: {}", file.display())))?;
                 payloads.push(json!({
                     "record_id": item.record_id.to_string(), "status": "retrieved", "origin": "zotero",
                     "zotero_key": key, "sha256": sha256, "size": size,
@@ -758,7 +760,7 @@ impl Review {
         let fulltext = self
             .fulltext_of(record_id)?
             .filter(|f| f.status == "retrieved")
-            .ok_or_else(|| not_found("Zu diesem Eintrag ist kein Volltext beschafft."))?;
+            .ok_or_else(|| not_found(tr!("Zu diesem Eintrag ist kein Volltext beschafft.")))?;
         match fulltext.origin.as_str() {
             "zotero" => Ok(Location::Zotero(fulltext.zotero_key)),
             _ => Ok(Location::Folder(self.linked_folder()?.join(&fulltext.path))),
@@ -771,14 +773,13 @@ impl Review {
         let path = match (self.fulltext_location(record_id)?, zotero_file) {
             (Location::Folder(path), _) => path,
             (Location::Zotero(_), Some(path)) => path.to_path_buf(),
-            (Location::Zotero(_), None) => return Err(invalid("Dieser Volltext liegt in Zotero.")),
+            (Location::Zotero(_), None) => return Err(invalid(tr!("Dieser Volltext liegt in Zotero."))),
         };
         let expected = self.fulltext_of(record_id)?.map(|f| f.sha256).unwrap_or_default();
-        let data = std::fs::read(&path).map_err(|_| {
-            not_found(format!("Die Datei „{}“ ist auf diesem Rechner nicht zu finden.", path.display()))
-        })?;
+        let data = std::fs::read(&path)
+            .map_err(|_| not_found(tr!("Die Datei „{}“ ist auf diesem Rechner nicht zu finden.", path.display())))?;
         if sha256_hex(&data) != expected {
-            return Err(integrity(format!(
+            return Err(integrity(tr!(
                 "Die Datei „{}“ ist nicht mehr die zugeordnete: Ihre Prüfsumme weicht ab. Ordne den Volltext neu zu, wenn die neue Datei gelten soll.",
                 path.display()
             )));

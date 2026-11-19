@@ -8,7 +8,9 @@ use ort_core::forms::{Form, FormEntryView, FormStageView, FormsView, Frequency};
 use ort_core::fulltext::{
     Assign, FileProblem, FullTextOverview, Location, Suggestion, ZoteroConfirm, ZoteroLink, ZoteroSuggestion,
 };
+use ort_core::guidance::{self, Guideline};
 use ort_core::protocol::Protocol;
+use ort_core::registration::RegistrationDraft;
 use ort_core::report::Report;
 use ort_core::search::Search;
 use ort_core::service::{
@@ -18,7 +20,7 @@ use ort_core::service::{
 use ort_core::sources::SourceList;
 use ort_core::store::BatchRow;
 use ort_core::workflow::{self, GateResult, TemplateInfo};
-use ort_core::{Identity, PublicIdentity, Review};
+use ort_core::{i18n, tr, Identity, PublicIdentity, Review};
 use serde::Serialize;
 use serde_json::Value;
 use tauri::State;
@@ -33,7 +35,7 @@ fn err(e: impl ToString) -> String {
 }
 
 fn me(state: &AppState) -> Res<Identity> {
-    state.me.lock().map_err(err)?.clone().ok_or_else(|| "Bitte zuerst deinen Namen festlegen.".to_string())
+    state.me.lock().map_err(err)?.clone().ok_or_else(|| tr!("Bitte zuerst deinen Namen festlegen."))
 }
 
 fn review_path(state: &AppState, review_id: &Uuid) -> PathBuf {
@@ -41,7 +43,7 @@ fn review_path(state: &AppState, review_id: &Uuid) -> PathBuf {
 }
 
 fn uuid(text: &str) -> Res<Uuid> {
-    Uuid::parse_str(text).map_err(|_| format!("Ungültige ID: {text}"))
+    Uuid::parse_str(text).map_err(|_| tr!("Ungültige ID: {}", text))
 }
 
 fn open(state: &AppState, review_id: &str) -> Res<Review> {
@@ -50,6 +52,27 @@ fn open(state: &AppState, review_id: &str) -> Res<Review> {
 
 fn file_name(path: &Path) -> String {
     path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()
+}
+
+/// Führt `run` in der Sprache `lang` aus, etwa für einen Bericht in einer anderen Sprache als der
+/// der Oberfläche. Ohne Angabe gilt die Sprache der App.
+fn in_language<T>(lang: Option<&str>, run: impl FnOnce() -> T) -> Res<T> {
+    match lang.filter(|code| !code.is_empty()) {
+        None => Ok(run()),
+        Some(code) if i18n::is_known(code) => Ok(i18n::with(code, run)),
+        Some(code) => Err(tr!("Unbekannte Sprache: {}", code)),
+    }
+}
+
+// ---------------------------------------------------------------- Sprache
+
+/// Setzt die Sprache der App: Fehlermeldungen, Texte der Vorlagen, Leitlinien und Bericht.
+#[tauri::command]
+pub async fn language_set(code: String) -> Res<()> {
+    match i18n::set_default(&code) {
+        true => Ok(()),
+        false => Err(tr!("Unbekannte Sprache: {}", code)),
+    }
 }
 
 // ---------------------------------------------------------------- Identität
@@ -232,7 +255,8 @@ fn zotero_file(review: &Review, record_id: &Uuid) -> Res<Option<PathBuf>> {
         Location::Folder(_) => Ok(None),
         Location::Zotero(key) => {
             let link = review.fulltext_overview().map_err(err)?.zotero;
-            let link = link.ok_or("Der Volltext liegt in Zotero, aber es ist keine Bibliothek verknüpft.")?;
+            let link =
+                link.ok_or_else(|| tr!("Der Volltext liegt in Zotero, aber es ist keine Bibliothek verknüpft."))?;
             zotero::file_path(&link, &key).map(Some)
         }
     }
@@ -262,7 +286,7 @@ pub async fn fulltext_open_external(state: State<'_, AppState>, review_id: Strin
     let path = match (review.fulltext_location(&record).map_err(err)?, file) {
         (Location::Folder(path), _) => path,
         (_, Some(path)) => path,
-        _ => return Err("Die Datei ist nicht zu finden.".into()),
+        _ => return Err(tr!("Die Datei ist nicht zu finden.")),
     };
     std::process::Command::new("open").arg(path).spawn().map_err(err)?;
     Ok(())
@@ -280,7 +304,7 @@ pub async fn zotero_link(state: State<'_, AppState>, review_id: String, link: Zo
 
 fn linked_zotero(review: &Review) -> Res<ZoteroLink> {
     let link = review.fulltext_overview().map_err(err)?.zotero;
-    link.ok_or_else(|| "Es ist keine Zotero-Bibliothek verknüpft.".to_string())
+    link.ok_or_else(|| tr!("Es ist keine Zotero-Bibliothek verknüpft."))
 }
 
 /// Liest die verknüpfte Bibliothek und schlägt Zuordnungen für die offenen Einträge vor.
@@ -470,8 +494,9 @@ pub async fn source_type_set(
 }
 
 #[tauri::command]
-pub async fn report(state: State<'_, AppState>, review_id: String) -> Res<Report> {
-    open(&state, &review_id)?.report().map_err(err)
+pub async fn report(state: State<'_, AppState>, review_id: String, lang: Option<String>) -> Res<Report> {
+    let review = open(&state, &review_id)?;
+    in_language(lang.as_deref(), || review.report())?.map_err(err)
 }
 
 /// Hält die Registrierung des Protokolls fest; ein weiterer Eintrag berichtigt die Angaben.
@@ -487,10 +512,62 @@ pub async fn protocol_register(
     open(&state, &review_id)?.register_protocol(&registered_on, &registry, &identifier, &note).map_err(err)
 }
 
-/// Schreibt eine Datei des Berichts, etwa Diagramm, Tabelle, Methodentext oder Checkliste.
+/// Mitgelieferte Leitlinien: Zusammenfassungen je Vorlage mit Verweis auf das Original.
 #[tauri::command]
-pub async fn report_export(state: State<'_, AppState>, review_id: String, kind: String, path: String) -> Res<()> {
-    let file = open(&state, &review_id)?.report_file(&kind).map_err(err)?;
+pub async fn guidance_list() -> Res<Vec<Guideline>> {
+    Ok(guidance::guidelines())
+}
+
+/// Registrierungsformular mit Vorschlägen aus dem Review und den eigenen Texten.
+#[tauri::command]
+pub async fn registration_draft(
+    state: State<'_, AppState>,
+    review_id: String,
+    lang: Option<String>,
+) -> Res<RegistrationDraft> {
+    let review = open(&state, &review_id)?;
+    in_language(lang.as_deref(), || review.registration_draft())?.map_err(err)
+}
+
+/// Hält den eigenen Text zu einem Feld fest; ein leerer Text nimmt ihn zurück.
+#[tauri::command]
+pub async fn registration_answer(
+    state: State<'_, AppState>,
+    review_id: String,
+    key: String,
+    text: String,
+    lang: Option<String>,
+) -> Res<RegistrationDraft> {
+    let review = open(&state, &review_id)?;
+    in_language(lang.as_deref(), || review.draft_registration(&key, &text))?.map_err(err)
+}
+
+/// Schreibt die Vorbereitung als Markdown: je Feld der Name im Register und der Text zum Kopieren.
+/// Mit `lang` in dieser Sprache statt in der der App.
+#[tauri::command]
+pub async fn registration_export(
+    state: State<'_, AppState>,
+    review_id: String,
+    path: String,
+    lang: Option<String>,
+) -> Res<()> {
+    let review = open(&state, &review_id)?;
+    let text = in_language(lang.as_deref(), || review.registration_markdown())?.map_err(err)?;
+    std::fs::write(path, text).map_err(err)
+}
+
+/// Schreibt eine Datei des Berichts, etwa Diagramm, Tabelle, Methodentext oder Checkliste. Mit `lang`
+/// in dieser Sprache statt in der der App.
+#[tauri::command]
+pub async fn report_export(
+    state: State<'_, AppState>,
+    review_id: String,
+    kind: String,
+    path: String,
+    lang: Option<String>,
+) -> Res<()> {
+    let review = open(&state, &review_id)?;
+    let file = in_language(lang.as_deref(), || review.report_file(&kind))?.map_err(err)?;
     std::fs::write(path, file.content).map_err(err)
 }
 
@@ -629,7 +706,7 @@ pub async fn chain_verify(state: State<'_, AppState>, review_id: String) -> Res<
 #[tauri::command]
 pub async fn open_url(url: String) -> Res<()> {
     if !url.starts_with("https://") {
-        return Err("Nur https-Links werden geöffnet.".into());
+        return Err(tr!("Nur https-Links werden geöffnet."));
     }
     std::process::Command::new("open").arg(&url).spawn().map_err(err)?;
     Ok(())

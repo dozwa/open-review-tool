@@ -1,0 +1,113 @@
+{
+  "key": "state_of_the_art",
+  "title": "State-of-the-Art-Review",
+  "summary": "Zusammenfassung des Sechs-Schritte-Ansatzes von Barry, Merkebu und Varpio in eigenen Worten. Einen verbindlichen Standard für diese Review-Art gibt es nicht. Maßgeblich ist das Original.",
+  "sources": [
+    {
+      "key": "barry2022",
+      "citation": "Barry ES, Merkebu J, Varpio L. State-of-the-art literature review methodology: A six-step approach for knowledge synthesis. Perspect Med Educ 2022;11(5):281–288.",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC9582072/",
+      "license": "CC BY 4.0",
+      "accessed": "2026-11-19"
+    }
+  ],
+  "entries": [
+    {
+      "id": "purpose",
+      "title": "Wozu diese Review-Art dient",
+      "source": "barry2022",
+      "section": "Einordnung",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC9582072/",
+      "text": [
+        "Ein State-of-the-Art-Review deutet, wo ein Feld heute steht, wie es dorthin kam und wohin es sich entwickeln könnte. Die Synthese ist eine Deutung des Teams und kein vollständiges Abbild der Literatur."
+      ],
+      "points": [],
+      "stations": [],
+      "areas": ["report"]
+    },
+    {
+      "id": "question",
+      "title": "Frage und Feld",
+      "source": "barry2022",
+      "section": "Schritte 1 und 3",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC9582072/",
+      "text": [
+        "Am Anfang stehen eine vorläufige Fragestellung und das Feld, in dem gesucht wird. Steht der Zeitraum fest, werden Thema und Fragen daran angepasst. Die überarbeitete Fassung gehört in den Bericht."
+      ],
+      "points": [],
+      "stations": ["protocol"],
+      "areas": ["criteria", "registration"]
+    },
+    {
+      "id": "timeframe",
+      "title": "Zeitraum",
+      "source": "barry2022",
+      "section": "Schritt 2",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC9582072/",
+      "text": [
+        "Das Team verschafft sich einen Überblick über die Literatur und sucht Wendepunkte in der Geschichte des Feldes. Daraus begründet es, ab welchem Jahr oder Ereignis der aktuelle Stand beginnt. Die Begründung wird berichtet."
+      ],
+      "points": [],
+      "stations": ["protocol"],
+      "areas": ["criteria"]
+    },
+    {
+      "id": "search",
+      "title": "Suche",
+      "source": "barry2022",
+      "section": "Schritt 4",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC9582072/",
+      "text": ["Die Suche wird erprobt und schrittweise überarbeitet."],
+      "points": [
+        "Das Team wählt die Datenbanken; eine Bibliothekarin oder ein Bibliothekar wird hinzugezogen.",
+        "Auch Literatur aus der Zeit vor dem Zeitraum gehört dazu, damit sichtbar wird, wie es zum heutigen Stand kam.",
+        "Die Suchstrategie wird im Bericht oder im Anhang offengelegt."
+      ],
+      "stations": ["search"],
+      "areas": ["search"]
+    },
+    {
+      "id": "selection",
+      "title": "Auswahl",
+      "source": "barry2022",
+      "section": "Schritte 4 und 5",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC9582072/",
+      "text": [
+        "Der Ansatz schreibt weder eine Zahl von Personen noch feste Ein- und Ausschlusskriterien vor. Das Team muss nicht jede gefundene Arbeit auswerten; es zieht Quellen aus der ganzen Breite der Literatur heran."
+      ],
+      "points": [],
+      "stations": ["title_abstract", "fulltext"],
+      "areas": []
+    },
+    {
+      "id": "analysis",
+      "title": "Auswertung",
+      "source": "barry2022",
+      "section": "Schritt 5",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC9582072/",
+      "text": ["Die Auswertung geht vom Material aus und ist zugleich von der Sicht des Teams geprägt."],
+      "points": [
+        "Quellen lesen und festhalten, welche die entstehenden Annahmen stützen und welche ihnen widersprechen.",
+        "Aus den Quellen eine Zeitleiste des Feldes bauen.",
+        "Die eigene Deutung an weiteren Quellen und an Gegenpositionen prüfen.",
+        "Berichten, wie das Team mit unterschiedlichen Deutungen umgegangen ist."
+      ],
+      "stations": ["analysis"],
+      "areas": ["forms"]
+    },
+    {
+      "id": "reflexivity",
+      "title": "Reflexion und Bericht",
+      "source": "barry2022",
+      "section": "Schritt 6",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC9582072/",
+      "text": [
+        "Das Team beschreibt, wie die eigene Perspektive die Deutung geprägt hat. Diese Reflexion gilt als Zeichen von Sorgfalt.",
+        "Einen Berichtsstandard oder ein Flussdiagramm verlangt der Ansatz nicht. In den Bericht gehören die überarbeitete Fragestellung, die Begründung des Zeitraums, die Suchstrategie, der Umgang mit abweichenden Deutungen und die Reflexion."
+      ],
+      "points": [],
+      "stations": ["report"],
+      "areas": ["report"]
+    }
+  ]
+}

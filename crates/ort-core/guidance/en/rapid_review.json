@@ -1,0 +1,214 @@
+{
+  "key": "rapid_review",
+  "title": "Rapid Review",
+  "summary": "Summary of the 24 recommendations of the Cochrane Rapid Reviews Methods Group for rapid reviews of effectiveness, in our own words. The original is authoritative.",
+  "sources": [
+    {
+      "key": "garritty2024",
+      "citation": "Garritty C, Hamel C, Trivella M, et al. Updated recommendations for the Cochrane rapid review methods guidance for rapid reviews of effectiveness. BMJ 2024;384:e076335.",
+      "url": "https://doi.org/10.1136/bmj-2023-076335",
+      "license": "CC BY-NC 4.0",
+      "accessed": "2026-11-19"
+    }
+  ],
+  "entries": [
+    {
+      "id": "definition",
+      "title": "What a rapid review is",
+      "source": "garritty2024",
+      "section": "Definition",
+      "url": "https://doi.org/10.1136/bmj-2023-076335",
+      "text": [
+        "A rapid review brings evidence together systematically but with less effort: individual steps of a systematic review are simplified or left out. The team discloses which ones. Not every shortcut has to be used; a team with more time works more strictly.",
+        "Whether a rapid review is appropriate at all should be justified. A Cochrane rapid review takes six months at most."
+      ],
+      "points": [],
+      "stations": [],
+      "areas": [
+        "report"
+      ]
+    },
+    {
+      "id": "protocol",
+      "title": "Question and protocol",
+      "source": "garritty2024",
+      "section": "Recommendations 1 and 2",
+      "url": "https://doi.org/10.1136/bmj-2023-076335",
+      "text": [
+        "The people who need the result are involved in the question, criteria and outcomes and are consulted repeatedly along the way.",
+        "A rapid review has a protocol too, with the review question, population, intervention, comparator, outcomes and methods. It should be publicly available, for example through PROSPERO or the Open Science Framework. Changes after the start are allowed but are recorded and reported."
+      ],
+      "points": [],
+      "stations": [
+        "protocol"
+      ],
+      "areas": [
+        "criteria",
+        "members",
+        "registration"
+      ]
+    },
+    {
+      "id": "eligibility",
+      "title": "Criteria and limits",
+      "source": "garritty2024",
+      "section": "Recommendation 3",
+      "url": "https://doi.org/10.1136/bmj-2023-076335",
+      "text": [
+        "The criteria are set out clearly, with all limits. Every limit is justified."
+      ],
+      "points": [
+        "Limit the number of interventions and comparators.",
+        "Limit the outcomes to those most important for the decision, seven at most.",
+        "Limit the search period only with a justification.",
+        "Limit the setting only with a justification.",
+        "Limit the language to English at selection, not already in the search; allow other languages where the topic calls for it.",
+        "Prefer high-quality study designs: good systematic reviews first, then randomised trials, otherwise other designs."
+      ],
+      "stations": [
+        "protocol"
+      ],
+      "areas": [
+        "criteria"
+      ]
+    },
+    {
+      "id": "search",
+      "title": "Search",
+      "source": "garritty2024",
+      "section": "Recommendations 4 to 7",
+      "url": "https://doi.org/10.1136/bmj-2023-076335",
+      "text": [
+        "The search follows the same steps as for a systematic review, with fewer sources."
+      ],
+      "points": [
+        "An information specialist helps to develop the strategy.",
+        "A few databases, but at least two, that suit the topic. For randomised trials, two of MEDLINE, CENTRAL and Embase.",
+        "The main strategy is checked with the PRESS checklist; at the least for typing errors, missing terms and operators.",
+        "Grey literature and supplementary searches only where the topic calls for them; justify the choice of sources."
+      ],
+      "stations": [
+        "search"
+      ],
+      "areas": [
+        "search"
+      ]
+    },
+    {
+      "id": "pilot",
+      "title": "Piloting the selection",
+      "source": "garritty2024",
+      "section": "Recommendation 8",
+      "url": "https://doi.org/10.1136/bmj-2023-076335",
+      "text": [
+        "Before selection, the whole team tests the procedure on a purposely chosen sample, for example 50 to 100 records, and adjusts the criteria and the form. The same applies to full texts."
+      ],
+      "points": [],
+      "stations": [
+        "pilot_title_abstract"
+      ],
+      "areas": [
+        "criteria"
+      ]
+    },
+    {
+      "id": "selection",
+      "title": "Start in duplicate, continue alone",
+      "source": "garritty2024",
+      "section": "Recommendation 9",
+      "url": "https://doi.org/10.1136/bmj-2023-076335",
+      "text": [
+        "Two people independently screen part of the records, for example 20%, and resolve their differences. If agreement is good, for example kappa of 0.8 or more, one person screens alone from then on. If it is not, two people carry on until it improves.",
+        "The same applies to full texts. If resources allow, a second person checks all excluded full texts. With a few hundred hits it is worth screening in duplicate throughout. One person alone from the outset is not recommended for Cochrane rapid reviews."
+      ],
+      "points": [],
+      "stations": [
+        "pilot_title_abstract",
+        "title_abstract",
+        "fulltext"
+      ],
+      "areas": []
+    },
+    {
+      "id": "extraction",
+      "title": "Data extraction",
+      "source": "garritty2024",
+      "section": "Recommendations 10 to 13",
+      "url": "https://doi.org/10.1136/bmj-2023-076335",
+      "text": [
+        "Only what answers the question is extracted."
+      ],
+      "points": [
+        "Limit the form to the most important items.",
+        "In the pilot everyone extracts the same studies, at least two.",
+        "One person extracts; a second checks at least the decisive items, that is the definition and values of the outcomes, against the full text.",
+        "Where a good systematic review exists, data can be taken from it."
+      ],
+      "stations": [
+        "extraction_pilot",
+        "extraction"
+      ],
+      "areas": [
+        "forms"
+      ]
+    },
+    {
+      "id": "risk_of_bias",
+      "title": "Risk of bias",
+      "source": "garritty2024",
+      "section": "Recommendations 14 to 16",
+      "url": "https://doi.org/10.1136/bmj-2023-076335",
+      "text": [
+        "Leaving out the risk of bias assessment altogether is not recommended."
+      ],
+      "points": [
+        "Use validated instruments that suit the study design.",
+        "Assess at least the most important outcomes.",
+        "One person assesses, a second checks the judgements."
+      ],
+      "stations": [
+        "extraction"
+      ],
+      "areas": [
+        "forms"
+      ]
+    },
+    {
+      "id": "synthesis",
+      "title": "Synthesis and certainty of the evidence",
+      "source": "garritty2024",
+      "section": "Recommendations 17 to 23",
+      "url": "https://doi.org/10.1136/bmj-2023-076335",
+      "text": [
+        "The analysis plan is part of the protocol. A descriptive overview of the included studies comes first, then the synthesis of the results. A meta-analysis is an option if the data support it and resources suffice.",
+        "Certainty of the evidence is judged with GRADE if time and resources suffice, limited to the main comparison and the decisive outcomes. One person judges, a second checks."
+      ],
+      "points": [],
+      "stations": [
+        "report"
+      ],
+      "areas": [
+        "report"
+      ]
+    },
+    {
+      "id": "reporting",
+      "title": "Report and limitations",
+      "source": "garritty2024",
+      "section": "Recommendation 24",
+      "url": "https://doi.org/10.1136/bmj-2023-076335",
+      "text": [
+        "The report describes the chosen approach and names every shortcut. It says which biases may result and how they affect the interpretation of the results.",
+        "Reporting follows PRISMA as far as it fits; the protocol follows PRISMA-P, the search PRISMA-S. A dedicated extension for rapid reviews is in preparation."
+      ],
+      "points": [],
+      "stations": [
+        "report"
+      ],
+      "areas": [
+        "report",
+        "registration"
+      ]
+    }
+  ]
+}

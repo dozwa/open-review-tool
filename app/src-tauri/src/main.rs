@@ -35,6 +35,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::language_set,
             commands::identity_get,
             commands::identity_create,
             commands::identity_export,
@@ -86,6 +87,10 @@ fn main() {
             commands::report,
             commands::report_export,
             commands::protocol_register,
+            commands::guidance_list,
+            commands::registration_draft,
+            commands::registration_answer,
+            commands::registration_export,
             commands::forms,
             commands::form_publish,
             commands::form_confirm,

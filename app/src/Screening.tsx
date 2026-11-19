@@ -8,25 +8,27 @@ import { api, canVote, errorText, FullText, MyVote, Progress, reasonsOf, RecordF
 import { CriteriaView } from "./Criteria";
 import { PdfView } from "./PdfView";
 import { DECISION_LABEL, RecordView } from "./StagePages";
+import { HelpButton } from "./Guidance";
+import { formatNumber, t, tn, tx } from "./i18n";
 import { Banner, Empty, Icon, Kbd, Pill, Segmented } from "./ui";
 
 const PAGE = 200;
 const DECISION_FILTERS: [string, string][] = [
-  ["", "Alle"],
-  ["open", "Offen"],
+  ["", t("Alle")],
+  ["open", t("Offen")],
   ["include", "Include"],
   ["maybe", "Maybe"],
   ["exclude", "Exclude"],
-  ["conflict", "Konflikt"],
+  ["conflict", t("Konflikt")],
 ];
 const VOTE_FILTERS: Record<string, { label: string; min?: number; max?: number }> = {
-  "": { label: "beliebig viele Stimmen" },
-  none: { label: "keine Stimme", max: 0 },
-  min1: { label: "mindestens 1 Stimme", min: 1 },
-  min2: { label: "mindestens 2 Stimmen", min: 2 },
-  max1: { label: "höchstens 1 Stimme", max: 1 },
+  "": { label: t("beliebig viele Stimmen") },
+  none: { label: t("keine Stimme"), max: 0 },
+  min1: { label: t("mindestens 1 Stimme"), min: 1 },
+  min2: { label: t("mindestens 2 Stimmen"), min: 2 },
+  max1: { label: t("höchstens 1 Stimme"), max: 1 },
 };
-const STATUS_LABEL: Record<string, string> = { disagreement: "Konflikt", needs_clarification: "Klärung", consensus: "Konsens" };
+const STATUS_LABEL: Record<string, string> = { disagreement: t("Konflikt"), needs_clarification: t("Zur Klärung"), consensus: t("Konsens") };
 
 /** Merkt sich eine Einstellung der Ansicht auf diesem Rechner. Ohne Speicher gilt der Standard. */
 function useStored(key: string, fallback: boolean): [boolean, (value: boolean) => void] {
@@ -181,7 +183,7 @@ function Screening() {
 
   const vote = useCallback((choice: string) => {
     if (choice === "exclude" && required && !primary) {
-      setError("In dieser Stufe braucht jeder Ausschluss genau einen Hauptgrund. Wähle ihn mit den Tasten 1 bis 9.");
+      setError(t("In dieser Stufe braucht jeder Ausschluss genau einen Hauptgrund. Wähle ihn mit den Tasten 1 bis 9."));
       return;
     }
     const excluded = choice === "exclude";
@@ -225,7 +227,7 @@ function Screening() {
 
   if (!detail) return error ? <Banner kind="error">{error}</Banner> : null;
   const { stage, criteria } = detail;
-  const records = term(detail.terms, "records", "Einträge");
+  const records = term(detail.terms, "records", t("Einträge"));
   const locked = new Set(list?.locked ?? []);
   const voters = detail.members.filter((m) => canVote(m.role));
   const mayVote = canVote(detail.role) && !stage.closed;
@@ -237,44 +239,45 @@ function Screening() {
   return (
     <div className={`screening${showCriteria ? "" : " no-criteria"}`}>
       <div className="screening-top">
-        <Link to={`/reviews/${reviewId}`} className="back-link"><Icon name="back" size={14} /> Review</Link>
+        <Link to={`/reviews/${reviewId}`} className="back-link"><Icon name="back" size={14} /> {t("Review")}</Link>
         <div className="screening-title">
           <strong>{stage.name}</strong>
-          {stage.blind_active && <Pill tone="violet"><Icon name="lock" size={11} /> verblindet</Pill>}
-          {stage.closed && <Pill>geschlossen</Pill>}
+          {stage.blind_active && <Pill tone="violet"><Icon name="lock" size={11} /> {t("verblindet")}</Pill>}
+          {stage.closed && <Pill>{t("geschlossen")}</Pill>}
         </div>
         <span className="screening-tools">
           <span className="screening-count">{progress ? `${progress.done} / ${progress.total}` : ""}</span>
-          <button className="ghost" aria-pressed={showCriteria} onClick={() => setShowCriteria(!showCriteria)} title="Kriterien ein- oder ausblenden"><Icon name="list" size={14} /> Kriterien</button>
+          <button className="ghost" aria-pressed={showCriteria} onClick={() => setShowCriteria(!showCriteria)} title={t("Kriterien ein- oder ausblenden")}><Icon name="list" size={14} /> {t("Kriterien")}</button>
+          <HelpButton reviewId={reviewId} station={stage.station} context={stage.name} />
         </span>
       </div>
       <div className="progress-line"><span style={{ width: `${pct}%` }} /></div>
       {error && <Banner kind="error" onClose={() => setError("")}>{error}</Banner>}
 
       <div className="screening-columns">
-        <aside className="screening-list" aria-label={`Liste der ${records}`}>
+        <aside className="screening-list" aria-label={t("Liste der {records}", { records })}>
           <div className="filters">
-            <input type="search" value={query} onChange={(e) => { setQuery(e.target.value); setLimit(PAGE); }} placeholder="In Titel und Abstract suchen" aria-label="Suche" />
-            <div className="filter-chips" role="group" aria-label="Entscheidung">
+            <input type="search" value={query} onChange={(e) => { setQuery(e.target.value); setLimit(PAGE); }} placeholder={t("In Titel und Abstract suchen")} aria-label={t("Suche")} />
+            <div className="filter-chips" role="group" aria-label={t("Entscheidung")}>
               {DECISION_FILTERS.map(([value, label]) => {
                 const off = value === "conflict" && locked.has("conflict");
                 return (
-                  <button key={value} className={`chip toggle${decision === value ? " active" : ""}`} aria-pressed={decision === value} disabled={off} title={off ? "Erst nach dem Entblinden" : undefined} onClick={() => { setDecision(value); setLimit(PAGE); }}>
+                  <button key={value} className={`chip toggle${decision === value ? " active" : ""}`} aria-pressed={decision === value} disabled={off} title={off ? t("Erst nach dem Entblinden") : undefined} onClick={() => { setDecision(value); setLimit(PAGE); }}>
                     {off && <Icon name="lock" size={10} />} {label}
                   </button>
                 );
               })}
             </div>
-            <select value={person} onChange={(e) => { setPerson(e.target.value); setLimit(PAGE); }} disabled={locked.has("person")} aria-label="Person">
-              <option value="">Meine Stimmen</option>
-              {voters.filter((m) => !m.is_me).map((m) => <option key={m.actor_id} value={m.actor_id}>Stimmen von {m.name}</option>)}
+            <select value={person} onChange={(e) => { setPerson(e.target.value); setLimit(PAGE); }} disabled={locked.has("person")} aria-label={t("Person")}>
+              <option value="">{t("Meine Stimmen")}</option>
+              {voters.filter((m) => !m.is_me).map((m) => <option key={m.actor_id} value={m.actor_id}>{t("Stimmen von {name}", { name: m.name })}</option>)}
             </select>
-            <select value={voteCount} onChange={(e) => { setVoteCount(e.target.value); setLimit(PAGE); }} disabled={locked.has("votes")} aria-label="Zahl der Stimmen">
+            <select value={voteCount} onChange={(e) => { setVoteCount(e.target.value); setLimit(PAGE); }} disabled={locked.has("votes")} aria-label={t("Zahl der Stimmen")}>
               {Object.entries(VOTE_FILTERS).map(([value, f]) => <option key={value} value={value}>{f.label}</option>)}
             </select>
-            {locked.size > 0 && <small className="locked-hint"><Icon name="lock" size={11} /> Verblindet: Konflikt, Person und Zahl der Stimmen sind gesperrt.</small>}
+            {locked.size > 0 && <small className="locked-hint"><Icon name="lock" size={11} /> {t("Verblindet: Konflikt, Person und Zahl der Stimmen sind gesperrt.")}</small>}
             {list && list.keywords.length > 0 && (
-              <div className="filter-chips" role="group" aria-label="Schlagwörter">
+              <div className="filter-chips" role="group" aria-label={t("Schlagwörter")}>
                 {list.keywords.map((k) => (
                   <button key={`${k.kind}-${k.keyword}`} className={`chip toggle kw-${k.kind}${keyword === k.keyword ? " active" : ""}`} aria-pressed={keyword === k.keyword} onClick={() => { setKeyword(keyword === k.keyword ? "" : k.keyword); setLimit(PAGE); }}>
                     {k.keyword} <span className="count">{k.n}</span>
@@ -283,31 +286,31 @@ function Screening() {
               </div>
             )}
           </div>
-          <p className="list-count">{list ? `${list.total.toLocaleString("de-DE")} ${records}` : ""}</p>
+          <p className="list-count">{list ? `${formatNumber(list.total)} ${records}` : ""}</p>
           <ol className="record-list">
             {list?.items.map((r) => (
               <li key={r.id}>
                 <button className={`record-row${record?.id === r.id ? " current" : ""}`} aria-current={record?.id === r.id} onClick={() => select(r.id)}>
-                  <span className={`dot d-${r.my_decision ?? "open"}`} title={r.my_decision ? `Deine Stimme: ${DECISION_LABEL[r.my_decision]}` : "Noch nicht bewertet"} />
+                  <span className={`dot d-${r.my_decision ?? "open"}`} title={r.my_decision ? t("Deine Stimme: {decision}", { decision: DECISION_LABEL[r.my_decision] ?? r.my_decision }) : t("Noch nicht bewertet")} />
                   <span className="record-row-text">
-                    <span className="record-row-title">{r.title || "(ohne Titel)"}</span>
+                    <span className="record-row-title">{r.title || t("(ohne Titel)")}</span>
                     <small>
-                      {[r.year, r.n_votes !== null ? `${r.n_votes} ${r.n_votes === 1 ? "Stimme" : "Stimmen"}` : null, r.status ? STATUS_LABEL[r.status] : null].filter(Boolean).join(" · ")}
+                      {[r.year, r.n_votes !== null ? tn("{n} Stimme", "{n} Stimmen", r.n_votes) : null, r.status ? STATUS_LABEL[r.status] : null].filter(Boolean).join(" · ")}
                     </small>
                   </span>
                 </button>
               </li>
             ))}
           </ol>
-          {list && list.total > list.items.length && <button className="ghost more" onClick={() => setLimit(limit + PAGE)}>Weitere laden</button>}
-          {list && list.total === 0 && <p className="muted list-empty">Kein Eintrag passt zu den Filtern.</p>}
+          {list && list.total > list.items.length && <button className="ghost more" onClick={() => setLimit(limit + PAGE)}>{t("Weitere laden")}</button>}
+          {list && list.total === 0 && <p className="muted list-empty">{t("Kein Eintrag passt zu den Filtern.")}</p>}
         </aside>
 
         <section className="screening-main">
           {!record && (
-            <Empty icon="check" title={stage.closed ? "Diese Stufe ist geschlossen" : "Alles bewertet"}>
-              {stage.closed ? "Einträge lassen sich über die Liste weiter ansehen." : "Speichere im Review unter „Austausch“ eine Rückmeldung und schick sie an die Leitung."}
-              <div><Link className="button primary" to={`/reviews/${reviewId}`}>Zum Review</Link></div>
+            <Empty icon="check" title={stage.closed ? t("Diese Stufe ist geschlossen") : t("Alles bewertet")}>
+              {stage.closed ? t("Einträge lassen sich über die Liste weiter ansehen.") : t("Speichere im Review unter „Austausch“ eine Rückmeldung und schick sie an die Leitung.")}
+              <div><Link className="button primary" to={`/reviews/${reviewId}`}>{t("Zum Review")}</Link></div>
             </Empty>
           )}
           {record && (
@@ -315,22 +318,22 @@ function Screening() {
               {hasFulltext && (
                 <div className="reading-switch">
                   <Segmented<"abstract" | "fulltext">
-                    label="Ansicht"
+                    label={t("Ansicht")}
                     value={showFulltext ? "fulltext" : "abstract"}
                     onChange={setReading}
-                    options={[{ value: "abstract", label: "Titel und Abstract" }, { value: "fulltext", label: "Volltext" }]}
+                    options={[{ value: "abstract", label: t("Titel und Abstract") }, { value: "fulltext", label: t("Volltext") }]}
                   />
                   {showFulltext && <span className="reading-title" title={record.title}>{record.title}</span>}
                 </div>
               )}
-              {fulltext?.status === "unavailable" && <p className="reading-note">Volltext nicht beschaffbar: {fulltext.reason}</p>}
+              {fulltext?.status === "unavailable" && <p className="reading-note">{t("Volltext nicht beschaffbar: {reason}", { reason: fulltext.reason ?? "" })}</p>}
               {showFulltext ? (
                 <PdfView load={loadFulltext} onExternal={() => api.openFulltext(reviewId, record.id).catch((e) => setError(errorText(e)))} />
               ) : (
                 <div className="reading">
                   <RecordView record={record} criteria={criteria} large showSource={showSource} />
                   <button className="link source-toggle" onClick={() => setShowSource(!showSource)}>
-                    {showSource ? "Autoren und Zeitschrift ausblenden" : "Autoren und Zeitschrift einblenden"}
+                    {showSource ? t("Autoren und Zeitschrift ausblenden") : t("Autoren und Zeitschrift einblenden")}
                   </button>
                 </div>
               )}
@@ -338,12 +341,18 @@ function Screening() {
                 <div className="decision-dock">
                   {myVote && (
                     <p className="my-vote">
-                      Deine Stimme: <strong>{DECISION_LABEL[myVote.decision] ?? myVote.decision}</strong>
-                      {myVote.primary_reason && ` · Hauptgrund ${myVote.primary_reason}`}. Eine neue Entscheidung ersetzt sie; die alte bleibt im Log.
+                      {myVote.primary_reason
+                        ? tx("Deine Stimme: {decision} · Hauptgrund {reason}. Eine neue Entscheidung ersetzt sie; die alte bleibt im Log.", {
+                            decision: <strong>{DECISION_LABEL[myVote.decision] ?? myVote.decision}</strong>,
+                            reason: myVote.primary_reason,
+                          })
+                        : tx("Deine Stimme: {decision}. Eine neue Entscheidung ersetzt sie; die alte bleibt im Log.", {
+                            decision: <strong>{DECISION_LABEL[myVote.decision] ?? myVote.decision}</strong>,
+                          })}
                     </p>
                   )}
                   {reasonList.length > 0 && (
-                    <div className="reasons" role="group" aria-label={required ? "Hauptgrund für den Ausschluss" : "Ausschlussgründe"}>
+                    <div className="reasons" role="group" aria-label={required ? t("Hauptgrund für den Ausschluss") : t("Ausschlussgründe")}>
                       {reasonList.map((reason, i) => {
                         const on = required ? primary === reason.code : reasons.includes(reason.code);
                         return (
@@ -354,11 +363,11 @@ function Screening() {
                       })}
                     </div>
                   )}
-                  {required && <p className="reason-hint">{primary ? `Hauptgrund für den Ausschluss: ${primary}` : "Ein Ausschluss braucht in dieser Stufe genau einen Hauptgrund."}</p>}
+                  {required && <p className="reason-hint">{primary ? t("Hauptgrund für den Ausschluss: {reason}", { reason: primary }) : t("Ein Ausschluss braucht in dieser Stufe genau einen Hauptgrund.")}</p>}
                   <div className="dock-row">
-                    <input className="note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Notiz (optional)" aria-label="Notiz" />
-                    <button className="ghost" disabled={busy} onClick={() => send((id) => api.flag(reviewId, stageId, id, note), "Zur Klärung")} title="Nicht entscheidbar, zur Klärung geben">
-                      <Icon name="flag" size={14} /> Klärung
+                    <input className="note" value={note} onChange={(e) => setNote(e.target.value)} placeholder={t("Notiz (optional)")} aria-label={t("Notiz")} />
+                    <button className="ghost" disabled={busy} onClick={() => send((id) => api.flag(reviewId, stageId, id, note), t("Zur Klärung"))} title={t("Nicht entscheidbar, zur Klärung geben")}>
+                      <Icon name="flag" size={14} /> {t("Zur Klärung")}
                     </button>
                   </div>
                   <div className="vote-buttons">
@@ -372,7 +381,7 @@ function Screening() {
                       <Icon name="x" /> Exclude <Kbd>E</Kbd>
                     </button>
                   </div>
-                  {last && <p className="last-vote">Gespeichert: {last}</p>}
+                  {last && <p className="last-vote">{t("Gespeichert: {label}", { label: last })}</p>}
                 </div>
               )}
             </>
@@ -380,9 +389,9 @@ function Screening() {
         </section>
 
         {showCriteria && (
-          <aside className="screening-criteria" aria-label="Kriterien">
-            <h2>Kriterien <small>Version {criteria.version}</small></h2>
-            {detail.newer_criteria && <p className="criteria-newer">Es gibt eine neuere Version. Sie gilt ab der nächsten Stufe; diese Stufe bleibt bei Version {criteria.version}.</p>}
+          <aside className="screening-criteria" aria-label={t("Kriterien")}>
+            <h2>{t("Kriterien")} <small>{t("Version {version}", { version: criteria.version })}</small></h2>
+            {detail.newer_criteria && <p className="criteria-newer">{t("Es gibt eine neuere Version. Sie gilt ab der nächsten Stufe; diese Stufe bleibt bei Version {version}.", { version: criteria.version })}</p>}
             <CriteriaView criteria={criteria} schema={detail.criteria_schema} />
           </aside>
         )}

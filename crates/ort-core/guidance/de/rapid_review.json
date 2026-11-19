@@ -1,0 +1,164 @@
+{
+  "key": "rapid_review",
+  "title": "Rapid Review",
+  "summary": "Zusammenfassung der 24 Empfehlungen der Cochrane Rapid Reviews Methods Group für Rapid Reviews zur Wirksamkeit, in eigenen Worten. Maßgeblich ist das Original.",
+  "sources": [
+    {
+      "key": "garritty2024",
+      "citation": "Garritty C, Hamel C, Trivella M, et al. Updated recommendations for the Cochrane rapid review methods guidance for rapid reviews of effectiveness. BMJ 2024;384:e076335.",
+      "url": "https://doi.org/10.1136/bmj-2023-076335",
+      "license": "CC BY-NC 4.0",
+      "accessed": "2026-11-19"
+    }
+  ],
+  "entries": [
+    {
+      "id": "definition",
+      "title": "Was ein Rapid Review ist",
+      "source": "garritty2024",
+      "section": "Definition",
+      "url": "https://doi.org/10.1136/bmj-2023-076335",
+      "text": [
+        "Ein Rapid Review fasst Evidenz systematisch, aber mit weniger Aufwand zusammen: Einzelne Schritte eines Systematic Review werden vereinfacht oder weggelassen. Welche das sind, legt das Team offen. Nicht jede Abkürzung muss genutzt werden; wer Zeit hat, arbeitet strenger.",
+        "Ob ein Rapid Review überhaupt angemessen ist, soll begründet werden. Ein Cochrane Rapid Review dauert höchstens sechs Monate."
+      ],
+      "points": [],
+      "stations": [],
+      "areas": ["report"]
+    },
+    {
+      "id": "protocol",
+      "title": "Frage und Protokoll",
+      "source": "garritty2024",
+      "section": "Empfehlungen 1 und 2",
+      "url": "https://doi.org/10.1136/bmj-2023-076335",
+      "text": [
+        "Die Menschen, die das Ergebnis brauchen, werden bei Frage, Kriterien und Endpunkten einbezogen und im Verlauf wiederholt gefragt.",
+        "Auch ein Rapid Review hat ein Protokoll mit Fragestellung, Population, Intervention, Vergleich, Endpunkten und Methoden. Es soll öffentlich zugänglich sein, etwa über PROSPERO oder das Open Science Framework. Änderungen nach dem Start sind erlaubt, werden aber festgehalten und berichtet."
+      ],
+      "points": [],
+      "stations": ["protocol"],
+      "areas": ["criteria", "members", "registration"]
+    },
+    {
+      "id": "eligibility",
+      "title": "Kriterien und Einschränkungen",
+      "source": "garritty2024",
+      "section": "Empfehlung 3",
+      "url": "https://doi.org/10.1136/bmj-2023-076335",
+      "text": ["Die Kriterien werden klar festgelegt, mit allen Einschränkungen. Jede Einschränkung wird begründet."],
+      "points": [
+        "Zahl der Interventionen und Vergleiche begrenzen.",
+        "Endpunkte auf die wichtigsten für die Entscheidung begrenzen, höchstens sieben.",
+        "Zeitraum der Suche nur mit Begründung einschränken.",
+        "Setting nur mit Begründung einschränken.",
+        "Sprache erst bei der Auswahl auf Englisch begrenzen, nicht schon in der Suche; andere Sprachen zulassen, wenn das Thema es verlangt.",
+        "Hochwertige Studiendesigns bevorzugen: zuerst gute systematische Reviews, dann randomisierte Studien, sonst andere Designs."
+      ],
+      "stations": ["protocol"],
+      "areas": ["criteria"]
+    },
+    {
+      "id": "search",
+      "title": "Suche",
+      "source": "garritty2024",
+      "section": "Empfehlungen 4 bis 7",
+      "url": "https://doi.org/10.1136/bmj-2023-076335",
+      "text": ["Die Suche folgt denselben Schritten wie bei einem Systematic Review, mit weniger Quellen."],
+      "points": [
+        "Eine Fachperson für Literatursuche entwickelt die Strategie mit.",
+        "Wenige, aber mindestens zwei Datenbanken, die zum Thema passen. Für randomisierte Studien zwei aus MEDLINE, CENTRAL und Embase.",
+        "Die Hauptstrategie wird mit der PRESS-Checkliste geprüft; mindestens auf Tippfehler, fehlende Begriffe und Operatoren.",
+        "Graue Literatur und ergänzende Suchen nur, wenn das Thema es verlangt; die Auswahl der Quellen begründen."
+      ],
+      "stations": ["search"],
+      "areas": ["search"]
+    },
+    {
+      "id": "pilot",
+      "title": "Pilot der Auswahl",
+      "source": "garritty2024",
+      "section": "Empfehlung 8",
+      "url": "https://doi.org/10.1136/bmj-2023-076335",
+      "text": [
+        "Vor der Auswahl testet das ganze Team das Vorgehen an einer gezielt gewählten Stichprobe, zum Beispiel 50 bis 100 Einträgen, und passt Kriterien und Formular an. Dasselbe gilt für den Volltext."
+      ],
+      "points": [],
+      "stations": ["pilot_title_abstract"],
+      "areas": ["criteria"]
+    },
+    {
+      "id": "selection",
+      "title": "Doppelt beginnen, einfach fortsetzen",
+      "source": "garritty2024",
+      "section": "Empfehlung 9",
+      "url": "https://doi.org/10.1136/bmj-2023-076335",
+      "text": [
+        "Zwei Personen bewerten unabhängig einen Teil der Einträge, zum Beispiel 20 %, und klären ihre Abweichungen. Ist die Übereinstimmung gut, zum Beispiel Kappa ab 0,8, bewertet danach eine Person allein. Ist sie es nicht, bleibt es bei zwei Personen, bis sie besser wird.",
+        "Dasselbe gilt für den Volltext. Wenn es die Mittel erlauben, prüft eine zweite Person alle ausgeschlossenen Volltexte. Bei wenigen hundert Treffern lohnt es, durchgehend doppelt zu bewerten. Eine Person allein von Anfang an wird für Cochrane Rapid Reviews nicht empfohlen."
+      ],
+      "points": [],
+      "stations": ["pilot_title_abstract", "title_abstract", "fulltext"],
+      "areas": []
+    },
+    {
+      "id": "extraction",
+      "title": "Datenextraktion",
+      "source": "garritty2024",
+      "section": "Empfehlungen 10 bis 13",
+      "url": "https://doi.org/10.1136/bmj-2023-076335",
+      "text": ["Extrahiert wird nur, was die Frage beantwortet."],
+      "points": [
+        "Das Formular auf die wichtigsten Angaben begrenzen.",
+        "Im Pilot extrahieren alle dieselben Studien, mindestens zwei.",
+        "Eine Person extrahiert; eine zweite prüft mindestens die entscheidenden Angaben, also Definition und Werte der Endpunkte, am Volltext.",
+        "Liegt ein guter systematischer Review vor, können Daten daraus übernommen werden."
+      ],
+      "stations": ["extraction_pilot", "extraction"],
+      "areas": ["forms"]
+    },
+    {
+      "id": "risk_of_bias",
+      "title": "Verzerrungsrisiko",
+      "source": "garritty2024",
+      "section": "Empfehlungen 14 bis 16",
+      "url": "https://doi.org/10.1136/bmj-2023-076335",
+      "text": ["Die Bewertung des Verzerrungsrisikos ganz wegzulassen, wird nicht empfohlen."],
+      "points": [
+        "Geprüfte Instrumente nutzen, die zum Studiendesign passen.",
+        "Mindestens die wichtigsten Endpunkte bewerten.",
+        "Eine Person bewertet, eine zweite prüft die Urteile."
+      ],
+      "stations": ["extraction"],
+      "areas": ["forms"]
+    },
+    {
+      "id": "synthesis",
+      "title": "Synthese und Vertrauen in die Evidenz",
+      "source": "garritty2024",
+      "section": "Empfehlungen 17 bis 23",
+      "url": "https://doi.org/10.1136/bmj-2023-076335",
+      "text": [
+        "Der Analyseplan steht im Protokoll. Am Anfang steht eine beschreibende Übersicht der eingeschlossenen Studien, dann die Synthese der Ergebnisse. Eine Meta-Analyse kommt in Frage, wenn die Daten sie tragen und die Mittel reichen.",
+        "Das Vertrauen in die Evidenz wird nach GRADE beurteilt, wenn Zeit und Mittel reichen, begrenzt auf den Hauptvergleich und die entscheidenden Endpunkte. Eine Person urteilt, eine zweite prüft."
+      ],
+      "points": [],
+      "stations": ["report"],
+      "areas": ["report"]
+    },
+    {
+      "id": "reporting",
+      "title": "Bericht und Limitationen",
+      "source": "garritty2024",
+      "section": "Empfehlung 24",
+      "url": "https://doi.org/10.1136/bmj-2023-076335",
+      "text": [
+        "Der Bericht beschreibt das gewählte Vorgehen und nennt jede Abkürzung. Er sagt, welche Verzerrungen dadurch entstehen können und wie sie die Deutung der Ergebnisse beeinflussen.",
+        "Berichtet wird nach PRISMA, soweit es passt; das Protokoll nach PRISMA-P, die Suche nach PRISMA-S. Eine eigene Erweiterung für Rapid Reviews ist in Arbeit."
+      ],
+      "points": [],
+      "stations": ["report"],
+      "areas": ["report", "registration"]
+    }
+  ]
+}

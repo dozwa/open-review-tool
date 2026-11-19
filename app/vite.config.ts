@@ -10,6 +10,8 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     watch: { ignored: ["**/src-tauri/**"] },
+    // Die Vorschau im Browser liest Leitlinien und Registrierungsformular aus dem Kern (`../crates`).
+    fs: { allow: [".."] },
   },
   build: {
     target: "safari15",

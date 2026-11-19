@@ -14,6 +14,7 @@ use crate::criteria::valid_code;
 use crate::event::Event;
 use crate::forms::{self, Field, PURPOSES};
 use crate::service::ROLES;
+use crate::tr;
 use crate::workflow::{GateResult, Template, CONFLICT_RULES, DECISION_RULES};
 
 /// In welcher Kette ein Ereignis liegt.
@@ -61,7 +62,7 @@ pub struct Spec {
     check: fn(&Value) -> Check,
 }
 
-pub static CATALOG: [Spec; 29] = [
+pub static CATALOG: [Spec; 30] = [
     Spec {
         name: "ReviewCreated",
         version: 1,
@@ -255,6 +256,14 @@ pub static CATALOG: [Spec; 29] = [
         check: protocol_registered,
     },
     Spec {
+        name: "ProtocolDrafted",
+        version: 1,
+        chain: Chain::Main,
+        writer: Writer::Manage,
+        stage: StageRule::None,
+        check: protocol_drafted,
+    },
+    Spec {
         name: "FormVersionPublished",
         version: 1,
         chain: Chain::Main,
@@ -319,18 +328,18 @@ pub fn is_blindable(event_type: &str) -> bool {
 
 /// Prüft Typ, Schema-Version, Stufenbezug und Payload. Der Text der Ablehnung ist für Menschen.
 pub fn validate(event_type: &str, schema_version: i64, stage_id: Option<&Uuid>, payload: &Value) -> Check {
-    let spec = spec(event_type).ok_or_else(|| format!("Unbekannter Ereignistyp {event_type}."))?;
+    let spec = spec(event_type).ok_or_else(|| tr!("Unbekannter Ereignistyp {}.", event_type))?;
     if schema_version > spec.version {
-        return Err(format!("{event_type} stammt aus einer neueren Version der App."));
+        return Err(tr!("{} stammt aus einer neueren Version der App.", event_type));
     }
     if schema_version < 1 {
-        return Err(format!("{event_type} hat eine ungültige Schema-Version."));
+        return Err(tr!("{} hat eine ungültige Schema-Version.", event_type));
     }
     if spec.stage != StageRule::None && stage_id.is_none() {
-        return Err(format!("{event_type} braucht eine Stufe."));
+        return Err(tr!("{} braucht eine Stufe.", event_type));
     }
     if !payload.is_object() {
-        return Err(format!("{event_type}: Der Inhalt ist kein Objekt."));
+        return Err(tr!("{}: Der Inhalt ist kein Objekt.", event_type));
     }
     (spec.check)(payload).map_err(|reason| format!("{event_type}: {reason}"))
 }
@@ -397,32 +406,32 @@ fn upcast_criteria(payload: &mut Value) {
 // ---------------------------------------------------------------- Bausteine der Prüfung
 
 fn text<'a>(p: &'a Value, key: &str) -> std::result::Result<&'a str, String> {
-    p.get(key).and_then(Value::as_str).ok_or_else(|| format!("Feld „{key}“ fehlt oder ist kein Text."))
+    p.get(key).and_then(Value::as_str).ok_or_else(|| tr!("Feld „{}“ fehlt oder ist kein Text.", key))
 }
 
 fn filled(p: &Value, key: &str) -> Check {
     if text(p, key)?.trim().is_empty() {
-        return Err(format!("Feld „{key}“ ist leer."));
+        return Err(tr!("Feld „{}“ ist leer.", key));
     }
     Ok(())
 }
 
 fn uuid(p: &Value, key: &str) -> Check {
-    Uuid::parse_str(text(p, key)?).map(|_| ()).map_err(|_| format!("Feld „{key}“ ist keine gültige ID."))
+    Uuid::parse_str(text(p, key)?).map(|_| ()).map_err(|_| tr!("Feld „{}“ ist keine gültige ID.", key))
 }
 
 fn integer(p: &Value, key: &str, min: i64) -> Check {
     match p.get(key).and_then(Value::as_i64) {
         Some(n) if n >= min => Ok(()),
-        Some(_) => Err(format!("Feld „{key}“ ist kleiner als {min}.")),
-        None => Err(format!("Feld „{key}“ fehlt oder ist keine ganze Zahl.")),
+        Some(_) => Err(tr!("Feld „{}“ ist kleiner als {}.", key, min)),
+        None => Err(tr!("Feld „{}“ fehlt oder ist keine ganze Zahl.", key)),
     }
 }
 
 fn one_of(p: &Value, key: &str, allowed: &[&str]) -> Check {
     let value = text(p, key)?;
     if !allowed.contains(&value) {
-        return Err(format!("Feld „{key}“ hat den unzulässigen Wert „{value}“."));
+        return Err(tr!("Feld „{}“ hat den unzulässigen Wert „{}“.", key, value));
     }
     Ok(())
 }
@@ -438,7 +447,7 @@ fn optional(p: &Value, key: &str, check: impl FnOnce(&Value, &str) -> Check) -> 
 fn text_list(p: &Value, key: &str) -> Check {
     match p.get(key) {
         Some(Value::Array(items)) if items.iter().all(Value::is_string) => Ok(()),
-        _ => Err(format!("Feld „{key}“ ist keine Liste von Texten.")),
+        _ => Err(tr!("Feld „{}“ ist keine Liste von Texten.", key)),
     }
 }
 
@@ -476,19 +485,19 @@ fn criteria_version_published(p: &Value) -> Check {
     let items = match p.get("items") {
         None | Some(Value::Null) => return Ok(()),
         Some(Value::Array(items)) => items,
-        Some(_) => return Err("Feld „items“ ist keine Liste.".into()),
+        Some(_) => return Err(tr!("Feld „items“ ist keine Liste.")),
     };
     let mut codes = std::collections::BTreeSet::new();
     for item in items {
         let code = text(item, "code")?;
         if !valid_code(code) {
-            return Err(format!("Das Kürzel „{code}“ braucht ein bis acht Buchstaben oder Ziffern."));
+            return Err(tr!("Das Kürzel „{}“ braucht ein bis acht Buchstaben oder Ziffern.", code));
         }
         if !codes.insert(code) {
-            return Err(format!("Das Kürzel „{code}“ kommt mehrfach vor."));
+            return Err(tr!("Das Kürzel „{}“ kommt mehrfach vor.", code));
         }
         one_of(item, "kind", &["include", "exclude"])?;
-        filled(item, "text").map_err(|e| format!("Kriterium {code}: {e}"))?;
+        filled(item, "text").map_err(|e| tr!("Kriterium {}: {}", code, e))?;
         optional(item, "element", is_text)?;
         optional(item, "note", is_text)?;
     }
@@ -505,7 +514,7 @@ fn records_imported(p: &Value) -> Check {
     match (p.get("search_id").is_some_and(|v| !v.is_null()), p.get("search_version").is_some_and(|v| !v.is_null())) {
         (true, true) => integer(p, "search_version", 1),
         (false, false) => Ok(()),
-        _ => Err("Suche und Suchversion gehören zusammen.".into()),
+        _ => Err(tr!("Suche und Suchversion gehören zusammen.")),
     }
 }
 
@@ -524,7 +533,7 @@ fn date(p: &Value, key: &str) -> Check {
     if is_date(text(p, key)?) {
         return Ok(());
     }
-    Err(format!("Feld „{key}“ ist kein Datum der Form JJJJ-MM-TT."))
+    Err(tr!("Feld „{}“ ist kein Datum der Form JJJJ-MM-TT.", key))
 }
 
 fn search_version_published(p: &Value) -> Check {
@@ -551,9 +560,10 @@ fn search_peer_reviewed(p: &Value) -> Check {
 }
 
 fn duplicates_resolved(p: &Value) -> Check {
-    let pairs = p.get("pairs").and_then(Value::as_array).ok_or("Feld „pairs“ fehlt oder ist keine Liste.")?;
+    let pairs =
+        p.get("pairs").and_then(Value::as_array).ok_or_else(|| tr!("Feld „pairs“ fehlt oder ist keine Liste."))?;
     if pairs.is_empty() || pairs.len() > MAX_PAIRS {
-        return Err(format!("Ein Ereignis entscheidet 1 bis {MAX_PAIRS} Paare."));
+        return Err(tr!("Ein Ereignis entscheidet 1 bis {} Paare.", MAX_PAIRS));
     }
     for pair in pairs {
         uuid(pair, "a")?;
@@ -561,14 +571,14 @@ fn duplicates_resolved(p: &Value) -> Check {
         one_of(pair, "decision", &["duplicate", "distinct"])?;
         let (a, b) = (text(pair, "a")?, text(pair, "b")?);
         if a == b {
-            return Err("Ein Paar braucht zwei verschiedene Einträge.".into());
+            return Err(tr!("Ein Paar braucht zwei verschiedene Einträge."));
         }
         let keep = pair.get("keep").and_then(Value::as_str);
         match (text(pair, "decision")?, keep) {
             ("duplicate", Some(k)) if k == a || k == b => {}
-            ("duplicate", _) => return Err("Bei einer Dublette muss „keep“ einer der beiden Einträge sein.".into()),
+            ("duplicate", _) => return Err(tr!("Bei einer Dublette muss „keep“ einer der beiden Einträge sein.")),
             (_, None) => {}
-            (_, Some(_)) => return Err("„keep“ gehört nur zu einer Dublette.".into()),
+            (_, Some(_)) => return Err(tr!("„keep“ gehört nur zu einer Dublette.")),
         }
     }
     Ok(())
@@ -592,7 +602,7 @@ fn zotero_key(p: &Value, key: &str) -> Check {
     if is_zotero_key(text(p, key)?) {
         return Ok(());
     }
-    Err(format!("Feld „{key}“ ist kein Zotero-Schlüssel."))
+    Err(tr!("Feld „{}“ ist kein Zotero-Schlüssel.", key))
 }
 
 fn fulltext_status_set(p: &Value) -> Check {
@@ -603,12 +613,12 @@ fn fulltext_status_set(p: &Value) -> Check {
             one_of(p, "origin", &FULLTEXT_ORIGINS)?;
             let sum = text(p, "sha256")?;
             if sum.len() != 64 || !sum.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
-                return Err("Feld „sha256“ ist keine Prüfsumme.".into());
+                return Err(tr!("Feld „sha256“ ist keine Prüfsumme."));
             }
             integer(p, "size", 0)?;
             match text(p, "origin")? {
                 "folder" if is_relative_path(text(p, "path")?) => Ok(()),
-                "folder" => Err("Feld „path“ ist kein Pfad innerhalb des Ordners.".into()),
+                "folder" => Err(tr!("Feld „path“ ist kein Pfad innerhalb des Ordners.")),
                 _ => zotero_key(p, "zotero_key"),
             }
         }
@@ -625,9 +635,10 @@ fn zotero_library_linked(p: &Value) -> Check {
 }
 
 fn zotero_item_mapped(p: &Value) -> Check {
-    let items = p.get("items").and_then(Value::as_array).ok_or("Feld „items“ fehlt oder ist keine Liste.")?;
+    let items =
+        p.get("items").and_then(Value::as_array).ok_or_else(|| tr!("Feld „items“ fehlt oder ist keine Liste."))?;
     if items.is_empty() || items.len() > MAX_MAPPINGS {
-        return Err(format!("Ein Ereignis ordnet 1 bis {MAX_MAPPINGS} Einträge zu."));
+        return Err(tr!("Ein Ereignis ordnet 1 bis {} Einträge zu.", MAX_MAPPINGS));
     }
     for item in items {
         uuid(item, "record_id")?;
@@ -643,13 +654,13 @@ pub const MAX_STUDY_RECORDS: usize = 50;
 pub const MAX_LABEL: usize = 200;
 
 fn id_list<'a>(p: &'a Value, key: &str) -> std::result::Result<Vec<&'a str>, String> {
-    let list = p.get(key).and_then(Value::as_array).ok_or(format!("Feld „{key}“ fehlt oder ist keine Liste."))?;
+    let list = p.get(key).and_then(Value::as_array).ok_or(tr!("Feld „{}“ fehlt oder ist keine Liste.", key))?;
     let mut out = Vec::new();
     for item in list {
         let id = item.as_str().filter(|s| Uuid::parse_str(s).is_ok());
-        let id = id.ok_or(format!("Feld „{key}“ enthält etwas, das keine ID ist."))?;
+        let id = id.ok_or(tr!("Feld „{}“ enthält etwas, das keine ID ist.", key))?;
         if out.contains(&id) {
-            return Err(format!("Feld „{key}“ nennt einen Eintrag doppelt."));
+            return Err(tr!("Feld „{}“ nennt einen Eintrag doppelt.", key));
         }
         out.push(id);
     }
@@ -661,17 +672,17 @@ fn id_list<'a>(p: &'a Value, key: &str) -> std::result::Result<Vec<&'a str>, Str
 fn records_linked_to_study(p: &Value) -> Check {
     uuid(p, "study_id")?;
     if text(p, "label")?.chars().count() > MAX_LABEL {
-        return Err(format!("Die Bezeichnung hat höchstens {MAX_LABEL} Zeichen."));
+        return Err(tr!("Die Bezeichnung hat höchstens {} Zeichen.", MAX_LABEL));
     }
     let records = id_list(p, "records")?;
     let primary = p.get("primary").and_then(Value::as_str);
     match (records.len(), primary) {
         (0, None) => Ok(()),
-        (0, Some(_)) => Err("Ein aufgelöstes Bündel hat keinen Haupteintrag.".into()),
-        (1, _) => Err("Ein Bündel braucht mindestens zwei Einträge.".into()),
-        (n, _) if n > MAX_STUDY_RECORDS => Err(format!("Ein Bündel hat höchstens {MAX_STUDY_RECORDS} Einträge.")),
+        (0, Some(_)) => Err(tr!("Ein aufgelöstes Bündel hat keinen Haupteintrag.")),
+        (1, _) => Err(tr!("Ein Bündel braucht mindestens zwei Einträge.")),
+        (n, _) if n > MAX_STUDY_RECORDS => Err(tr!("Ein Bündel hat höchstens {} Einträge.", MAX_STUDY_RECORDS)),
         (_, Some(primary)) if records.contains(&primary) => Ok(()),
-        _ => Err("Der Haupteintrag muss einer der Einträge des Bündels sein.".into()),
+        _ => Err(tr!("Der Haupteintrag muss einer der Einträge des Bündels sein.")),
     }
 }
 
@@ -679,10 +690,10 @@ fn records_linked_to_study(p: &Value) -> Check {
 fn source_type_set(p: &Value) -> Check {
     let records = id_list(p, "records")?;
     if records.is_empty() || records.len() > MAX_PAIRS {
-        return Err(format!("Ein Ereignis setzt die Quellenart für 1 bis {MAX_PAIRS} Einträge."));
+        return Err(tr!("Ein Ereignis setzt die Quellenart für 1 bis {} Einträge.", MAX_PAIRS));
     }
     if text(p, "source_type")?.chars().count() > MAX_LABEL {
-        return Err(format!("Die Quellenart hat höchstens {MAX_LABEL} Zeichen."));
+        return Err(tr!("Die Quellenart hat höchstens {} Zeichen.", MAX_LABEL));
     }
     Ok(())
 }
@@ -694,10 +705,30 @@ fn protocol_registered(p: &Value) -> Check {
     filled(p, "registry")?;
     for key in ["registry", "identifier"] {
         if text(p, key)?.chars().count() > MAX_LABEL {
-            return Err(format!("Feld „{key}“ hat höchstens {MAX_LABEL} Zeichen."));
+            return Err(tr!("Feld „{}“ hat höchstens {} Zeichen.", key, MAX_LABEL));
         }
     }
     optional(p, "note", is_text)
+}
+
+/// Eigene Texte zur Vorbereitung der Registrierung: Formular und je Feld ein Text; leer nimmt zurück.
+fn protocol_drafted(p: &Value) -> Check {
+    one_of(p, "form", &crate::registration::FORMS)?;
+    let answers = p.get("answers").and_then(Value::as_object).ok_or_else(|| tr!("Feld „answers“ fehlt."))?;
+    if answers.is_empty() || answers.len() > forms::MAX_FIELDS {
+        return Err(tr!("Ein Eintrag enthält 1 bis {} Felder.", forms::MAX_FIELDS));
+    }
+    for (key, value) in answers {
+        if !forms::valid_key(key) {
+            return Err(tr!("„{}“ ist kein Schlüssel eines Feldes.", key));
+        }
+        match value.as_str() {
+            Some(text) if text.chars().count() <= crate::registration::MAX_ANSWER => {}
+            Some(_) => return Err(tr!("Feld „{}“ ist zu lang.", key)),
+            None => return Err(tr!("Feld „{}“ ist kein Text.", key)),
+        }
+    }
+    Ok(())
 }
 
 /// Eine Formularversion: Zweck, Name und Felder. Ob ein Feld seinen Typ behält, prüft der Dienst.
@@ -707,9 +738,9 @@ fn form_version_published(p: &Value) -> Check {
     one_of(p, "purpose", &PURPOSES)?;
     filled(p, "name")?;
     optional(p, "change_note", is_text)?;
-    let fields = p.get("fields").cloned().ok_or("Feld „fields“ fehlt.")?;
+    let fields = p.get("fields").cloned().ok_or_else(|| tr!("Feld „fields“ fehlt."))?;
     let fields: Vec<Field> =
-        serde_json::from_value(fields).map_err(|_| "Die Felder des Formulars sind nicht lesbar.".to_string())?;
+        serde_json::from_value(fields).map_err(|_| tr!("Die Felder des Formulars sind nicht lesbar."))?;
     forms::check_fields(&fields)
 }
 
@@ -723,7 +754,7 @@ fn form_confirmed(p: &Value) -> Check {
 fn form_value_recorded(p: &Value) -> Check {
     uuid(p, "record_id")?;
     if !forms::valid_key(text(p, "field")?) {
-        return Err("Feld „field“ ist kein Schlüssel eines Formularfeldes.".into());
+        return Err(tr!("Feld „field“ ist kein Schlüssel eines Formularfeldes."));
     }
     integer(p, "group_index", 0)?;
     integer(p, "form_version", 1)?;
@@ -740,7 +771,7 @@ fn form_entry_completed(p: &Value) -> Check {
 fn stage_instance_opened(p: &Value) -> Check {
     filled(p, "name")?;
     if !p.get("blind").is_some_and(Value::is_boolean) {
-        return Err("Feld „blind“ fehlt oder ist kein Wahrheitswert.".into());
+        return Err(tr!("Feld „blind“ fehlt oder ist kein Wahrheitswert."));
     }
     integer(p, "min_reviewers", 1)?;
     optional(p, "maybe_as", |p, key| one_of(p, key, &["include", "exclude"]))?;
@@ -752,19 +783,19 @@ fn stage_instance_opened(p: &Value) -> Check {
     optional(p, "conflict_rule", |p, key| one_of(p, key, &CONFLICT_RULES))?;
     optional(p, "reason_required", |p, key| match p[key].is_boolean() {
         true => Ok(()),
-        false => Err(format!("Feld „{key}“ ist kein Wahrheitswert.")),
+        false => Err(tr!("Feld „{}“ ist kein Wahrheitswert.", key)),
     })?;
     optional(p, "form_id", uuid)?;
     optional(p, "form_version", |p, key| integer(p, key, 1))?;
     optional(p, "verify", |p, key| {
         let v = &p[key];
-        one_of(v, "scope", &["all", "sample"]).map_err(|e| format!("Feld „{key}“: {e}"))?;
+        one_of(v, "scope", &["all", "sample"]).map_err(|e| tr!("Feld „{}“: {}", key, e))?;
         if v["scope"] == "sample" {
             let percent = v.get("percent").and_then(Value::as_i64);
             if !percent.is_some_and(|n| (1..=100).contains(&n)) {
-                return Err(format!("Feld „{key}“: Der Anteil der Stichprobe muss zwischen 1 und 100 Prozent liegen."));
+                return Err(tr!("Feld „{}“: Der Anteil der Stichprobe muss zwischen 1 und 100 Prozent liegen.", key));
             }
-            integer(v, "seed", 0).map_err(|e| format!("Feld „{key}“: {e}"))?;
+            integer(v, "seed", 0).map_err(|e| tr!("Feld „{}“: {}", key, e))?;
         }
         Ok(())
     })
@@ -772,7 +803,7 @@ fn stage_instance_opened(p: &Value) -> Check {
 
 fn workflow_version_published(p: &Value) -> Check {
     integer(p, "version", 1)?;
-    let template = p.get("template").ok_or("Feld „template“ fehlt.")?;
+    let template = p.get("template").ok_or_else(|| tr!("Feld „template“ fehlt."))?;
     Template::parse(template).map(|_| ())
 }
 
@@ -781,7 +812,7 @@ fn gate_evaluated(p: &Value) -> Check {
     integer(p, "round", 1)?;
     serde_json::from_value::<GateResult>(p.clone())
         .map(|_| ())
-        .map_err(|_| "Das Ergebnis des Gates ist nicht lesbar.".to_string())
+        .map_err(|_| tr!("Das Ergebnis des Gates ist nicht lesbar."))
 }
 
 fn gate_overridden(p: &Value) -> Check {
@@ -793,7 +824,7 @@ fn gate_overridden(p: &Value) -> Check {
 fn snapshot_taken(p: &Value) -> Check {
     filled(p, "hash")?;
     if !p.get("heads").is_some_and(Value::is_array) {
-        return Err("Feld „heads“ fehlt oder ist keine Liste.".into());
+        return Err(tr!("Feld „heads“ fehlt oder ist keine Liste."));
     }
     Ok(())
 }
@@ -1008,6 +1039,19 @@ mod tests {
             let mut changed = protocol.clone();
             changed[key] = bad;
             assert!(validate("ProtocolRegistered", 1, None, &changed).is_err(), "{key}");
+        }
+        // Vorbereitung der Registrierung: bekanntes Formular, je Feld ein Text; leer nimmt zurück.
+        let draft =
+            json!({"form": "osf_gsrrf", "answers": {"background": "Warum es das Review braucht", "funding": ""}});
+        assert_eq!(validate("ProtocolDrafted", 1, None, &draft), Ok(()));
+        for bad in [
+            json!({"form": "prospero", "answers": {"background": "x"}}),
+            json!({"form": "osf_gsrrf", "answers": {}}),
+            json!({"form": "osf_gsrrf", "answers": {"background": 7}}),
+            json!({"form": "osf_gsrrf", "answers": {"Mein Feld": "x"}}),
+            json!({"form": "osf_gsrrf", "answers": {"background": "x".repeat(20_001)}}),
+        ] {
+            assert!(validate("ProtocolDrafted", 1, None, &bad).is_err(), "{bad}");
         }
     }
 

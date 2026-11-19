@@ -1,6 +1,8 @@
 // Beispieldaten für Formulare und eine entblindete Charting-Stufe in der Browser-Vorschau.
 // Die Regeln (Abgleich, Pflichtfelder, Verblindung) liegen im Kern; hier steht nur genug, um die Seiten zu zeigen.
 
+import { core } from "./core";
+
 type Value = string | number | string[] | null;
 
 const field = (key: string, label: string, type: string, group: string, extra: Record<string, unknown> = {}) => ({
@@ -70,7 +72,7 @@ export function mockForms(cmd: string, a: Record<string, unknown>, context: { me
   const form = { id: "f1", purpose: "charting", name: "Charting-Formular", version: 2, fields, confirmed: forms[0]?.confirmed ?? false };
   switch (cmd) {
     case "forms":
-      return { forms: a.reviewId === "r2" ? [] : forms, starters: a.reviewId === "r2" ? [{ purpose: "charting", name: "Charting-Formular", fields }] : [], term: "Charting" };
+      return { forms: a.reviewId === "r2" ? [] : forms, starters: a.reviewId === "r2" ? [{ purpose: "charting", name: core("Charting-Formular"), fields }] : [], term: core("Charting") };
     case "form_publish": {
       const data = a.data as { name: string; fields: typeof fields; change_note: string };
       const last = forms[0].versions[forms[0].versions.length - 1];

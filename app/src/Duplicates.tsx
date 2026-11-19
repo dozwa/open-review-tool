@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 
 import { api, canManage, DuplicateList, DuplicatePair, errorText, PairDecision, RecordItem, ReviewDetail } from "./api";
+import { t } from "./i18n";
 import { Banner, Group, Icon, Pill } from "./ui";
 
 type Run = (action: () => Promise<string | void>, done?: string) => Promise<void>;
@@ -13,15 +14,15 @@ function Side({ record, source, other, kept }: { record: RecordItem; source: str
   return (
     <div className={`dup-side${kept ? " kept" : ""}`}>
       <p className={`dup-title ${differs(record.title, other.title)}`}>{record.title}</p>
-      <p className={differs(record.authors, other.authors)}>{record.authors || <span className="muted">ohne Autoren</span>}</p>
+      <p className={differs(record.authors, other.authors)}>{record.authors || <span className="muted">{t("ohne Autoren")}</span>}</p>
       <p>
-        <span className={differs(record.year, other.year)}>{record.year ?? "ohne Jahr"}</span>
+        <span className={differs(record.year, other.year)}>{record.year ?? t("ohne Jahr")}</span>
         {record.journal && <span className={differs(record.journal, other.journal)}> · {record.journal}</span>}
       </p>
-      <p className={`dup-ids ${differs(record.doi, other.doi)}`}>{record.doi ? `DOI ${record.doi}` : "ohne DOI"}</p>
+      <p className={`dup-ids ${differs(record.doi, other.doi)}`}>{record.doi ? `DOI ${record.doi}` : t("ohne DOI")}</p>
       <p className="muted">
-        {source || "ohne Quelle"} · {record.abstract ? "mit Abstract" : "ohne Abstract"}
-        {kept && <> · <strong>Vorschlag: bleibt</strong></>}
+        {source || t("ohne Quelle")} · {record.abstract ? t("mit Abstract") : t("ohne Abstract")}
+        {kept && <> · <strong>{t("Vorschlag: bleibt")}</strong></>}
       </p>
     </div>
   );
@@ -45,29 +46,29 @@ export function Duplicates({ review, run }: { review: ReviewDetail; run: Run }) 
   const same = list.pairs.filter((p) => p.similarity === 100);
 
   const counts = [
-    `${list.n_exact} beim Import erkannt`,
-    `${list.n_resolved} als Dublette entschieden`,
-    `${list.n_distinct} als verschieden entschieden`,
+    t("{n} beim Import erkannt", { n: list.n_exact }),
+    t("{n} als Dublette entschieden", { n: list.n_resolved }),
+    t("{n} als verschieden entschieden", { n: list.n_distinct }),
   ].join(" · ");
 
   return (
     <Group
-      title={list.total > 0 ? `Mögliche Dubletten (${list.total})` : "Dubletten"}
+      title={list.total > 0 ? t("Mögliche Dubletten ({n})", { n: list.total }) : t("Dubletten")}
       footer={
         list.total > 0
-          ? `${counts}. Vorgeschlagen werden Paare mit gleichem oder sehr ähnlichem Titel. Wer als Dublette entschieden ist, fehlt in neuen Stufen; offene Stufen ändern sich nicht.`
-          : `${counts}. Keine offenen Paare.`
+          ? t("{counts}. Vorgeschlagen werden Paare mit gleichem oder sehr ähnlichem Titel. Wer als Dublette entschieden ist, fehlt in neuen Stufen; offene Stufen ändern sich nicht.", { counts })
+          : t("{counts}. Keine offenen Paare.", { counts })
       }
       action={manage && same.length > 1 && (
-        <button className="small" onClick={() => resolve(same.map((p) => duplicate(p, p.keep)), `${same.length} Paare als Dubletten entschieden.`)}>
-          Alle {same.length} mit gleichem Titel bestätigen
+        <button className="small" onClick={() => resolve(same.map((p) => duplicate(p, p.keep)), t("{n} Paare als Dubletten entschieden.", { n: same.length }))}>
+          {t("Alle {n} mit gleichem Titel bestätigen", { n: same.length })}
         </button>
       )}
     >
       {list.pairs.map((p) => (
         <div className="dup-pair" key={`${p.a.id}-${p.b.id}`}>
           <div className="dup-head">
-            <Pill tone={p.similarity === 100 ? "green" : "yellow"}>{p.similarity === 100 ? "gleicher Titel" : `Titel zu ${p.similarity} % gleich`}</Pill>
+            <Pill tone={p.similarity === 100 ? "green" : "yellow"}>{p.similarity === 100 ? t("gleicher Titel") : t("Titel zu {percent} % gleich", { percent: p.similarity })}</Pill>
           </div>
           <div className="dup-sides">
             <Side record={p.a} source={p.a_source} other={p.b} kept={p.keep === p.a.id} />
@@ -75,15 +76,15 @@ export function Duplicates({ review, run }: { review: ReviewDetail; run: Run }) 
           </div>
           {manage && (
             <div className="dup-actions">
-              <button className="small" onClick={() => resolve([duplicate(p, p.a.id)], "Als Dublette entschieden.")}><Icon name="check" size={13} /> Dublette, linken behalten</button>
-              <button className="small" onClick={() => resolve([duplicate(p, p.b.id)], "Als Dublette entschieden.")}><Icon name="check" size={13} /> Dublette, rechten behalten</button>
-              <button className="small" onClick={() => resolve([distinct(p)], "Als verschieden entschieden.")}><Icon name="x" size={13} /> Keine Dublette</button>
+              <button className="small" onClick={() => resolve([duplicate(p, p.a.id)], t("Als Dublette entschieden."))}><Icon name="check" size={13} /> {t("Dublette, linken behalten")}</button>
+              <button className="small" onClick={() => resolve([duplicate(p, p.b.id)], t("Als Dublette entschieden."))}><Icon name="check" size={13} /> {t("Dublette, rechten behalten")}</button>
+              <button className="small" onClick={() => resolve([distinct(p)], t("Als verschieden entschieden."))}><Icon name="x" size={13} /> {t("Keine Dublette")}</button>
             </div>
           )}
         </div>
       ))}
       {list.total > list.pairs.length && (
-        <p className="muted dup-more">Gezeigt sind die ersten {list.pairs.length} von {list.total} Paaren; nach dem Entscheiden rücken weitere nach.</p>
+        <p className="muted dup-more">{t("Gezeigt sind die ersten {shown} von {total} Paaren; nach dem Entscheiden rücken weitere nach.", { shown: list.pairs.length, total: list.total })}</p>
       )}
     </Group>
   );

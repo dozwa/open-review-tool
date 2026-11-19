@@ -2,13 +2,15 @@
 
 import { invoke } from "@tauri-apps/api/core";
 
+import { formatPercent, t, tn } from "./i18n";
+
 function call<T>(command: string, args: Record<string, unknown> = {}): Promise<T> {
   return invoke<T>(command, args);
 }
 
 export function errorText(error: unknown): string {
   if (typeof error === "string") return error;
-  return error instanceof Error ? error.message : "Unbekannter Fehler";
+  return error instanceof Error ? error.message : t("Unbekannter Fehler");
 }
 
 export interface Person {
@@ -169,6 +171,72 @@ export interface Workflow {
   stations: Station[];
 }
 
+/** Quelle einer Leitlinie mit Adresse und Abrufdatum. */
+export interface GuidelineSource {
+  key: string;
+  citation: string;
+  url: string;
+  license: string;
+  accessed: string;
+}
+
+/** Ein Eintrag der Leitlinie: Zusammenfassung in eigenen Worten mit Verweis auf den Abschnitt im Original. */
+export interface GuidelineEntry {
+  id: string;
+  title: string;
+  source: string;
+  section: string;
+  url: string;
+  text: string[];
+  points: string[];
+  stations: string[];
+  areas: string[];
+}
+
+export interface Guideline {
+  /** Schlüssel der Vorlage, zu der die Leitlinie gehört. */
+  key: string;
+  title: string;
+  summary: string;
+  sources: GuidelineSource[];
+  entries: GuidelineEntry[];
+}
+
+export interface RegistrationSection {
+  key: string;
+  label: string;
+  original: string;
+}
+
+export interface RegistrationItem {
+  number: number;
+  key: string;
+  section: string;
+  label: string;
+  /** Name des Feldes im Register. */
+  original: string;
+  hint: string;
+  suggestion: string;
+  answer: string | null;
+  status: "answered" | "suggested" | "open";
+}
+
+export interface RegistrationDraft {
+  form: string;
+  name: string;
+  registry: string;
+  citation: string;
+  url: string;
+  sections: RegistrationSection[];
+  items: RegistrationItem[];
+  n_answered: number;
+  n_suggested: number;
+  n_open: number;
+  updated_at: string | null;
+  registration: Registration | null;
+  can_edit: boolean;
+}
+
 export interface TemplateInfo {
   key: string;
   name: string;
@@ -194,10 +262,10 @@ export interface ImportBatch {
 }
 
 export const ORIGIN_LABEL: Record<string, string> = {
-  database: "Datenbank",
-  register: "Register",
-  citation: "Zitationssuche",
-  other: "Andere Quelle",
+  database: t("Datenbank"),
+  register: t("Register"),
+  citation: t("Zitationssuche"),
+  other: t("Andere Quelle"),
 };
 
 /** Woher die Treffer eines Imports stammen: eine Suche oder Quelle mit Herkunft. */
@@ -539,13 +607,13 @@ export interface StageParams {
 }
 
 export const RULE_LABEL: Record<string, string> = {
-  unanimous: "Einstimmig",
-  liberal: "Eine Einschluss-Stimme genügt",
-  single_verified: "Eine Stimme mit Prüfung der Ausschlüsse",
+  unanimous: t("Einstimmig"),
+  liberal: t("Eine Einschluss-Stimme genügt"),
+  single_verified: t("Eine Stimme mit Prüfung der Ausschlüsse"),
 };
 export const CONFLICT_LABEL: Record<string, string> = {
-  discussion: "Diskussion",
-  third_person: "Entscheid durch eine dritte Person",
+  discussion: t("Diskussion"),
+  third_person: t("Entscheid durch eine dritte Person"),
 };
 
 /** Begriff aus der Vorlage, z. B. „Einträge“ oder „Quellen“. */
@@ -558,11 +626,13 @@ export function gateText(gate: GateResult): string {
   return gate.checks
     .map((c) => {
       if (c.check === "agreement_min") {
-        const percent = c.percent_x100 == null ? "keine doppelt bewerteten Einträge" : `${(c.percent_x100 / 100).toLocaleString("de-DE", { maximumFractionDigits: 1 })} %`;
-        return `Übereinstimmung ${percent}, verlangt sind ${c.threshold_percent} %`;
+        const threshold = formatPercent(c.threshold_percent ?? 0);
+        if (c.percent_x100 == null) return t("Übereinstimmung keine doppelt bewerteten Einträge, verlangt sind {threshold}", { threshold });
+        const percent = formatPercent(c.percent_x100 / 100, c.percent_x100 % 100 === 0 ? 0 : 1);
+        return t("Übereinstimmung {percent}, verlangt sind {threshold}", { percent, threshold });
       }
-      if (c.check === "all_decided") return `${c.numerator} von ${c.denominator} entschieden`;
-      return `${c.numerator} offene Konflikte`;
+      if (c.check === "all_decided") return t("{n} von {total} entschieden", { n: c.numerator, total: c.denominator });
+      return tn("{n} offener Konflikt", "{n} offene Konflikte", c.numerator);
     })
     .join("; ");
 }
@@ -709,12 +779,12 @@ export type FieldType = "text" | "integer" | "decimal" | "choice" | "multi_choic
 export type FormValue = string | number | string[] | null;
 
 export const FIELD_TYPE_LABEL: Record<FieldType, string> = {
-  text: "Text",
-  integer: "Ganze Zahl",
-  decimal: "Dezimalzahl",
-  choice: "Auswahl",
-  multi_choice: "Mehrfachauswahl",
-  quote: "Zitat",
+  text: t("Text"),
+  integer: t("Ganze Zahl"),
+  decimal: t("Dezimalzahl"),
+  choice: t("Auswahl"),
+  multi_choice: t("Mehrfachauswahl"),
+  quote: t("Zitat"),
 };
 
 export interface FormField {
@@ -882,11 +952,19 @@ export const api = {
   dissolveStudy: (reviewId: string, studyId: string) => call<void>("study_dissolve", { reviewId, studyId }),
   setSourceType: (reviewId: string, records: string[], sourceType: string) =>
     call<number>("source_type_set", { reviewId, records, sourceType }),
-  report: (reviewId: string) => call<Report>("report", { reviewId }),
+  report: (reviewId: string, lang?: string) => call<Report>("report", { reviewId, lang }),
   registerProtocol: (reviewId: string, registeredOn: string, registry: string, identifier: string, note: string) =>
     call<Protocol>("protocol_register", { reviewId, registeredOn, registry, identifier, note }),
-  exportReport: (reviewId: string, kind: ReportFileKind, path: string) =>
-    call<void>("report_export", { reviewId, kind, path }),
+  /** Sprache des Kerns: Fehlermeldungen, Vorlagentexte, Bericht, Leitlinien. */
+  setLanguage: (code: string) => call<void>("language_set", { code }),
+  exportReport: (reviewId: string, kind: ReportFileKind, path: string, lang?: string) =>
+    call<void>("report_export", { reviewId, kind, path, lang }),
+  guidelines: () => call<Guideline[]>("guidance_list"),
+  registrationDraft: (reviewId: string, lang?: string) => call<RegistrationDraft>("registration_draft", { reviewId, lang }),
+  answerRegistration: (reviewId: string, key: string, text: string, lang?: string) =>
+    call<RegistrationDraft>("registration_answer", { reviewId, key, text, lang }),
+  exportRegistration: (reviewId: string, path: string, lang?: string) =>
+    call<void>("registration_export", { reviewId, path, lang }),
 
   fulltexts: (reviewId: string) => call<FullTextOverview>("fulltext_overview", { reviewId }),
   setFulltextFolder: (reviewId: string, path: string | null) => call<void>("fulltext_folder_set", { reviewId, path }),
@@ -960,7 +1038,7 @@ export const api = {
   openUrl: (url: string) => call<void>("open_url", { url }),
 };
 
-export const BUNDLE_FILTER = [{ name: "Paket oder Rückmeldung", extensions: ["ortpkg", "ortvotes"] }];
+export const BUNDLE_FILTER = [{ name: t("Paket oder Rückmeldung"), extensions: ["ortpkg", "ortvotes"] }];
 
 /** Dateiname ohne Zeichen, die macOS oder andere Systeme stören. */
 export function safeFileName(text: string): string {
@@ -969,9 +1047,12 @@ export function safeFileName(text: string): string {
 
 export function importSummary(result: BundleImported): string {
   const r = result.report;
-  const parts = [`${r.accepted} neue Einträge`];
-  if (r.already_known) parts.push(`${r.already_known} schon vorhanden`);
-  if (r.records_added) parts.push(`${r.records_added} Records`);
-  if (r.rejected.length) parts.push(`${r.rejected.length} abgewiesen`);
-  return `${result.created ? "Review angelegt" : "Eingelesen"}: ${result.title} (${parts.join(", ")}).`;
+  const parts = [tn("{n} neuer Eintrag", "{n} neue Einträge", r.accepted)];
+  if (r.already_known) parts.push(t("{n} schon vorhanden", { n: r.already_known }));
+  if (r.records_added) parts.push(tn("{n} Record", "{n} Records", r.records_added));
+  if (r.rejected.length) parts.push(t("{n} abgewiesen", { n: r.rejected.length }));
+  const details = parts.join(", ");
+  return result.created
+    ? t("Review angelegt: {title} ({details}).", { title: result.title, details })
+    : t("Eingelesen: {title} ({details}).", { title: result.title, details });
 }

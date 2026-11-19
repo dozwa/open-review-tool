@@ -11,6 +11,7 @@ use ort_core::event::sha256_hex;
 use ort_core::exchange::{export_return, merge};
 use ort_core::fulltext::Assign;
 use ort_core::projection::Verify;
+use ort_core::registration::RegistrationDraft;
 use ort_core::report::{Level, Retrieval};
 use ort_core::service::{ImportSource, OpenStage, PairDecision, RecordFilter, StageView};
 use ort_core::workflow::{builtin_template, StationView};
@@ -1628,6 +1629,73 @@ fn update_runs_as_further_rounds_and_the_report_names_protocol_and_deviations() 
 }
 
 #[test]
+fn registration_is_prepared_from_the_review_and_own_texts_win() {
+    let t = jbi_team_with_protocol();
+    let find = |draft: &RegistrationDraft, key: &str| draft.items.iter().find(|i| i.item.key == key).unwrap().clone();
+    let draft = t.owner.registration_draft().unwrap();
+    assert_eq!((draft.items.len(), draft.sections.len(), draft.n_answered), (65, 6, 0));
+    assert_eq!(draft.items.iter().map(|i| i.item.number).collect::<Vec<_>>(), (1..=65).collect::<Vec<_>>());
+    assert!(draft.can_edit && draft.registration.is_none());
+
+    // Was das Review schon weiß, steht als Vorschlag da; der Rest bleibt offen.
+    let title = find(&draft, "title");
+    assert_eq!((title.status, title.text()), ("suggested", "Testreview"));
+    assert!(find(&draft, "criteria").suggestion.contains("Ausschluss:\n- E1 Falsche Population"));
+    assert_eq!(find(&draft, "databases").suggestion, "MEDLINE");
+    assert_eq!(find(&draft, "interfaces").suggestion, "- MEDLINE über Ovid");
+    assert!(find(&draft, "query_strings").suggestion.contains("(headache OR migraine) AND adult"));
+    assert!(find(&draft, "review_type").suggestion.contains("JBI Manual for Evidence Synthesis"));
+    assert!(find(&draft, "review_type").suggestion.contains("PRISMA-ScR"));
+    assert!(find(&draft, "review_stages").suggestion.starts_with("Protokoll und Team; Suche; Import und Dubletten"));
+    let reliability = find(&draft, "screening_reliability").suggestion;
+    assert!(reliability.contains("Pilot Titel/Abstract: 2 Personen bewerten jeden Eintrag unabhängig; weiter ab 75 %"));
+    assert!(find(&draft, "screening_blinding").suggestion.contains("Titel/Abstract: verblindet"));
+    assert!(find(&draft, "exclusion_criteria").suggestion.contains("In „Volltext-Screening“ braucht jeder Ausschluss"));
+    assert!(find(&draft, "entities").suggestion.contains("- Land: Land, in dem die Arbeit entstand"));
+    assert!(find(&draft, "synthesis_plan").suggestion.contains("- Land: Häufigkeit je Land"));
+    assert!(find(&draft, "other_search").suggestion.contains("Zitationssuche"));
+    for key in ["background", "primary_questions", "funding", "start_date"] {
+        assert_eq!(find(&draft, key).status, "open", "{key}");
+    }
+    assert_eq!(draft.n_suggested + draft.n_open, 65);
+
+    // Eigene Texte schreibt nur die Leitung; je Feld gilt der letzte, ein leerer nimmt ihn zurück.
+    assert!(matches!(t.r1.draft_registration("background", "x"), Err(Error::Forbidden(_))));
+    assert!(matches!(t.owner.draft_registration("lieblingsfarbe", "blau"), Err(Error::Invalid(_))));
+    let draft = t.owner.draft_registration("background", "  Warum es das Review braucht  ").unwrap();
+    assert_eq!(find(&draft, "background").answer.as_deref(), Some("Warum es das Review braucht"));
+    t.owner.draft_registration("background", "Warum es das Review braucht").unwrap();
+    let drafted = |review: &Review| review.store().events_of_types(&["ProtocolDrafted"]).unwrap().len();
+    assert_eq!(drafted(&t.owner), 1, "derselbe Text ist kein neues Ereignis");
+    let draft = t.owner.draft_registration("title", "Formalisierung von Kopfschmerz: ein Scoping Review").unwrap();
+    let title = find(&draft, "title");
+    assert_eq!((title.status, title.suggestion.as_str()), ("answered", "Testreview"));
+    assert_eq!((draft.n_answered, draft.updated_at.is_some()), (2, true));
+    let markdown = t.owner.registration_markdown().unwrap();
+    assert!(markdown.contains("### 1 Title · Titel\n\nFormalisierung von Kopfschmerz: ein Scoping Review\n"));
+    assert!(markdown
+        .contains("### 21 Databases · Datenbanken\n\n*Vorschlag aus dem Review, noch nicht geprüft:*\n\nMEDLINE\n"));
+    assert!(markdown.contains("### 18 Funding · Finanzierung\n\n*Noch offen.*\n"));
+    let draft = t.owner.draft_registration("title", "").unwrap();
+    assert_eq!((find(&draft, "title").status, draft.n_answered), ("suggested", 1));
+
+    // Das Team liest mit; ein untergeschobener Eintrag eines Reviewers wird beim Einlesen abgewiesen.
+    send_package(&t.owner, &t.r1);
+    let seen = t.r1.registration_draft().unwrap();
+    assert_eq!((find(&seen, "background").status, seen.can_edit), ("answered", false));
+    let forged = json!({"form": "osf_gsrrf", "answers": {"background": "Anders"}});
+    t.r1.store().append(t.r1.me(), "ProtocolDrafted", None, forged).unwrap();
+    let report = send_return(&t.r1, &t.owner);
+    assert_eq!(report.rejected.len(), 1, "{:?}", report.rejected);
+    assert_eq!(find(&t.owner.registration_draft().unwrap(), "background").text(), "Warum es das Review braucht");
+
+    // Nach dem Einreichen trägt die Leitung die Registrierung ein; der Dialog zeigt sie.
+    t.owner.register_protocol("2026-11-20", "OSF", "osf.io/abc12", "").unwrap();
+    assert_eq!(t.owner.registration_draft().unwrap().registration.unwrap().registry, "OSF");
+    assert!(t.owner.verify_chain().unwrap().ok);
+}
+
+#[test]
 fn reviews_without_a_checklist_in_the_template_get_none() {
     let t = Team::with_template(Some("free"));
     let report = t.owner.report().unwrap();
@@ -1718,7 +1786,7 @@ fn form_events_are_checked_when_a_file_is_read() {
 
 /// Derselbe Ablauf für jede Vorlage: Stationen der Reihe nach, bis alle abgeschlossen sind, die die
 /// App bearbeiten kann. Im Test steht kein Schlüssel einer Station.
-fn walk(template: &str) {
+fn walk(template: &str) -> Team {
     let t = Team::with_template(Some(template));
     let stations = t.owner.stations().unwrap();
     for planned in stations.iter().filter(|s| s.available) {
@@ -1765,9 +1833,13 @@ fn walk(template: &str) {
                 let stage = open(&t, &now.key, |_| {});
                 let view = t.owner.form_stage(&stage.id).unwrap();
                 for reviewer in [&t.r1, &t.r2] {
+                    // Bei einfacher Extraktion mit Prüfung sieht die zweite Person die Arbeit der ersten
+                    // und schließt nur ab; verblindet kommt davon nichts an.
+                    send_package(&t.owner, reviewer);
                     for row in &view.rows {
                         let record = row.record_id.to_string();
-                        for field in view.form.fields.iter().filter(|f| f.required) {
+                        let extracts = reviewer.form_entry(&stage.id, &record).unwrap().mode == "extract";
+                        for field in view.form.fields.iter().filter(|f| f.required && extracts) {
                             let value = match field.kind.as_str() {
                                 "integer" => json!(1),
                                 "decimal" => json!("1,5"),
@@ -1777,7 +1849,7 @@ fn walk(template: &str) {
                             };
                             reviewer.record_form_value(&stage.id, &record, &field.key, &value).unwrap();
                         }
-                        reviewer.complete_form_entry(&stage.id, &record, Some(60)).unwrap();
+                        reviewer.complete_form_entry(&stage.id, &record, extracts.then_some(60)).unwrap();
                     }
                     send_return(reviewer, &t.owner);
                 }
@@ -1808,6 +1880,7 @@ fn walk(template: &str) {
     let after = t.owner.stations().unwrap();
     assert!(after.iter().filter(|s| s.blocking).all(|s| s.state == "done"));
     assert!(after.iter().filter(|s| s.kind == "screening").all(|s| s.state == "done"));
+    t
 }
 
 #[test]
@@ -1818,4 +1891,120 @@ fn same_walk_runs_with_the_scoping_template() {
 #[test]
 fn same_walk_runs_with_the_free_template() {
     walk("free");
+}
+
+#[test]
+fn rapid_review_runs_with_the_same_parts_and_names_its_shortcuts() {
+    let t = walk("rapid_review");
+    let stations = t.owner.stations().unwrap();
+    assert!(stations.iter().all(|s| s.available), "die Vorlage braucht keinen neuen Baustein");
+    assert!(stations.iter().filter(|s| s.kind != "report").all(|s| s.blocking && s.state == "done"));
+
+    // Der Pilot lief mit zwei unabhängigen Stimmen, alles danach mit einer Stimme und Prüfung.
+    let stages = t.owner.detail().unwrap().stages;
+    let rule = |key: &str| {
+        let stage = stages.iter().find(|s| s.station.as_deref() == Some(key)).unwrap();
+        (stage.decision_rule.clone(), stage.blind)
+    };
+    assert_eq!(rule("pilot_title_abstract"), ("unanimous".to_string(), true));
+    assert_eq!(rule("extraction_pilot"), ("unanimous".to_string(), true));
+    for key in ["title_abstract", "fulltext", "extraction"] {
+        assert_eq!(rule(key), ("single_verified".to_string(), false), "{key}");
+    }
+    let shortcut = OpenStage {
+        decision_rule: Some("single_verified".into()),
+        blind: false,
+        ..t.owner.stage_defaults("pilot_title_abstract").unwrap()
+    };
+    assert!(matches!(t.owner.open_stage(&shortcut), Err(Error::Invalid(_))), "der Pilot bleibt doppelt");
+
+    // Jede Abkürzung steht bei den Limitationen; die Begriffe kommen aus der Vorlage.
+    let report = t.owner.report().unwrap();
+    assert!(report.methods.contains("Der Ablauf folgte der Vorlage „Rapid Review“"));
+    assert!(report.methods.contains("Für den Übergang waren mindestens 80 % Übereinstimmung verlangt."));
+    let limitations = report.methods.split("## Abweichungen und Limitationen").nth(1).unwrap();
+    for label in ["Titel/Abstract", "Volltext-Screening", "Datenextraktion und Bewertung"] {
+        assert!(limitations.contains(&format!("- In „{label}“")), "{label} fehlt in:\n{limitations}");
+    }
+    assert!(!limitations.contains("- In „Pilot und doppelte Bewertung“"));
+    assert!(limitations.contains("einzelne passende Studien können dadurch fehlen"));
+    assert!(limitations.contains("extrahierte nur eine Person jede Studie"));
+    assert_eq!((report.flow.sources_term.as_str(), report.table.n_charted), ("Studien", 4));
+    assert!(report.checklist.is_none(), "PRISMA-ScR passt nicht; eine eigene Checkliste gibt es noch nicht");
+}
+
+#[test]
+fn state_of_the_art_review_blocks_nothing_and_one_vote_is_enough() {
+    let t = Team::with_template(Some("state_of_the_art"));
+    let stations = t.owner.stations().unwrap();
+    assert!(stations.iter().all(|s| s.available && !s.blocking && s.state != "locked"));
+    // Ohne Kriterien und ohne Suche lässt sich sofort auswählen, mit einer Stimme je Eintrag.
+    let stage = open(&t, "title_abstract", |_| {});
+    assert_eq!((stage.min_reviewers, stage.blind, stage.decision_rule.as_str()), (1, false, "unanimous"));
+    for _ in 0..stage.n_records {
+        let record = t.r1.next_record(&stage.id).unwrap().record.unwrap();
+        vote(&t.r1, &stage.id, &record.id.to_string(), "include");
+    }
+    send_return(&t.r1, &t.owner);
+    assert!(t.owner.close_stage(&stage.id).unwrap().gate.is_none());
+    let report = t.owner.report().unwrap();
+    assert_eq!(report.flow.levels[0].included, 4);
+    assert!(report.methods.contains("- In „Titel/Abstract“ bewertete nur eine Person jeden Eintrag, ohne Prüfung"));
+
+    // Derselbe Ablauf wie bei den anderen Vorlagen geht bis zur Auswertung durch.
+    let t = walk("state_of_the_art");
+    let report = t.owner.report().unwrap();
+    assert_eq!((report.table.n_charted, report.checklist.is_none()), (4, true));
+    assert!(report.methods.contains("Auswertungsformular"));
+}
+
+/// Die Sprache gehört der Person, nicht dem Review: Im Log steht die Vorlage immer in der deutschen
+/// Fassung, angezeigt wird sie in der Sprache, die gerade gilt.
+#[test]
+fn language_changes_what_the_app_says_and_never_the_log() {
+    use ort_core::i18n;
+
+    // Auf Englisch angelegt: dasselbe Log wie auf Deutsch.
+    let t = i18n::with("en", || Team::with_template(Some("jbi_scoping")));
+    let logged = t.owner.store().events_of_types(&["WorkflowVersionPublished"]).unwrap();
+    let logged = serde_json::to_string(&logged[0].payload).unwrap();
+    assert!(logged.contains("Protokoll und Team") && !logged.contains("Protocol and team"), "{logged}");
+
+    let labels = |review: &Review| -> Vec<String> {
+        review.detail().unwrap().workflow.stations.iter().map(|s| s.label.clone()).collect()
+    };
+    let german = labels(&t.owner);
+    let english = i18n::with("en", || labels(&t.owner));
+    assert_eq!(german[0], "Protokoll und Team");
+    assert_eq!(english.len(), german.len());
+    // „Charting“ heißt in beiden Sprachen gleich; alles andere ist übersetzt.
+    let same: Vec<&String> = german.iter().zip(&english).filter(|(de, en)| de == en).map(|(de, _)| de).collect();
+    assert_eq!(same, ["Charting"]);
+    let detail = i18n::with("en", || t.owner.detail().unwrap());
+    assert_eq!(detail.workflow.terms["records"], "records");
+
+    // Fehlermeldungen, Bericht, Leitlinie und Registrierung folgen der Sprache des Aufrufs.
+    let message = |review: &Review| review.draft_registration("lieblingsfarbe", "blau").unwrap_err().to_string();
+    let (de, en) = (message(&t.owner), i18n::with("en", || message(&t.owner)));
+    assert_ne!(de, en);
+    assert!(!en.contains("Feld") && !en.contains('„'), "{en}");
+
+    let report = i18n::with("en", || t.owner.report().unwrap());
+    assert!(report.methods.starts_with("# Methods"), "{}", report.methods);
+    assert!(report.svg.contains("Identified") && !report.svg.contains("Identifiziert"));
+    assert!(report.problems.is_empty(), "{:?}", report.problems);
+    assert!(t.owner.report().unwrap().methods.starts_with("# Methoden"));
+
+    let draft = i18n::with("en", || t.owner.registration_draft().unwrap());
+    let stages = draft.items.iter().find(|i| i.item.key == "review_stages").unwrap();
+    assert!(stages.suggestion.starts_with(&english[0]), "{}", stages.suggestion);
+    assert_eq!(draft.items.len(), t.owner.registration_draft().unwrap().items.len());
+
+    let guideline = |code: &str| i18n::with(code, || ort_core::guidance::guideline("jbi_scoping").unwrap());
+    assert_ne!(guideline("en").entries[0].title, guideline("de").entries[0].title);
+
+    // Wer eine Stufe öffnet, bekommt den Namen in der eigenen Sprache vorgeschlagen.
+    let name = |code: &str| i18n::with(code, || t.owner.stage_defaults("title_abstract").unwrap().name);
+    assert_ne!(name("en"), name("de"));
+    assert_eq!(name("de"), "Titel/Abstract");
 }

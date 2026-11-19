@@ -5,10 +5,11 @@ import { Link, useNavigate } from "react-router-dom";
 import { open } from "@tauri-apps/plugin-dialog";
 
 import { api, errorText, TemplateInfo } from "./api";
+import { t } from "./i18n";
 import { ROLE_LABEL, useRefreshSidebar } from "./shared";
 import { Banner, Group, Icon, PageHeader, Row } from "./ui";
 
-const STEPS = ["Angaben", "Treffer", "Team"];
+const STEPS = [t("Angaben"), t("Treffer"), t("Team")];
 
 function fileName(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
@@ -36,13 +37,13 @@ export function NewReviewPage() {
   }, []);
 
   async function addFiles() {
-    const picked = await open({ multiple: true, directory: false, filters: [{ name: "RIS oder BibTeX", extensions: ["ris", "bib", "bibtex", "txt", "nbib"] }] });
+    const picked = await open({ multiple: true, directory: false, filters: [{ name: t("RIS oder BibTeX"), extensions: ["ris", "bib", "bibtex", "txt", "nbib"] }] });
     const paths = Array.isArray(picked) ? picked : typeof picked === "string" ? [picked] : [];
     setFiles((current) => [...current, ...paths.filter((p) => !current.some((f) => f.path === p)).map((path) => ({ path, source: "" }))]);
   }
 
   async function addPeople() {
-    const picked = await open({ multiple: true, directory: false, filters: [{ name: "Identitätsdatei", extensions: ["ortid"] }] });
+    const picked = await open({ multiple: true, directory: false, filters: [{ name: t("Identitätsdatei"), extensions: ["ortid"] }] });
     const paths = Array.isArray(picked) ? picked : typeof picked === "string" ? [picked] : [];
     setPeople((current) => [...current, ...paths.filter((p) => !current.some((f) => f.path === p)).map((path) => ({ path, role: "reviewer" }))]);
   }
@@ -83,12 +84,12 @@ export function NewReviewPage() {
     else create();
   }
 
-  const chosen = templates.find((t) => t.key === template);
+  const chosen = templates.find((option) => option.key === template);
 
   return (
     <form className="wizard" onSubmit={next}>
-      <PageHeader back={<Link to="/" className="back-link"><Icon name="back" size={14} /> Übersicht</Link>} title="Neues Review" />
-      <ol className="wizard-steps" aria-label="Schritte">
+      <PageHeader back={<Link to="/" className="back-link"><Icon name="back" size={14} /> {t("Übersicht")}</Link>} title={t("Neues Review")} />
+      <ol className="wizard-steps" aria-label={t("Schritte")}>
         {STEPS.map((label, i) => (
           <li key={label} className={i === step ? "current" : i < step ? "done" : ""} aria-current={i === step ? "step" : undefined}>
             <span className="step-num">{i < step ? <Icon name="check" size={12} /> : i + 1}</span> {label}
@@ -99,24 +100,24 @@ export function NewReviewPage() {
 
       {step === 0 && (
         <>
-          <Group title="Titel">
+          <Group title={t("Titel")}>
             <div className="stack-field">
-              <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Titel des Reviews" aria-label="Titel des Reviews" required autoFocus />
+              <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t("Titel des Reviews")} aria-label={t("Titel des Reviews")} required autoFocus />
             </div>
           </Group>
-          <Group title="Review-Typ" footer="Der Typ legt Stationen, Regeln und Begriffe fest. Die Vorlage wird ins Review kopiert und gilt dort unabhängig von der App-Version.">
-            {templates.map((t) => (
-              <label key={t.key} className={`template-option${t.key === template ? " selected" : ""}`}>
-                <input type="radio" name="template" value={t.key} checked={t.key === template} onChange={() => setTemplate(t.key)} />
+          <Group title={t("Review-Typ")} footer={t("Der Typ legt Stationen, Regeln und Begriffe fest. Die Vorlage wird ins Review kopiert und gilt dort unabhängig von der App-Version.")}>
+            {templates.map((option) => (
+              <label key={option.key} className={`template-option${option.key === template ? " selected" : ""}`}>
+                <input type="radio" name="template" value={option.key} checked={option.key === template} onChange={() => setTemplate(option.key)} />
                 <span>
-                  <strong>{t.name}</strong>
-                  <small>{t.description}</small>
+                  <strong>{option.name}</strong>
+                  <small>{option.description}</small>
                 </span>
               </label>
             ))}
           </Group>
           {chosen && (
-            <p className="template-flow" aria-label="Stationen der Vorlage">
+            <p className="template-flow" aria-label={t("Stationen der Vorlage")}>
               {chosen.stations.map((s, i) => <span key={s}>{i > 0 && <span className="flow-arrow">›</span>}{s}</span>)}
             </p>
           )}
@@ -124,8 +125,8 @@ export function NewReviewPage() {
       )}
 
       {step === 1 && (
-        <Group title="Treffer importieren" footer="Exportiere die Treffer deiner Suche als RIS oder BibTeX. Dubletten werden erkannt. Du kannst das auch später im Review nachholen.">
-          {files.length === 0 && <Row><span className="muted">Noch keine Datei gewählt.</span></Row>}
+        <Group title={t("Treffer importieren")} footer={t("Exportiere die Treffer deiner Suche als RIS oder BibTeX. Dubletten werden erkannt. Du kannst das auch später im Review nachholen.")}>
+          {files.length === 0 && <Row><span className="muted">{t("Noch keine Datei gewählt.")}</span></Row>}
           {files.map((f, i) => (
             <Row key={f.path}>
               <span className="person">
@@ -133,21 +134,21 @@ export function NewReviewPage() {
                 <span>{fileName(f.path)}</span>
               </span>
               <span className="inline-actions">
-                <input value={f.source} onChange={(e) => setFiles(files.map((x, j) => (j === i ? { ...x, source: e.target.value } : x)))} placeholder="Quelle, z. B. PubMed" aria-label={`Quelle von ${fileName(f.path)}`} />
-                <button type="button" className="plain" onClick={() => setFiles(files.filter((_, j) => j !== i))} aria-label={`${fileName(f.path)} entfernen`}><Icon name="x" size={14} /></button>
+                <input value={f.source} onChange={(e) => setFiles(files.map((x, j) => (j === i ? { ...x, source: e.target.value } : x)))} placeholder={t("Quelle, z. B. PubMed")} aria-label={t("Quelle von {file}", { file: fileName(f.path) })} />
+                <button type="button" className="plain" onClick={() => setFiles(files.filter((_, j) => j !== i))} aria-label={t("{file} entfernen", { file: fileName(f.path) })}><Icon name="x" size={14} /></button>
               </span>
             </Row>
           ))}
           <Row>
-            <span className="muted">RIS oder BibTeX</span>
-            <button type="button" onClick={addFiles}><Icon name="upload" size={14} /> Dateien wählen …</button>
+            <span className="muted">{t("RIS oder BibTeX")}</span>
+            <button type="button" onClick={addFiles}><Icon name="upload" size={14} /> {t("Dateien wählen …")}</button>
           </Row>
         </Group>
       )}
 
       {step === 2 && (
-        <Group title="Team" footer="Jede Person speichert in ihrer App eine Identitätsdatei (.ortid) und schickt sie dir. Auch das geht später im Review.">
-          {people.length === 0 && <Row><span className="muted">Noch niemand hinzugefügt. Du selbst leitest das Review.</span></Row>}
+        <Group title={t("Team")} footer={t("Jede Person speichert in ihrer App eine Identitätsdatei (.ortid) und schickt sie dir. Auch das geht später im Review.")}>
+          {people.length === 0 && <Row><span className="muted">{t("Noch niemand hinzugefügt. Du selbst leitest das Review.")}</span></Row>}
           {people.map((p, i) => (
             <Row key={p.path}>
               <span className="person">
@@ -155,24 +156,24 @@ export function NewReviewPage() {
                 <span>{fileName(p.path)}</span>
               </span>
               <span className="inline-actions">
-                <select value={p.role} onChange={(e) => setPeople(people.map((x, j) => (j === i ? { ...x, role: e.target.value } : x)))} aria-label={`Rolle für ${fileName(p.path)}`}>
+                <select value={p.role} onChange={(e) => setPeople(people.map((x, j) => (j === i ? { ...x, role: e.target.value } : x)))} aria-label={t("Rolle für {file}", { file: fileName(p.path) })}>
                   {Object.entries(ROLE_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                 </select>
-                <button type="button" className="plain" onClick={() => setPeople(people.filter((_, j) => j !== i))} aria-label={`${fileName(p.path)} entfernen`}><Icon name="x" size={14} /></button>
+                <button type="button" className="plain" onClick={() => setPeople(people.filter((_, j) => j !== i))} aria-label={t("{file} entfernen", { file: fileName(p.path) })}><Icon name="x" size={14} /></button>
               </span>
             </Row>
           ))}
           <Row>
-            <span className="muted">Identitätsdateien</span>
-            <button type="button" onClick={addPeople}><Icon name="file" size={14} /> Dateien wählen …</button>
+            <span className="muted">{t("Identitätsdateien")}</span>
+            <button type="button" onClick={addPeople}><Icon name="file" size={14} /> {t("Dateien wählen …")}</button>
           </Row>
         </Group>
       )}
 
       <div className="sheet-actions">
-        {step > 0 && <button type="button" onClick={() => setStep(step - 1)} disabled={busy}>Zurück</button>}
-        {step < STEPS.length - 1 && <button type="button" onClick={create} disabled={busy || !title.trim()}>Jetzt anlegen</button>}
-        <button className="primary" type="submit" disabled={busy}>{step < STEPS.length - 1 ? "Weiter" : "Review anlegen"}</button>
+        {step > 0 && <button type="button" onClick={() => setStep(step - 1)} disabled={busy}>{t("Zurück")}</button>}
+        {step < STEPS.length - 1 && <button type="button" onClick={create} disabled={busy || !title.trim()}>{t("Jetzt anlegen")}</button>}
+        <button className="primary" type="submit" disabled={busy}>{step < STEPS.length - 1 ? t("Weiter") : t("Review anlegen")}</button>
       </div>
     </form>
   );

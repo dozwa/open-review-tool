@@ -4,7 +4,9 @@
 
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 
+import { core } from "./core";
 import { formStage, mockForms } from "./mockForms";
+import { mockGuidance } from "./mockGuidance";
 import { mockReport } from "./mockReport";
 
 // Protokoll, Abweichungen und Checkliste des Berichts
@@ -79,7 +81,7 @@ const criteria = {
 const criteriaSchema = [
   { key: "population", label: "Population" }, { key: "concept", label: "Concept" },
   { key: "context", label: "Context" }, { key: "source_type", label: "Quellenart" },
-];
+].map((element) => ({ ...element, label: core(element.label) }));
 const stage = (id: string, name: string, kind: string, extra: Record<string, unknown>) => ({
   id, review_id: "r1", name, kind, blind: true, min_reviewers: 2, maybe_as: null, scope: "all",
   sample_size: null, seed: null, n_records: 38, opened_at: "2026-11-12T09:00:00Z",
@@ -105,12 +107,20 @@ const gate = (agree: number, n: number) => ({
   passed: agree * 100 >= 75 * n,
   checks: [{ check: "agreement_min", passed: agree * 100 >= 75 * n, numerator: agree, denominator: n, threshold_percent: 75, percent_x100: Math.floor((agree * 10000) / n) }],
 });
-const station = (key: string, kind: string, label: string, description: string, extra: Record<string, unknown> = {}) => ({
-  key, kind, label, description, tool: null, state: "locked", available: kind === "screening", blocking: false,
-  blocked_by: [{ key: "title_abstract", label: "Titel/Abstract" }], checks: [], rounds: [], overridden: null, free_rounds: false,
-  defaults: kind === "screening" ? { name: label, round: 1, scope: "all", sample_size: null, source_stage: null, rules, reason_required: false } : null,
-  ...extra,
-});
+// Namen, Beschreibungen und Prüfungen der Stationen kommen im Kern aus der Vorlage und folgen der Sprache.
+const labelled = <T extends { label: string }>(item: T): T => ({ ...item, label: core(item.label) });
+const station = (key: string, kind: string, label: string, description: string, extra: Record<string, unknown> = {}) => {
+  const s = {
+    key, kind, label, description, tool: null, state: "locked", available: kind === "screening", blocking: false,
+    blocked_by: [{ key: "title_abstract", label: "Titel/Abstract" }], checks: [] as { label: string }[], rounds: [], overridden: null, free_rounds: false,
+    defaults: kind === "screening" ? { name: label, round: 1, scope: "all", sample_size: null, source_stage: null, rules, reason_required: false } : null,
+    ...extra,
+  };
+  return {
+    ...s, label: core(s.label), description: core(s.description), blocked_by: s.blocked_by.map(labelled), checks: s.checks.map(labelled),
+    defaults: s.defaults && { ...s.defaults, name: core(s.defaults.name) },
+  };
+};
 const done = { state: "done", available: true, blocking: true, blocked_by: [] };
 const jbiStations = [
   station("protocol", "setup", "Protokoll und Team", "Kriterien veröffentlichen und das Team zusammenstellen.", {
@@ -151,17 +161,17 @@ const jbiStations = [
     tool: "fulltext", available: true, blocking: true,
     checks: [{ check: "all_fulltext_status", label: "Jeder Volltext beschafft oder als nicht beschaffbar vermerkt", passed: false, detail: "2 von 6 beschafft, 1 nicht beschaffbar" }],
   }),
-  station("fulltext", "screening", "Volltext-Screening", "Eingeschlossene aus Titel/Abstract am Volltext prüfen, danach Klärung.", {
+  station("fulltext", "screening", "Volltext-Screening", "Eingeschlossene aus Titel/Abstract mit beschafftem Volltext prüfen, danach Klärung. Jeder Ausschluss braucht genau einen Hauptgrund. Später beschaffte Volltexte laufen als weitere Runde.", {
     blocking: true, defaults: { name: "Volltext-Screening", round: 1, scope: "from_stage", sample_size: null, source_stage: "s2", rules, reason_required: true },
   }),
-  station("citation_search", "setup", "Zitationssuche", "Vorwärts und rückwärts suchen, bis nichts Neues mehr kommt.", {
+  station("citation_search", "setup", "Zitationssuche", "Vorwärts und rückwärts suchen, bis nichts Neues mehr kommt. Die Suche wird wie jede andere festgehalten, Treffer mit der Herkunft „Zitationssuche“ eingelesen. Neue Einträge laufen als weitere Runde durch Titel/Abstract und Volltext.", {
     tool: "citation", available: true, blocking: true,
     checks: [
       { check: "citation_search_documented", label: "Zitationssuche festgehalten", passed: false, detail: "noch keine Suche und kein Import mit dieser Herkunft" },
       { check: "all_records_assigned", label: "Alle Einträge einer Runde zugeteilt", passed: true, detail: "0 ohne Runde" },
     ],
   }),
-  station("bundling", "setup", "Quellen bündeln", "Begleitpublikationen derselben Studie zu einer Quelle zusammenfassen.", {
+  station("bundling", "setup", "Quellen bündeln", "Begleitpublikationen derselben Studie zu einer Quelle zusammenfassen und jeder Quelle eine Quellenart geben.", {
     tool: "bundling", available: true, blocking: true,
     checks: [{ check: "source_types_set", label: "Jede eingeschlossene Quelle hat eine Quellenart", passed: false, detail: "3 von 4 ohne Quellenart" }],
   }),
@@ -172,7 +182,7 @@ const jbiStations = [
     rounds: [{ round: 1, stage_id: "s4", name: "Charting-Pilot", closed: false, gate: null }],
     defaults: { name: "Charting-Pilot (Runde 2)", round: 2, scope: "sample", sample_size: 2, source_stage: null, rules, reason_required: false },
   }),
-  station("charting", "form", "Charting", "Alle Quellen mit dem abgestimmten Formular extrahieren und abgleichen.", {
+  station("charting", "form", "Charting", "Alle Quellen mit dem abgestimmten Formular extrahieren und abgleichen. Später dazugekommene Quellen laufen als weitere Runde.", {
     available: true, blocking: true, blocked_by: [{ key: "charting_pilot", label: "Charting-Pilot" }],
     checks: [
       { check: "all_sources_assigned", label: "Alle Quellen einer Runde zugeteilt", passed: false, detail: "3 ohne Runde" },
@@ -183,14 +193,14 @@ const jbiStations = [
   }),
   station("report", "report", "Auswertung und Bericht", "Flussdiagramm, Tabellen und Methodentext.", { available: true }),
 ];
-const terms = { record: "Eintrag", records: "Einträge", source: "Quelle", sources: "Quellen", extraction: "Charting" };
+const terms = { record: core("Eintrag"), records: core("Einträge"), source: core("Quelle"), sources: core("Quellen"), extraction: core("Charting") };
 const jbiWorkflow = {
-  published: true, version: 1, template_key: "jbi_scoping", template_name: "JBI Scoping Review", review_type: "scoping", terms,
+  published: true, version: 1, template_key: "jbi_scoping", template_name: core("JBI Scoping Review"), review_type: "scoping", terms,
   criteria_schema: criteriaSchema, stations: jbiStations,
 };
 // Ein Review aus der Zeit vor den Vorlagen: freier Ablauf, nichts gesperrt.
 const freeWorkflow = {
-  published: false, version: 0, template_key: "free", template_name: "Freier Ablauf", review_type: "free", terms,
+  published: false, version: 0, template_key: "free", template_name: core("Freier Ablauf"), review_type: "free", terms,
   criteria_schema: [], stations: [
     station("protocol", "setup", "Kriterien und Team", "Kriterien festhalten und Personen hinzufügen.", { state: "open", available: true, tool: "protocol", blocked_by: [] }),
     station("import", "setup", "Import", "Treffer einlesen; Dubletten werden erkannt und gezählt.", { state: "open", available: true, tool: "import", blocked_by: [] }),
@@ -202,8 +212,10 @@ const freeWorkflow = {
 };
 const templates = [
   { key: "jbi_scoping", name: "JBI Scoping Review", review_type: "scoping", description: "Ablauf nach dem JBI Manual, Kapitel 10: Pilot mit mindestens 75 % Übereinstimmung, zwei unabhängige Stimmen, Klärung, Volltext, Charting und Bericht nach PRISMA-ScR.", stations: jbiStations.map((s) => s.label) },
+  { key: "rapid_review", name: "Rapid Review", review_type: "rapid", description: "Abgekürzter Ablauf nach den Empfehlungen der Cochrane Rapid Reviews Methods Group (2024): doppelte Bewertung einer Stichprobe mit mindestens 80 % Übereinstimmung, danach eine Stimme je Eintrag mit Prüfung der Ausschlüsse, Extraktion durch eine Person mit Prüfung. Jede Abkürzung steht als Limitation im Methodentext.", stations: ["Protokoll und Team", "Suche", "Import und Dubletten", "Pilot und doppelte Bewertung", "Titel/Abstract", "Volltexte beschaffen", "Volltext-Screening", "Studien bündeln", "Extraktions-Pilot", "Datenextraktion und Bewertung", "Auswertung und Bericht"] },
+  { key: "state_of_the_art", name: "State-of-the-Art-Review", review_type: "state_of_the_art", description: "Übersicht zum aktuellen Stand eines Feldes, angelehnt an die sechs Schritte von Barry, Merkebu und Varpio (2022): Frage und Zeitraum festlegen, suchen, auswählen, auswerten. Eine Stimme je Eintrag, keine Abschlussregeln. Einen verbindlichen Berichtsstandard gibt es nicht.", stations: ["Frage, Feld und Zeitraum", "Suche", "Import", "Titel/Abstract", "Volltexte beschaffen", "Volltext-Auswahl", "Auswertung", "Bericht"] },
   { key: "free", name: "Freier Ablauf", review_type: "free", description: "Ohne feste Reihenfolge und ohne Abschlussregeln: Stufen lassen sich jederzeit öffnen, eine Stimme je Eintrag genügt. Für Literaturübersichten und zum Ausprobieren.", stations: ["Kriterien und Team", "Import", "Screening"] },
-];
+].map((template) => ({ ...template, name: core(template.name), description: core(template.description), stations: template.stations.map(core) }));
 const members = [
   { actor_id: me.actor_id, name: me.name, role: "owner", is_me: true },
   { actor_id: "b0000000-0000-4000-8000-000000000002", name: "Anna Berger", role: "reviewer", is_me: false },
@@ -275,7 +287,7 @@ const sourceTypes = [
   { key: "grey", label: "Graue Literatur" },
   { key: "opinion", label: "Meinung, Kommentar oder Editorial" },
   { key: "other", label: "Sonstiges" },
-];
+].map(labelled);
 const sourceRecord = (id: string, title: string, authors: string, year: number, journal: string) =>
   ({ id, title, abstract: "", authors, year, journal, doi: "", url: "", keywords: "", duplicate_of: null, included: true });
 // Eingeschlossene Einträge; `study` und `primary` beschreiben die Bündel.
@@ -300,7 +312,7 @@ function mockSources() {
   const count = (key: string) => sources.filter((s) => s.source_type === key).length;
   return {
     sources, source_types: sourceTypes, n_records: sourceRecords.length, n_sources: sources.length, n_without_type: count(""),
-    by_type: sourceTypes.map((t) => ({ ...t, n: count(t.key) })).filter((t) => t.n > 0), level: "Volltext-Screening", complete: false,
+    by_type: sourceTypes.map((t) => ({ ...t, n: count(t.key) })).filter((t) => t.n > 0), level: core("Volltext-Screening"), complete: false,
   };
 }
 
@@ -382,6 +394,8 @@ export function installMock() {
     const a = (args ?? {}) as Record<string, unknown>;
     const form = mockForms(cmd, a, { members, sourceTypes, terms });
     if (form !== undefined) return form;
+    const guidance = mockGuidance(cmd, a, () => mockProtocol.registration);
+    if (guidance !== undefined) return guidance;
     switch (cmd) {
       case "identity_get": return identity;
       case "templates_list": return templates;

@@ -33,6 +33,7 @@ use crate::projection::{order_key, StageState};
 use crate::service::{csv_field, require, stage_view, MemberView, RecordItem, Review, StageView};
 use crate::service::{MANAGE_ROLES, ROLES, WRITE_ROLES};
 use crate::sources::Studies;
+use crate::tr;
 use crate::workflow::{CheckResult, GateResult, SchemaElement, Station, Workflow};
 
 pub const FORM_TYPES: [&str; 2] = ["FormVersionPublished", "FormConfirmed"];
@@ -92,32 +93,29 @@ pub fn valid_key(key: &str) -> bool {
 
 pub fn check_fields(fields: &[Field]) -> Check {
     if fields.is_empty() || fields.len() > MAX_FIELDS {
-        return Err(format!("Ein Formular hat 1 bis {MAX_FIELDS} Felder."));
+        return Err(tr!("Ein Formular hat 1 bis {} Felder.", MAX_FIELDS));
     }
     let mut keys = BTreeSet::new();
     for f in fields {
         if !valid_key(&f.key) {
-            return Err(format!(
-                "Der Schlüssel „{}“ braucht 1 bis 40 Kleinbuchstaben, Ziffern oder Unterstriche.",
-                f.key
-            ));
+            return Err(tr!("Der Schlüssel „{}“ braucht 1 bis 40 Kleinbuchstaben, Ziffern oder Unterstriche.", f.key));
         }
         if !keys.insert(f.key.as_str()) {
-            return Err(format!("Der Schlüssel „{}“ kommt mehrfach vor.", f.key));
+            return Err(tr!("Der Schlüssel „{}“ kommt mehrfach vor.", f.key));
         }
         if f.label.trim().is_empty() {
-            return Err(format!("Dem Feld „{}“ fehlt der Name.", f.key));
+            return Err(tr!("Dem Feld „{}“ fehlt der Name.", f.key));
         }
         if !FIELD_TYPES.contains(&f.kind.as_str()) {
-            return Err(format!("Feld „{}“: unbekannter Typ „{}“.", f.label, f.kind));
+            return Err(tr!("Feld „{}“: unbekannter Typ „{}“.", f.label, f.kind));
         }
         if f.has_options() {
             let distinct: BTreeSet<&str> = f.options.iter().map(|o| o.trim()).collect();
             if f.options.is_empty() || f.options.len() > MAX_FIELDS {
-                return Err(format!("Feld „{}“: Eine Auswahl braucht 1 bis {MAX_FIELDS} Werte.", f.label));
+                return Err(tr!("Feld „{}“: Eine Auswahl braucht 1 bis {} Werte.", f.label, MAX_FIELDS));
             }
             if distinct.len() != f.options.len() || distinct.contains("") {
-                return Err(format!("Feld „{}“: Die Auswahlwerte müssen verschieden und nicht leer sein.", f.label));
+                return Err(tr!("Feld „{}“: Die Auswahlwerte müssen verschieden und nicht leer sein.", f.label));
             }
         }
     }
@@ -126,10 +124,10 @@ pub fn check_fields(fields: &[Field]) -> Check {
 
 pub fn check_starter(starter: &Starter) -> Check {
     if !PURPOSES.contains(&starter.purpose.as_str()) {
-        return Err(format!("Formular „{}“: unbekannter Zweck „{}“.", starter.name, starter.purpose));
+        return Err(tr!("Formular „{}“: unbekannter Zweck „{}“.", starter.name, starter.purpose));
     }
     if starter.name.trim().is_empty() {
-        return Err("Einem Formular der Vorlage fehlt der Name.".into());
+        return Err(tr!("Einem Formular der Vorlage fehlt der Name."));
     }
     check_fields(&starter.fields)
 }
@@ -140,12 +138,12 @@ pub fn check_shape(value: &Value) -> Check {
     match value {
         Value::Null => Ok(()),
         Value::String(s) if short(s) => Ok(()),
-        Value::String(_) => Err(format!("Ein Wert hat höchstens {MAX_VALUE} Zeichen.")),
+        Value::String(_) => Err(tr!("Ein Wert hat höchstens {} Zeichen.", MAX_VALUE)),
         Value::Number(n) if n.is_i64() => Ok(()),
         Value::Array(items) if items.len() <= MAX_FIELDS && items.iter().all(|i| i.as_str().is_some_and(short)) => {
             Ok(())
         }
-        _ => Err("Ein Wert ist leer, ein Text, eine ganze Zahl oder eine Liste von Texten.".into()),
+        _ => Err(tr!("Ein Wert ist leer, ein Text, eine ganze Zahl oder eine Liste von Texten.")),
     }
 }
 
@@ -165,19 +163,19 @@ pub fn check_value(field: &Field, value: &Value) -> Check {
         (_, Value::Null) => Ok(()),
         ("text" | "quote", Value::String(_)) => Ok(()),
         ("integer", Value::Number(_)) => Ok(()),
-        ("integer", _) => Err(format!("Feld „{label}“ erwartet eine ganze Zahl.")),
+        ("integer", _) => Err(tr!("Feld „{}“ erwartet eine ganze Zahl.", label)),
         ("decimal", Value::String(s)) if is_decimal(s) => Ok(()),
-        ("decimal", _) => Err(format!("Feld „{label}“ erwartet eine Zahl wie 12,5.")),
+        ("decimal", _) => Err(tr!("Feld „{}“ erwartet eine Zahl wie 12,5.", label)),
         ("choice", Value::String(s)) if field.options.contains(s) => Ok(()),
-        ("choice", _) => Err(format!("Feld „{label}“: Der Wert steht nicht in der Auswahl.")),
+        ("choice", _) => Err(tr!("Feld „{}“: Der Wert steht nicht in der Auswahl.", label)),
         ("multi_choice", Value::Array(items)) => {
             let known = items.iter().all(|i| i.as_str().is_some_and(|s| field.options.iter().any(|o| o == s)));
             match known {
                 true => Ok(()),
-                false => Err(format!("Feld „{label}“: Ein Wert steht nicht in der Auswahl.")),
+                false => Err(tr!("Feld „{}“: Ein Wert steht nicht in der Auswahl.", label)),
             }
         }
-        _ => Err(format!("Feld „{label}“: Der Wert passt nicht zum Typ des Feldes.")),
+        _ => Err(tr!("Feld „{}“: Der Wert passt nicht zum Typ des Feldes.", label)),
     }
 }
 
@@ -649,7 +647,7 @@ fn cell_text(cell: &Cell) -> String {
     match cell.status {
         "differs" => {
             let given: Vec<String> = cell.values.iter().map(|g| show(&g.value)).collect();
-            format!("[Abweichung] {}", given.join(" | "))
+            tr!("[Abweichung] {}", given.join(" | "))
         }
         _ => show(&cell.value),
     }
@@ -742,6 +740,8 @@ impl Review {
             starters = crate::workflow::builtin_template(&template.key).map(|t| t.forms).unwrap_or_default();
         }
         starters.retain(|s| !forms.iter().any(|f| f.purpose == s.purpose));
+        // Angeboten wird das Startformular in der geltenden Sprache; die Leitung veröffentlicht es so.
+        let starters = starters.iter().map(crate::workflow::localized_starter).collect();
         Ok(FormsView { forms, starters, term: template.term("extraction").to_string() })
     }
 
@@ -751,7 +751,7 @@ impl Review {
         require(&self.state()?, &self.me.actor_id, &MANAGE_ROLES)?;
         let text = |key: &str| data.get(key).and_then(Value::as_str).unwrap_or_default().trim().to_string();
         let fields: Vec<Field> = serde_json::from_value(data.get("fields").cloned().unwrap_or(Value::Null))
-            .map_err(|_| invalid("Die Felder des Formulars sind nicht lesbar."))?;
+            .map_err(|_| invalid(tr!("Die Felder des Formulars sind nicht lesbar.")))?;
         let fields: Vec<Field> = fields
             .into_iter()
             .map(|mut f| {
@@ -767,14 +767,14 @@ impl Review {
         check_fields(&fields).map_err(invalid)?;
         let name = text("name");
         if name.is_empty() {
-            return Err(invalid("Dem Formular fehlt der Name."));
+            return Err(invalid(tr!("Dem Formular fehlt der Name.")));
         }
         let note = text("change_note");
         let forms = self.form_defs()?;
         let existing = match data.get("form_id").and_then(Value::as_str) {
             Some(id) => {
-                let id = Uuid::parse_str(id).map_err(|_| invalid("Ungültige ID des Formulars."))?;
-                Some(forms.get(&id).ok_or_else(|| not_found("Dieses Formular gibt es nicht."))?)
+                let id = Uuid::parse_str(id).map_err(|_| invalid(tr!("Ungültige ID des Formulars.")))?;
+                Some(forms.get(&id).ok_or_else(|| not_found(tr!("Dieses Formular gibt es nicht.")))?)
             }
             None => None,
         };
@@ -782,25 +782,25 @@ impl Review {
             Some(form) => {
                 let current = form.current();
                 if current.name == name && current.fields == fields {
-                    return Err(conflict("Am Formular hat sich nichts geändert."));
+                    return Err(conflict(tr!("Am Formular hat sich nichts geändert.")));
                 }
                 for f in &fields {
                     if let Some(old) = form.field(&f.key).filter(|old| old.kind != f.kind) {
-                        return Err(invalid(format!(
+                        return Err(invalid(tr!(
                             "Das Feld „{}“ hatte bisher einen anderen Typ. Lege für den neuen Typ ein neues Feld mit eigenem Schlüssel an.",
                             old.label
                         )));
                     }
                 }
                 if form.confirmed && note.is_empty() {
-                    return Err(invalid("Das Formular ist bestätigt. Eine Änderung braucht eine Begründung."));
+                    return Err(invalid(tr!("Das Formular ist bestätigt. Eine Änderung braucht eine Begründung.")));
                 }
                 (form.id, form.purpose.clone(), current.version + 1)
             }
             None => {
                 let purpose = text("purpose");
                 if !PURPOSES.contains(&purpose.as_str()) {
-                    return Err(invalid("Unbekannter Zweck des Formulars."));
+                    return Err(invalid(tr!("Unbekannter Zweck des Formulars.")));
                 }
                 (Uuid::new_v4(), purpose, 1)
             }
@@ -814,16 +814,16 @@ impl Review {
             }),
         )?;
         let form = self.form_defs()?.get(&id).cloned();
-        form.ok_or_else(|| not_found("Dieses Formular gibt es nicht."))
+        form.ok_or_else(|| not_found(tr!("Dieses Formular gibt es nicht.")))
     }
 
     /// Die Leitung bestätigt die geltende Version, in der Regel nach dem Pilot.
     pub fn confirm_form(&self, form_id: &Uuid) -> Result<()> {
         require(&self.state()?, &self.me.actor_id, &MANAGE_ROLES)?;
         let forms = self.form_defs()?;
-        let form = forms.get(form_id).ok_or_else(|| not_found("Dieses Formular gibt es nicht."))?;
+        let form = forms.get(form_id).ok_or_else(|| not_found(tr!("Dieses Formular gibt es nicht.")))?;
         if form.current().confirmed {
-            return Err(conflict("Diese Version ist bereits bestätigt."));
+            return Err(conflict(tr!("Diese Version ist bereits bestätigt.")));
         }
         self.append("FormConfirmed", None, json!({"form_id": form.id, "version": form.current().version}))?;
         Ok(())
@@ -836,12 +836,11 @@ impl Review {
         let fitting: Vec<&Form> = forms.list.iter().filter(|f| f.purpose == purpose).collect();
         let form = match wanted {
             Some(id) => fitting.into_iter().find(|f| f.id == *id),
-            None if fitting.len() > 1 => return Err(invalid("Mit welchem Formular arbeitet die Stufe?")),
+            None if fitting.len() > 1 => return Err(invalid(tr!("Mit welchem Formular arbeitet die Stufe?"))),
             None => fitting.into_iter().next(),
         };
-        form.cloned().ok_or_else(|| {
-            invalid(format!("Für die Station „{}“ ist noch kein Formular veröffentlicht.", station.label))
-        })
+        form.cloned()
+            .ok_or_else(|| invalid(tr!("Für die Station „{}“ ist noch kein Formular veröffentlicht.", station.label)))
     }
 
     /// Haupteinträge der eingeschlossenen Quellen für eine Formular-Stufe. Eine Stichprobe zieht je
@@ -875,17 +874,18 @@ impl Review {
         let state = self.state()?;
         let role = require(&state, &self.me.actor_id, allowed)?.to_string();
         let events = self.store.stage_events(stage_id)?;
-        let stage = StageState::build(stage_id, &events).ok_or_else(|| not_found("Stufe nicht gefunden."))?;
-        let form_id = stage.config.form_id.ok_or_else(|| invalid("Diese Stufe arbeitet nicht mit einem Formular."))?;
+        let stage = StageState::build(stage_id, &events).ok_or_else(|| not_found(tr!("Stufe nicht gefunden.")))?;
+        let form_id =
+            stage.config.form_id.ok_or_else(|| invalid(tr!("Diese Stufe arbeitet nicht mit einem Formular.")))?;
         let form = self.form_defs()?.get(&form_id).cloned();
-        let form = form.ok_or_else(|| not_found("Das Formular dieser Stufe ist hier nicht bekannt."))?;
+        let form = form.ok_or_else(|| not_found(tr!("Das Formular dieser Stufe ist hier nicht bekannt.")))?;
         Ok(Parts { role, stage, form, values: FormState::build(&events) })
     }
 
     fn form_record(&self, stage_id: &Uuid, record_id: &str) -> Result<String> {
-        let id = Uuid::parse_str(record_id).map_err(|_| invalid("Ungültige ID des Eintrags."))?;
+        let id = Uuid::parse_str(record_id).map_err(|_| invalid(tr!("Ungültige ID des Eintrags.")))?;
         if !self.store.is_assigned(stage_id, &id)? {
-            return Err(not_found("Diese Quelle gehört nicht zu dieser Stufe."));
+            return Err(not_found(tr!("Diese Quelle gehört nicht zu dieser Stufe.")));
         }
         Ok(id.to_string())
     }
@@ -906,7 +906,7 @@ impl Review {
         let me = self.me.actor_id;
         let blind = parts.stage.blind_active();
         let studies = self.studies()?;
-        let template = self.workflow()?.template;
+        let template = self.workflow()?.template.localized();
         let mut rows = Vec::new();
         let mut counts = FormCounts::default();
         let mut times: BTreeMap<String, (i64, i64)> = BTreeMap::new();
@@ -979,7 +979,7 @@ impl Review {
         let parts = self.form_parts(stage_id, &ROLES)?;
         let record = self.form_record(stage_id, record_id)?;
         let me = self.me.actor_id;
-        let id = Uuid::parse_str(&record).map_err(|_| invalid("Ungültige ID des Eintrags."))?;
+        let id = Uuid::parse_str(&record).map_err(|_| invalid(tr!("Ungültige ID des Eintrags.")))?;
         let (label, records, source_type) = unit_of(&self.studies()?, &id);
         let fulltexts = self.fulltexts()?;
         let mut companions = Vec::new();
@@ -988,7 +988,7 @@ impl Review {
                 companions.push(RecordItem::from(row));
             }
         }
-        let row = self.store.record(&id)?.ok_or_else(|| not_found("Record nicht gefunden."))?;
+        let row = self.store.record(&id)?.ok_or_else(|| not_found(tr!("Record nicht gefunden.")))?;
         let order: Vec<Uuid> = self.store.assignments(Some(stage_id))?.into_iter().map(|a| a.record_id).collect();
         let position = order.iter().position(|r| *r == id).unwrap_or(0);
         let wanted = |r: &&Uuid| matches!(parts.mine(&r.to_string(), &me), "open" | "draft" | "todo" | "to_verify");
@@ -1001,7 +1001,7 @@ impl Review {
             (true, true) => "verify",
             (true, false) => "extract",
         };
-        let template = self.workflow()?.template;
+        let template = self.workflow()?.template.localized();
         Ok(FormEntryView {
             mode,
             values: parts.values.values.get(&key).cloned().unwrap_or_default(),
@@ -1037,17 +1037,17 @@ impl Review {
     pub fn record_form_value(&self, stage_id: &Uuid, record_id: &str, field: &str, value: &Value) -> Result<bool> {
         let parts = self.form_parts(stage_id, &WRITE_ROLES)?;
         if parts.stage.closed {
-            return Err(conflict("Die Stufe ist geschlossen."));
+            return Err(conflict(tr!("Die Stufe ist geschlossen.")));
         }
         let record = self.form_record(stage_id, record_id)?;
         let me = self.me.actor_id;
         if parts.verifies(&record, &me) {
-            return Err(conflict(
-                "Diese Quelle hat schon jemand extrahiert. Beim Prüfen trägst du Korrekturen als geklärten Wert ein.",
-            ));
+            return Err(conflict(tr!(
+                "Diese Quelle hat schon jemand extrahiert. Beim Prüfen trägst du Korrekturen als geklärten Wert ein."
+            )));
         }
         let def = parts.fields().iter().find(|f| f.key == field);
-        let def = def.ok_or_else(|| invalid("Dieses Feld gibt es im Formular nicht."))?;
+        let def = def.ok_or_else(|| invalid(tr!("Dieses Feld gibt es im Formular nicht.")))?;
         let value = normal(value);
         check_value(def, &value).map_err(invalid)?;
         if parts.values.value_of(&record, &me, field) == value {
@@ -1070,7 +1070,7 @@ impl Review {
     pub fn complete_form_entry(&self, stage_id: &Uuid, record_id: &str, seconds: Option<i64>) -> Result<()> {
         let parts = self.form_parts(stage_id, &WRITE_ROLES)?;
         if parts.stage.closed {
-            return Err(conflict("Die Stufe ist geschlossen."));
+            return Err(conflict(tr!("Die Stufe ist geschlossen.")));
         }
         let record = self.form_record(stage_id, record_id)?;
         let me = self.me.actor_id;
@@ -1079,7 +1079,7 @@ impl Review {
             let missing = parts.values.missing(&record, &me, parts.fields());
             if !missing.is_empty() {
                 let names: Vec<&str> = missing.iter().map(|f| f.label.as_str()).collect();
-                return Err(invalid(format!("Es fehlen Pflichtfelder: {}.", names.join(", "))));
+                return Err(invalid(tr!("Es fehlen Pflichtfelder: {}.", names.join(", "))));
             }
         }
         let mut payload = json!({"record_id": record, "form_version": parts.form.current().version, "verify": verify});
@@ -1101,14 +1101,14 @@ impl Review {
     ) -> Result<()> {
         let parts = self.form_parts(stage_id, &WRITE_ROLES)?;
         if parts.stage.closed {
-            return Err(conflict("Die Stufe ist geschlossen."));
+            return Err(conflict(tr!("Die Stufe ist geschlossen.")));
         }
         if parts.stage.blind_active() {
-            return Err(forbidden("Die Stufe ist verblindet. Geklärt wird erst nach dem Entblinden."));
+            return Err(forbidden(tr!("Die Stufe ist verblindet. Geklärt wird erst nach dem Entblinden.")));
         }
         let record = self.form_record(stage_id, record_id)?;
         let def = parts.fields().iter().find(|f| f.key == field);
-        let def = def.ok_or_else(|| invalid("Dieses Feld gibt es im Formular nicht."))?;
+        let def = def.ok_or_else(|| invalid(tr!("Dieses Feld gibt es im Formular nicht.")))?;
         let value = normal(value);
         check_value(def, &value).map_err(invalid)?;
         self.append(
@@ -1229,7 +1229,7 @@ impl Review {
     pub fn form_frequencies(&self, stage_id: &Uuid) -> Result<Vec<Frequency>> {
         let parts = self.form_parts(stage_id, &ROLES)?;
         if parts.stage.blind_active() {
-            return Err(forbidden("Die Stufe ist verblindet. Ausgewertet wird erst nach dem Entblinden."));
+            return Err(forbidden(tr!("Die Stufe ist verblindet. Ausgewertet wird erst nach dem Entblinden.")));
         }
         let compared: Vec<Compared> = self
             .store
@@ -1275,18 +1275,18 @@ impl Review {
                 for count in &f.counts {
                     content += &line(vec![f.field.clone(), f.label.clone(), count.option.clone(), count.n.to_string()]);
                 }
-                content += &line(vec![f.field.clone(), f.label.clone(), "(leer)".into(), f.n_empty.to_string()]);
+                content += &line(vec![f.field.clone(), f.label.clone(), tr!("(leer)"), f.n_empty.to_string()]);
                 content +=
-                    &line(vec![f.field.clone(), f.label.clone(), "(Abweichung offen)".into(), f.n_open.to_string()]);
+                    &line(vec![f.field.clone(), f.label.clone(), tr!("(Abweichung offen)"), f.n_open.to_string()]);
             }
             return Ok(FormFile { filename: "extraktion-haeufigkeiten.csv".into(), content });
         }
         if kind != "table" {
-            return Err(invalid("Unbekannte Datei."));
+            return Err(invalid(tr!("Unbekannte Datei.")));
         }
         let view = self.form_stage(stage_id)?;
         if view.stage.blind_active {
-            return Err(forbidden("Die Stufe ist verblindet. Exportiert wird erst nach dem Entblinden."));
+            return Err(forbidden(tr!("Die Stufe ist verblindet. Exportiert wird erst nach dem Entblinden.")));
         }
         let type_label =
             |key: &str| view.source_types.iter().find(|t| t.key == key).map_or(key.to_string(), |t| t.label.clone());

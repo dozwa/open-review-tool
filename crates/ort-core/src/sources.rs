@@ -20,6 +20,7 @@ use crate::error::{conflict, invalid, not_found, Result};
 use crate::event::Event;
 use crate::projection::order_key;
 use crate::service::{require, RecordItem, Review, MANAGE_ROLES, ROLES};
+use crate::tr;
 use crate::workflow::SchemaElement;
 
 pub const SOURCE_TYPES: [&str; 2] = ["RecordsLinkedToStudy", "SourceTypeSet"];
@@ -207,7 +208,7 @@ pub fn count_types(units: &[Unit], known: &[SchemaElement]) -> Vec<TypeCount> {
         out.push(TypeCount { key: key.to_string(), label: key.to_string(), n });
     }
     if let Some(n) = without {
-        out.push(TypeCount { key: String::new(), label: "ohne Quellenart".to_string(), n });
+        out.push(TypeCount { key: String::new(), label: tr!("ohne Quellenart"), n });
     }
     out
 }
@@ -222,7 +223,7 @@ impl Review {
         require(&self.state()?, &self.me.actor_id, &ROLES)?;
         let selection = self.selection()?;
         let studies = self.studies()?;
-        let known = self.workflow()?.template.source_types;
+        let known = self.workflow()?.template.localized().source_types;
         let units = units(&selection.included, &studies);
         let included: BTreeSet<&Uuid> = selection.included.iter().collect();
         let mut sources = Vec::new();
@@ -272,34 +273,34 @@ impl Review {
         require(&self.state()?, &self.me.actor_id, &MANAGE_ROLES)?;
         let label = label.trim();
         if label.chars().count() > MAX_LABEL {
-            return Err(invalid(format!("Die Bezeichnung hat höchstens {MAX_LABEL} Zeichen.")));
+            return Err(invalid(tr!("Die Bezeichnung hat höchstens {} Zeichen.", MAX_LABEL)));
         }
         let unique: BTreeSet<&Uuid> = records.iter().collect();
         if unique.len() != records.len() {
-            return Err(invalid("Ein Eintrag ist doppelt gewählt."));
+            return Err(invalid(tr!("Ein Eintrag ist doppelt gewählt.")));
         }
         if records.len() < 2 {
-            return Err(invalid("Ein Bündel braucht mindestens zwei Einträge."));
+            return Err(invalid(tr!("Ein Bündel braucht mindestens zwei Einträge.")));
         }
         if records.len() > MAX_STUDY_RECORDS {
-            return Err(invalid(format!("Ein Bündel hat höchstens {MAX_STUDY_RECORDS} Einträge.")));
+            return Err(invalid(tr!("Ein Bündel hat höchstens {} Einträge.", MAX_STUDY_RECORDS)));
         }
         if !records.contains(primary) {
-            return Err(invalid("Der Haupteintrag muss einer der Einträge des Bündels sein."));
+            return Err(invalid(tr!("Der Haupteintrag muss einer der Einträge des Bündels sein.")));
         }
         let studies = self.studies()?;
         if study_id.is_some_and(|id| !studies.list.contains_key(&id)) {
-            return Err(not_found("Dieses Bündel gibt es nicht."));
+            return Err(not_found(tr!("Dieses Bündel gibt es nicht.")));
         }
         let resolutions = self.resolutions()?;
         for id in records {
-            let record = self.store.record(id)?.ok_or_else(|| not_found("Eintrag nicht gefunden."))?;
+            let record = self.store.record(id)?.ok_or_else(|| not_found(tr!("Eintrag nicht gefunden.")))?;
             let title: String = record.title.chars().take(60).collect();
             if record.duplicate_of.is_some() || resolutions.is_removed(id) {
-                return Err(invalid(format!("„{title}“ ist als Dublette entfernt und kann nicht gebündelt werden.")));
+                return Err(invalid(tr!("„{}“ ist als Dublette entfernt und kann nicht gebündelt werden.", title)));
             }
             if studies.of_record.get(id).is_some_and(|other| Some(*other) != study_id) {
-                return Err(conflict(format!("„{title}“ gehört schon zu einem anderen Bündel. Erst dort lösen.")));
+                return Err(conflict(tr!("„{}“ gehört schon zu einem anderen Bündel. Erst dort lösen.", title)));
             }
         }
         let study_id = study_id.unwrap_or_else(Uuid::new_v4);
@@ -319,7 +320,7 @@ impl Review {
     pub fn dissolve_study(&self, study_id: &Uuid) -> Result<()> {
         require(&self.state()?, &self.me.actor_id, &MANAGE_ROLES)?;
         if !self.studies()?.list.contains_key(study_id) {
-            return Err(not_found("Dieses Bündel gibt es nicht."));
+            return Err(not_found(tr!("Dieses Bündel gibt es nicht.")));
         }
         self.append(
             "RecordsLinkedToStudy",
@@ -335,19 +336,19 @@ impl Review {
         require(&self.state()?, &self.me.actor_id, &MANAGE_ROLES)?;
         let source_type = source_type.trim();
         if records.is_empty() {
-            return Err(invalid("Kein Eintrag gewählt."));
+            return Err(invalid(tr!("Kein Eintrag gewählt.")));
         }
         if source_type.chars().count() > MAX_LABEL {
-            return Err(invalid(format!("Die Quellenart hat höchstens {MAX_LABEL} Zeichen.")));
+            return Err(invalid(tr!("Die Quellenart hat höchstens {} Zeichen.", MAX_LABEL)));
         }
         let known = self.workflow()?.template.source_types;
         if !source_type.is_empty() && !known.is_empty() && !known.iter().any(|k| k.key == source_type) {
-            return Err(invalid("Diese Quellenart kennt die Vorlage nicht."));
+            return Err(invalid(tr!("Diese Quellenart kennt die Vorlage nicht.")));
         }
         let mut unique: Vec<Uuid> = Vec::new();
         for id in records {
             if self.store.record(id)?.is_none() {
-                return Err(not_found("Eintrag nicht gefunden."));
+                return Err(not_found(tr!("Eintrag nicht gefunden.")));
             }
             if !unique.contains(id) {
                 unique.push(*id);

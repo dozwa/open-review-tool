@@ -7,6 +7,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::projection::string_list;
+use crate::tr;
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Criterion {
@@ -84,13 +85,13 @@ pub fn check_reasons(
 ) -> std::result::Result<(), String> {
     let codes = criteria.reason_codes();
     let unknown = |code: &str| {
-        format!("„{code}“ ist kein Ausschlusskriterium der Kriterienversion {} dieser Stufe.", criteria.version)
+        tr!("„{}“ ist kein Ausschlusskriterium der Kriterienversion {} dieser Stufe.", code, criteria.version)
     };
     match primary_reason {
-        Some(_) if decision != "exclude" => return Err("Ein Hauptgrund gehört nur zu einem Ausschluss.".into()),
+        Some(_) if decision != "exclude" => return Err(tr!("Ein Hauptgrund gehört nur zu einem Ausschluss.")),
         Some(code) if !codes.contains(&code) => return Err(unknown(code)),
         None if reason_required && decision == "exclude" => {
-            return Err("In dieser Stufe braucht jeder Ausschluss genau einen Hauptgrund.".into());
+            return Err(tr!("In dieser Stufe braucht jeder Ausschluss genau einen Hauptgrund."));
         }
         _ => {}
     }

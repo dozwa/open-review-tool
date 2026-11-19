@@ -8,6 +8,7 @@
 use serde_json::Value;
 
 use crate::error::{invalid, Result};
+use crate::tr;
 
 pub fn to_canonical(value: &Value) -> Result<String> {
     let mut out = String::new();
@@ -23,7 +24,7 @@ fn write(value: &Value, out: &mut String) -> Result<()> {
             if n.is_i64() || n.is_u64() {
                 out.push_str(&n.to_string());
             } else {
-                return Err(invalid("Gleitkommazahlen sind in Ereignissen nicht erlaubt."));
+                return Err(invalid(tr!("Gleitkommazahlen sind in Ereignissen nicht erlaubt.")));
             }
         }
         Value::String(s) => out.push_str(&serde_json::to_string(s)?),

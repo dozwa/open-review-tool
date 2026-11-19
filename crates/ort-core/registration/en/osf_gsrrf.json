@@ -1,0 +1,561 @@
+{
+  "key": "osf_gsrrf",
+  "name": "Generalized Systematic Review Registration",
+  "registry": "OSF",
+  "citation": "van den Akker OR, Peters GJY, Bakker CJ, et al. Increasing the transparency of systematic reviews: presenting a generalized registration form. Syst Rev 2023;12:170.",
+  "url": "https://doi.org/10.1186/s13643-023-02281-7",
+  "sections": [
+    {
+      "key": "metadata",
+      "label": "Metadata",
+      "original": "Metadata"
+    },
+    {
+      "key": "methods",
+      "label": "Review methods",
+      "original": "Review methods"
+    },
+    {
+      "key": "search",
+      "label": "Search strategy",
+      "original": "Search strategy"
+    },
+    {
+      "key": "screening",
+      "label": "Screening",
+      "original": "Screening"
+    },
+    {
+      "key": "extraction",
+      "label": "Extraction",
+      "original": "Extraction"
+    },
+    {
+      "key": "synthesis",
+      "label": "Synthesis and quality assessment",
+      "original": "Synthesis and quality assessment"
+    }
+  ],
+  "items": [
+    {
+      "number": 1,
+      "key": "title",
+      "section": "metadata",
+      "label": "Title",
+      "original": "Title",
+      "hint": "Title of the review as it should appear in the registry. The review type belongs in the title."
+    },
+    {
+      "number": 2,
+      "key": "contributors",
+      "section": "metadata",
+      "label": "Contributors",
+      "original": "Contributors",
+      "hint": "Everyone who is listed as an author. OSF enters people with an OSF account here."
+    },
+    {
+      "number": 3,
+      "key": "subjects",
+      "section": "metadata",
+      "label": "Subjects",
+      "original": "Subjects",
+      "hint": "Subjects from OSF’s list, so that the registration can be found."
+    },
+    {
+      "number": 4,
+      "key": "tasks_roles",
+      "section": "metadata",
+      "label": "Tasks and roles",
+      "original": "Tasks and roles",
+      "hint": "Who takes on which task, for example search, screening, extraction, resolution, writing?"
+    },
+    {
+      "number": 5,
+      "key": "review_type",
+      "section": "methods",
+      "label": "Type of review",
+      "original": "Type of review",
+      "hint": "Review type and the guideline the approach follows; also the reporting standard."
+    },
+    {
+      "number": 6,
+      "key": "review_stages",
+      "section": "methods",
+      "label": "Steps of the review",
+      "original": "Review stages",
+      "hint": "The planned steps in their order."
+    },
+    {
+      "number": 7,
+      "key": "current_stage",
+      "section": "methods",
+      "label": "Current status",
+      "original": "Current review stage",
+      "hint": "What has already happened at the time of registration? State it honestly, including trial runs of the search or a pilot that has begun."
+    },
+    {
+      "number": 8,
+      "key": "start_date",
+      "section": "methods",
+      "label": "Start",
+      "original": "Start date",
+      "hint": "Day on which the review starts or started."
+    },
+    {
+      "number": 9,
+      "key": "end_date",
+      "section": "methods",
+      "label": "End",
+      "original": "End date",
+      "hint": "Planned completion of the review."
+    },
+    {
+      "number": 10,
+      "key": "background",
+      "section": "methods",
+      "label": "Background",
+      "original": "Background",
+      "hint": "Why is this review needed? State of knowledge, gap and benefit in a few paragraphs."
+    },
+    {
+      "number": 11,
+      "key": "primary_questions",
+      "section": "methods",
+      "label": "Primary research question",
+      "original": "Primary research question(s)",
+      "hint": "The question or questions the review is meant to answer."
+    },
+    {
+      "number": 12,
+      "key": "secondary_questions",
+      "section": "methods",
+      "label": "Secondary research questions",
+      "original": "Secondary research question(s)",
+      "hint": "Subordinate questions; leave empty or enter “none” if there are none."
+    },
+    {
+      "number": 13,
+      "key": "expectations",
+      "section": "methods",
+      "label": "Expectations or hypotheses",
+      "original": "Expectations / hypotheses",
+      "hint": "What does the team expect? For scoping reviews often “no hypotheses”; then give the reason."
+    },
+    {
+      "number": 14,
+      "key": "dependent_variables",
+      "section": "methods",
+      "label": "Dependent variables, outcomes, main characteristics",
+      "original": "Dependent variable(s) / outcome(s) / main variables",
+      "hint": "What is looked at in the sources? For scoping reviews the concept, for questions of effectiveness the outcomes."
+    },
+    {
+      "number": 15,
+      "key": "independent_variables",
+      "section": "methods",
+      "label": "Independent variables, interventions",
+      "original": "Independent variable(s) / intervention(s) / treatment(s)",
+      "hint": "Interventions or exposures. Enter “not applicable” if the question has none."
+    },
+    {
+      "number": 16,
+      "key": "additional_variables",
+      "section": "methods",
+      "label": "Additional variables, covariates",
+      "original": "Additional variable(s) / covariate(s)",
+      "hint": "Further characteristics used in the analysis, such as setting, year or source type."
+    },
+    {
+      "number": 17,
+      "key": "software",
+      "section": "methods",
+      "label": "Software",
+      "original": "Software",
+      "hint": "Programs for reference management, screening, extraction and analysis, with version."
+    },
+    {
+      "number": 18,
+      "key": "funding",
+      "section": "methods",
+      "label": "Funding",
+      "original": "Funding",
+      "hint": "Funders and grant numbers, or “no funding”."
+    },
+    {
+      "number": 19,
+      "key": "conflicts",
+      "section": "methods",
+      "label": "Conflicts of interest",
+      "original": "Conflicts of interest",
+      "hint": "Conflicts of interest of those involved, or “none”."
+    },
+    {
+      "number": 20,
+      "key": "overlapping_authorships",
+      "section": "methods",
+      "label": "Own work among the sources",
+      "original": "Overlapping authorships",
+      "hint": "Could work by those involved be among the records? How is this handled, for example who does not screen it themselves?"
+    },
+    {
+      "number": 21,
+      "key": "databases",
+      "section": "search",
+      "label": "Databases",
+      "original": "Databases",
+      "hint": "All databases and registers that are searched."
+    },
+    {
+      "number": 22,
+      "key": "interfaces",
+      "section": "search",
+      "label": "Interfaces",
+      "original": "Interfaces",
+      "hint": "Through which interface or platform is each database searched, for example Ovid or PubMed?"
+    },
+    {
+      "number": 23,
+      "key": "grey_literature",
+      "section": "search",
+      "label": "Grey literature",
+      "original": "Grey literature",
+      "hint": "Sources outside the databases: websites, reports, theses. Or give the reason for doing without."
+    },
+    {
+      "number": 24,
+      "key": "criteria",
+      "section": "search",
+      "label": "Inclusion and exclusion criteria",
+      "original": "Inclusion and exclusion criteria",
+      "hint": "The criteria verbatim, with codes, as they apply during screening."
+    },
+    {
+      "number": 25,
+      "key": "query_strings",
+      "section": "search",
+      "label": "Search strings",
+      "original": "Query strings",
+      "hint": "The complete search string for each database. Long strings can be attached as a file; then refer to it here."
+    },
+    {
+      "number": 26,
+      "key": "search_validation",
+      "section": "search",
+      "label": "Validation of the search",
+      "original": "Search validation procedure",
+      "hint": "How is it checked that the search finds what it should find? For example peer review following PRESS or a test with known papers."
+    },
+    {
+      "number": 27,
+      "key": "other_search",
+      "section": "search",
+      "label": "Other search methods",
+      "original": "Other search strategies",
+      "hint": "Citation search, hand searching, asking experts."
+    },
+    {
+      "number": 28,
+      "key": "contact_procedure",
+      "section": "search",
+      "label": "Contacting authors",
+      "original": "Procedures to contact authors",
+      "hint": "Are authors contacted, for instance for full texts or missing information? How often and by what means?"
+    },
+    {
+      "number": 29,
+      "key": "contact_results",
+      "section": "search",
+      "label": "Results of contacts",
+      "original": "Results of contacting authors",
+      "hint": "How are replies and missing replies recorded and reported?"
+    },
+    {
+      "number": 30,
+      "key": "search_repetition",
+      "section": "search",
+      "label": "Validity and repetition of the search",
+      "original": "Search expiration and repetition",
+      "hint": "When does the search count as out of date, and is it repeated before completion?"
+    },
+    {
+      "number": 31,
+      "key": "search_justification",
+      "section": "search",
+      "label": "Rationale for the search strategy",
+      "original": "Search strategy justification",
+      "hint": "Why these databases, terms and limits?"
+    },
+    {
+      "number": 32,
+      "key": "search_misc",
+      "section": "search",
+      "label": "Other search details",
+      "original": "Miscellaneous search strategy details",
+      "hint": "Anything about the search that fits no other field."
+    },
+    {
+      "number": 33,
+      "key": "screening_stages",
+      "section": "screening",
+      "label": "Screening stages",
+      "original": "Screening stages",
+      "hint": "Which stages are there, such as pilot, title/abstract and full text, and what happens in each?"
+    },
+    {
+      "number": 34,
+      "key": "screening_blinding",
+      "section": "screening",
+      "label": "Visible fields and blinding",
+      "original": "Screened fields / blinding",
+      "hint": "What information do the screeners see, and do they see the votes of the others?"
+    },
+    {
+      "number": 35,
+      "key": "exclusion_criteria",
+      "section": "screening",
+      "label": "Exclusion criteria applied",
+      "original": "Used exclusion criteria",
+      "hint": "Which criteria apply at which stage, and how are exclusion reasons recorded?"
+    },
+    {
+      "number": 36,
+      "key": "screener_instructions",
+      "section": "screening",
+      "label": "Instructions for screeners",
+      "original": "Screener instructions",
+      "hint": "What do the screeners go by? For example criteria with guidance notes and borderline cases. OSF has a field for files here; the protocol can be attached there as well."
+    },
+    {
+      "number": 37,
+      "key": "screening_reliability",
+      "section": "screening",
+      "label": "Reliability of screening",
+      "original": "Screening reliability",
+      "hint": "How many people screen each record, and how is agreement measured? State the threshold in the pilot."
+    },
+    {
+      "number": 38,
+      "key": "screening_reconciliation",
+      "section": "screening",
+      "label": "Resolution of disagreements",
+      "original": "Screening reconciliation procedure",
+      "hint": "How are differing votes resolved, and who decides in case of doubt?"
+    },
+    {
+      "number": 39,
+      "key": "screening_sampling",
+      "section": "screening",
+      "label": "Samples",
+      "original": "Sampling and sample size",
+      "hint": "Is only part of the records screened or verified? Size and drawing of the sample."
+    },
+    {
+      "number": 40,
+      "key": "screening_justification",
+      "section": "screening",
+      "label": "Rationale for the approach",
+      "original": "Screening procedure justification",
+      "hint": "Why this approach? Refer to the guideline and give reasons for shortcuts."
+    },
+    {
+      "number": 41,
+      "key": "screening_data",
+      "section": "screening",
+      "label": "Screening data",
+      "original": "Data management and sharing",
+      "hint": "Where are the decisions kept, and what of them is published?"
+    },
+    {
+      "number": 42,
+      "key": "screening_misc",
+      "section": "screening",
+      "label": "Other screening details",
+      "original": "Miscellaneous screening details",
+      "hint": "Anything about screening that fits no other field."
+    },
+    {
+      "number": 43,
+      "key": "entities",
+      "section": "extraction",
+      "label": "What is extracted",
+      "original": "Entities to extract",
+      "hint": "The information recorded from each source."
+    },
+    {
+      "number": 44,
+      "key": "extraction_stages",
+      "section": "extraction",
+      "label": "Extraction stages",
+      "original": "Extraction stages",
+      "hint": "Pilot and main run; what happens in each stage?"
+    },
+    {
+      "number": 45,
+      "key": "extractor_instructions",
+      "section": "extraction",
+      "label": "Instructions for extractors",
+      "original": "Extractor instructions",
+      "hint": "Form with a description for each field, coding rules, examples."
+    },
+    {
+      "number": 46,
+      "key": "extractor_blinding",
+      "section": "extraction",
+      "label": "Blinding during extraction",
+      "original": "Extractor blinding",
+      "hint": "Do the extractors see the others’ entries before they have finished?"
+    },
+    {
+      "number": 47,
+      "key": "extraction_reliability",
+      "section": "extraction",
+      "label": "Reliability of extraction",
+      "original": "Extraction reliability",
+      "hint": "Do two people extract independently, or does a second person verify the first person’s entries?"
+    },
+    {
+      "number": 48,
+      "key": "extraction_reconciliation",
+      "section": "extraction",
+      "label": "Resolution during extraction",
+      "original": "Extraction reconciliation procedure",
+      "hint": "How are differing entries resolved?"
+    },
+    {
+      "number": 49,
+      "key": "extraction_justification",
+      "section": "extraction",
+      "label": "Rationale for the approach",
+      "original": "Extraction procedure justification",
+      "hint": "Why this approach? Refer to the guideline."
+    },
+    {
+      "number": 50,
+      "key": "extraction_data",
+      "section": "extraction",
+      "label": "Extraction data",
+      "original": "Data management and sharing",
+      "hint": "Where are the extracted data kept, and what of them is published?"
+    },
+    {
+      "number": 51,
+      "key": "extraction_misc",
+      "section": "extraction",
+      "label": "Other extraction details",
+      "original": "Miscellaneous extraction details",
+      "hint": "Anything about extraction that fits no other field."
+    },
+    {
+      "number": 52,
+      "key": "transformations",
+      "section": "synthesis",
+      "label": "Planned data transformations",
+      "original": "Planned data transformations",
+      "hint": "Is information converted, combined or grouped into categories?"
+    },
+    {
+      "number": 53,
+      "key": "missing_data",
+      "section": "synthesis",
+      "label": "Missing information",
+      "original": "Missing data",
+      "hint": "How are sources handled that do not report a piece of information?"
+    },
+    {
+      "number": 54,
+      "key": "data_validation",
+      "section": "synthesis",
+      "label": "Data validation",
+      "original": "Data validation",
+      "hint": "How are the extracted data checked for errors?"
+    },
+    {
+      "number": 55,
+      "key": "quality_assessment",
+      "section": "synthesis",
+      "label": "Quality assessment",
+      "original": "Quality assessment",
+      "hint": "Is methodological quality or risk of bias assessed? With which instrument, or why not?"
+    },
+    {
+      "number": 56,
+      "key": "synthesis_plan",
+      "section": "synthesis",
+      "label": "Synthesis plan",
+      "original": "Synthesis plan",
+      "hint": "How are the data analysed and presented, for each research question?"
+    },
+    {
+      "number": 57,
+      "key": "conclusion_criteria",
+      "section": "synthesis",
+      "label": "Criteria for conclusions",
+      "original": "Criteria for conclusions / inference criteria",
+      "hint": "What does the team base its conclusions on? For descriptive reviews “not applicable”, with a reason."
+    },
+    {
+      "number": 58,
+      "key": "synthesist_blinding",
+      "section": "synthesis",
+      "label": "Blinding during synthesis",
+      "original": "Synthesist blinding",
+      "hint": "Are those doing the analysis blinded to anything? Usually “no”."
+    },
+    {
+      "number": 59,
+      "key": "synthesis_reliability",
+      "section": "synthesis",
+      "label": "Reliability of synthesis",
+      "original": "Synthesis reliability",
+      "hint": "How many people do the analysis, and how is it checked?"
+    },
+    {
+      "number": 60,
+      "key": "synthesis_reconciliation",
+      "section": "synthesis",
+      "label": "Resolution during synthesis",
+      "original": "Synthesis reconciliation procedure",
+      "hint": "How are differing interpretations resolved?"
+    },
+    {
+      "number": 61,
+      "key": "publication_bias",
+      "section": "synthesis",
+      "label": "Publication bias",
+      "original": "Publication bias analyses",
+      "hint": "Planned analyses of publication bias, or why there are none."
+    },
+    {
+      "number": 62,
+      "key": "sensitivity",
+      "section": "synthesis",
+      "label": "Sensitivity analyses",
+      "original": "Sensitivity analyses / robustness checks",
+      "hint": "Planned checks of whether the results depend on individual decisions, or why there are none."
+    },
+    {
+      "number": 63,
+      "key": "synthesis_justification",
+      "section": "synthesis",
+      "label": "Rationale for the approach",
+      "original": "Synthesis procedure justification",
+      "hint": "Why this kind of analysis? Refer to the guideline."
+    },
+    {
+      "number": 64,
+      "key": "synthesis_data",
+      "section": "synthesis",
+      "label": "Synthesis data",
+      "original": "Synthesis data management and sharing",
+      "hint": "Where are the analysis and the material kept, and what of them is published?"
+    },
+    {
+      "number": 65,
+      "key": "synthesis_misc",
+      "section": "synthesis",
+      "label": "Other synthesis details",
+      "original": "Miscellaneous synthesis details",
+      "hint": "Anything about the synthesis that fits no other field."
+    }
+  ]
+}
