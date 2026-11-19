@@ -17,10 +17,12 @@ use crate::agreement::{self, Alpha, CohenPair, Estimate, Metric, Percent};
 use crate::canonical::to_canonical;
 use crate::catalog;
 use crate::criteria::{check_reasons, Criteria};
+use crate::duplicates::{self, Resolutions};
 use crate::error::{conflict, forbidden, invalid, not_found, Result};
 use crate::event::{now_timestamp, parse_public_key, sha256_hex, Event, Identity, PublicIdentity};
 use crate::import;
 use crate::projection::{FinalDecision, MaybeMode, ReviewState, StageState, Verify};
+use crate::search::{Search, SearchVersion, Searches, SEARCH_TYPES};
 use crate::store::{AssignmentRow, BatchRow, RecordRow, Store};
 use crate::workflow::{self, Facts, GateResult, SchemaElement, StationView, Template, Workflow, WORKFLOW_TYPES};
 
@@ -103,9 +105,121 @@ pub struct ReviewDetail {
     pub n_duplicates: i64,
     pub criteria: Criteria,
     pub stages: Vec<StageView>,
-    pub imports: Vec<BatchRow>,
+    pub imports: Vec<ImportView>,
     pub workflow: WorkflowView,
 }
+
+/// Import mit Herkunft und Suchversion aus dem Log.
+#[derive(Clone, Debug, Serialize)]
+pub struct ImportView {
+    #[serde(flatten)]
+    pub batch: BatchRow,
+    /// `database`, `register`, `citation`, `other`; leer bei Importen aus der Zeit vor der Angabe.
+    pub origin: String,
+    pub search_id: Option<Uuid>,
+    pub search_version: Option<i64>,
+}
+
+/// Woher die Treffer eines Imports stammen. Mit Suche kommen Quelle und Herkunft von dort.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct ImportSource {
+    #[serde(default)]
+    pub source: String,
+    #[serde(default)]
+    pub origin: String,
+    #[serde(default)]
+    pub search_id: Option<Uuid>,
+    /// Ohne Angabe die neueste Version der Suche.
+    #[serde(default)]
+    pub search_version: Option<i64>,
+}
+
+/// Was ein `RecordsImported` über seinen Import sagt.
+#[derive(Clone, Debug)]
+struct ImportEvent {
+    batch_id: Option<Uuid>,
+    source: String,
+    origin: String,
+    search: Option<(Uuid, i64)>,
+    n_records: i64,
+    n_duplicates: i64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct SearchVersionView {
+    #[serde(flatten)]
+    pub version: SearchVersion,
+    pub n_imports: i64,
+    /// Importierte Einträge dieser Version, mit exakten Dubletten.
+    pub n_records: i64,
+    pub n_duplicates: i64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct SearchView {
+    pub id: Uuid,
+    pub versions: Vec<SearchVersionView>,
+}
+
+/// Treffer einer Quelle, allein aus dem Log gezählt.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct SourceCount {
+    pub source: String,
+    pub origin: String,
+    pub search_id: Option<Uuid>,
+    pub search_version: Option<i64>,
+    pub n_imports: i64,
+    pub n_records: i64,
+    /// Beim Import exakt erkannte Dubletten.
+    pub n_duplicates: i64,
+}
+
+/// Zahlen für den Kopf des Flussdiagramms: Treffer je Quelle und entfernte Dubletten.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct ImportSummary {
+    pub sources: Vec<SourceCount>,
+    pub n_records: i64,
+    pub n_exact_duplicates: i64,
+    /// Als Dublette entschiedene Paare (`DuplicatesResolved`).
+    pub n_resolved_duplicates: i64,
+    pub n_unique: i64,
+}
+
+/// Entscheidung über ein Paar möglicher Dubletten.
+#[derive(Clone, Debug, Deserialize)]
+pub struct PairDecision {
+    pub a: Uuid,
+    pub b: Uuid,
+    /// `duplicate` oder `distinct`.
+    pub decision: String,
+    /// Bei `duplicate`: der Eintrag, der bleibt.
+    #[serde(default)]
+    pub keep: Option<Uuid>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct DuplicatePair {
+    pub a: RecordItem,
+    pub b: RecordItem,
+    /// Quelle des Imports, aus dem der Eintrag stammt.
+    pub a_source: String,
+    pub b_source: String,
+    pub similarity: i64,
+    /// Vorschlag, welcher Eintrag bleibt: der vollständigere.
+    pub keep: Uuid,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct DuplicateList {
+    /// Offene Paare, höchstens [`PAIR_LIMIT`].
+    pub pairs: Vec<DuplicatePair>,
+    pub total: usize,
+    pub n_exact: i64,
+    pub n_resolved: i64,
+    pub n_distinct: usize,
+}
+
+pub const PAIR_LIMIT: usize = 200;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct RecordItem {
@@ -502,13 +616,22 @@ impl Review {
         state.stage_ids.iter().map(|id| self.stage_state(id)).collect()
     }
 
-    fn facts(&self, state: &ReviewState) -> Result<Facts> {
-        let n_records: i64 =
-            self.store.conn().query_row("SELECT count(*) FROM record WHERE duplicate_of IS NULL", [], |r| r.get(0))?;
+    fn facts(&self, state: &ReviewState, workflow: &Workflow) -> Result<Facts> {
+        let resolutions = self.resolutions()?;
+        let (total, exact, resolved) = self.duplicate_counts(&resolutions)?;
+        // Der Abgleich liest alle Titel; nur rechnen, wenn die Vorlage danach fragt.
+        let asks =
+            workflow.template.stations.iter().any(|s| s.gate.iter().any(|g| g.check == "no_unresolved_duplicates"));
+        let open_duplicates = match asks {
+            true => duplicates::candidates(&self.store.record_keys()?, &resolutions).len() as i64,
+            false => 0,
+        };
         Ok(Facts {
             criteria_published: Criteria::from_payload(state.criteria.as_ref()).version > 0,
             n_writers: state.members.values().filter(|m| WRITE_ROLES.contains(&m.role.as_str())).count() as i64,
-            n_records,
+            n_records: total - exact - resolved,
+            n_searches: self.search_state()?.list.len() as i64,
+            open_duplicates,
         })
     }
 
@@ -516,7 +639,8 @@ impl Review {
     pub fn stations(&self) -> Result<Vec<StationView>> {
         let state = self.state()?;
         require(&state, &self.me.actor_id, &ROLES)?;
-        Ok(self.workflow()?.stations(&self.facts(&state)?, &self.stage_states(&state)?))
+        let workflow = self.workflow()?;
+        Ok(workflow.stations(&self.facts(&state, &workflow)?, &self.stage_states(&state)?))
     }
 
     pub fn station(&self, key: &str) -> Result<StationView> {
@@ -721,10 +845,38 @@ impl Review {
 
     // ------------------------------------------------------------ Import
 
-    /// Liest eine RIS- oder BibTeX-Datei ein. Fehler in der Datei landen im Importstatus.
+    /// Kurzform ohne Suchversion: Treffer einer Datenbank mit frei benannter Quelle.
     pub fn import_file(&self, filename: &str, text: &str, source: &str) -> Result<BatchRow> {
+        let from = ImportSource { source: source.into(), origin: "database".into(), ..ImportSource::default() };
+        self.import_file_with(filename, text, &from)
+    }
+
+    /// Liest eine Datei in RIS, BibTeX oder dem PubMed-Format ein. Fehler in der Datei landen im
+    /// Importstatus. Mit Suchversion übernimmt der Import Quelle und Herkunft von dort.
+    pub fn import_file_with(&self, filename: &str, text: &str, from: &ImportSource) -> Result<BatchRow> {
         let state = self.state()?;
         require(&state, &self.me.actor_id, &MANAGE_ROLES)?;
+        let (source, origin, search) = match from.search_id {
+            Some(id) => {
+                let searches = self.search_state()?;
+                let search = searches.get(&id).ok_or_else(|| not_found("Diese Suche gibt es nicht."))?;
+                let version = match from.search_version {
+                    Some(n) => search.version(n),
+                    None => search.latest(),
+                }
+                .ok_or_else(|| not_found("Diese Suchversion gibt es nicht."))?;
+                (version.source.clone(), version.origin.clone(), Some((id, version.version)))
+            }
+            None => {
+                if !catalog::ORIGINS.contains(&from.origin.as_str()) {
+                    return Err(invalid(
+                        "Woher stammen die Treffer? Wähle eine Suche oder die Herkunft: Datenbank, Register, Zitationssuche oder andere.",
+                    ));
+                }
+                (from.source.trim().to_string(), from.origin.clone(), None)
+            }
+        };
+        let source = source.as_str();
         let format = import::detect_format(filename, text)?;
         let mut batch = BatchRow {
             id: Uuid::new_v4(),
@@ -789,17 +941,18 @@ impl Review {
         batch.status = "done".into();
         batch.n_records = ids.len() as i64;
         batch.n_duplicates = n_duplicates;
-        self.append(
-            "RecordsImported",
-            None,
-            json!({
-                "batch_id": batch.id.to_string(), "source": batch.source, "filename": batch.filename,
-                "file_sha256": batch.sha256, "format": batch.format, "n_records": batch.n_records,
-                "n_duplicates": n_duplicates, "record_ids_sha256": sha256_hex(ids.join("\n").as_bytes()),
-                "records_sha256": self.store.records_digest(&batch.id)?,
-                "created_at": batch.created_at,
-            }),
-        )?;
+        let mut payload = json!({
+            "batch_id": batch.id.to_string(), "source": batch.source, "filename": batch.filename,
+            "file_sha256": batch.sha256, "format": batch.format, "n_records": batch.n_records,
+            "n_duplicates": n_duplicates, "record_ids_sha256": sha256_hex(ids.join("\n").as_bytes()),
+            "records_sha256": self.store.records_digest(&batch.id)?,
+            "created_at": batch.created_at, "origin": origin,
+        });
+        if let Some((id, version)) = search {
+            payload["search_id"] = json!(id.to_string());
+            payload["search_version"] = json!(version);
+        }
+        self.append("RecordsImported", None, payload)?;
         self.store.finish_batch(&batch)?;
         tx.commit()?;
         Ok(batch)
@@ -812,12 +965,278 @@ impl Review {
         Ok(batch)
     }
 
+    fn import_events(&self) -> Result<Vec<ImportEvent>> {
+        let events = self.store.events_of_types(&["RecordsImported"])?;
+        Ok(events
+            .iter()
+            .map(|e| {
+                let p = catalog::upcast(e);
+                let text = |key: &str| p.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
+                let number = |key: &str| p.get(key).and_then(Value::as_i64);
+                let search_id = p.get("search_id").and_then(Value::as_str).and_then(|s| Uuid::parse_str(s).ok());
+                ImportEvent {
+                    batch_id: Uuid::parse_str(&text("batch_id")).ok(),
+                    source: text("source"),
+                    origin: text("origin"),
+                    search: search_id.zip(number("search_version")),
+                    n_records: number("n_records").unwrap_or(0),
+                    n_duplicates: number("n_duplicates").unwrap_or(0),
+                }
+            })
+            .collect())
+    }
+
+    /// Treffer je Quelle und Dublettenzahl, allein aus dem Log. Grundlage für das Flussdiagramm.
+    pub fn import_summary(&self) -> Result<ImportSummary> {
+        require(&self.state()?, &self.me.actor_id, &ROLES)?;
+        let mut sources: Vec<SourceCount> = Vec::new();
+        for e in self.import_events()? {
+            let (search_id, search_version) = (e.search.map(|s| s.0), e.search.map(|s| s.1));
+            let found = sources.iter().position(|s| {
+                s.source == e.source
+                    && s.origin == e.origin
+                    && s.search_id == search_id
+                    && s.search_version == search_version
+            });
+            let index = found.unwrap_or_else(|| {
+                sources.push(SourceCount {
+                    source: e.source.clone(),
+                    origin: e.origin.clone(),
+                    search_id,
+                    search_version,
+                    n_imports: 0,
+                    n_records: 0,
+                    n_duplicates: 0,
+                });
+                sources.len() - 1
+            });
+            sources[index].n_imports += 1;
+            sources[index].n_records += e.n_records;
+            sources[index].n_duplicates += e.n_duplicates;
+        }
+        let n_records: i64 = sources.iter().map(|s| s.n_records).sum();
+        let n_exact_duplicates: i64 = sources.iter().map(|s| s.n_duplicates).sum();
+        let n_resolved_duplicates = self.resolutions()?.removed.len() as i64;
+        Ok(ImportSummary {
+            sources,
+            n_records,
+            n_exact_duplicates,
+            n_resolved_duplicates,
+            n_unique: n_records - n_exact_duplicates - n_resolved_duplicates,
+        })
+    }
+
+    // ------------------------------------------------------------ Suche
+
+    fn search_state(&self) -> Result<Searches> {
+        Ok(Searches::build(&self.store.events_of_types(&SEARCH_TYPES)?))
+    }
+
+    /// Suchen mit ihren Versionen und den Importen je Version.
+    pub fn searches(&self) -> Result<Vec<SearchView>> {
+        require(&self.state()?, &self.me.actor_id, &ROLES)?;
+        let imports = self.import_events()?;
+        Ok(self
+            .search_state()?
+            .list
+            .into_iter()
+            .map(|search| {
+                let versions = search
+                    .versions
+                    .into_iter()
+                    .map(|version| {
+                        let own: Vec<&ImportEvent> =
+                            imports.iter().filter(|i| i.search == Some((search.id, version.version))).collect();
+                        SearchVersionView {
+                            n_imports: own.len() as i64,
+                            n_records: own.iter().map(|i| i.n_records).sum(),
+                            n_duplicates: own.iter().map(|i| i.n_duplicates).sum(),
+                            version,
+                        }
+                    })
+                    .collect();
+                SearchView { id: search.id, versions }
+            })
+            .collect())
+    }
+
+    /// Hält eine Suche fest. Mit `search_id` entsteht eine neue Version dieser Suche, sonst eine neue Suche.
+    pub fn publish_search(&self, data: &Value) -> Result<Search> {
+        let state = self.state()?;
+        require(&state, &self.me.actor_id, &MANAGE_ROLES)?;
+        let text = |key: &str| data.get(key).and_then(Value::as_str).unwrap_or_default().trim().to_string();
+        let number = |key: &str| data.get(key).and_then(Value::as_i64);
+        let searches = self.search_state()?;
+        let (id, version, previous) = match data.get("search_id").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+            Some(raw) => {
+                let id = Uuid::parse_str(raw).map_err(|_| invalid("Ungültige ID der Suche."))?;
+                let search = searches.get(&id).ok_or_else(|| not_found("Diese Suche gibt es nicht."))?;
+                let last = search.latest().map_or(0, |v| v.version);
+                (id, last + 1, Some(last))
+            }
+            None => (Uuid::new_v4(), 1, None),
+        };
+        if text("source").is_empty() {
+            return Err(invalid("Die Quelle fehlt, z. B. MEDLINE oder ClinicalTrials.gov."));
+        }
+        if text("query").is_empty() {
+            return Err(invalid("Der Suchstring fehlt."));
+        }
+        if !catalog::ORIGINS.contains(&text("origin").as_str()) {
+            return Err(invalid("Die Herkunft fehlt: Datenbank, Register, Zitationssuche oder andere."));
+        }
+        if !catalog::is_date(&text("searched_on")) {
+            return Err(invalid("Das Datum der Suche fehlt oder hat nicht die Form JJJJ-MM-TT."));
+        }
+        if number("hit_limit").is_some_and(|n| n < 1) || number("hits").is_some_and(|n| n < 0) {
+            return Err(invalid("Trefferzahl und Trefferlimit dürfen nicht negativ sein."));
+        }
+        if version > 1 && text("change_note").is_empty() {
+            return Err(invalid("Was hat sich an der Suche geändert? Die Notiz zur Änderung fehlt."));
+        }
+        self.append(
+            "SearchVersionPublished",
+            None,
+            json!({
+                "search_id": id.to_string(), "version": version, "previous_version": previous,
+                "source": text("source"), "platform": text("platform"), "origin": text("origin"),
+                "query": text("query"), "searched_on": text("searched_on"), "limits": text("limits"),
+                "hit_limit": number("hit_limit"), "hits": number("hits"), "change_note": text("change_note"),
+            }),
+        )?;
+        self.search_state()?.get(&id).cloned().ok_or_else(|| not_found("Diese Suche gibt es nicht."))
+    }
+
+    /// Vermerkt ein Peer-Review der Suche, z. B. nach PRESS. Im Log steht kein Name: entweder ein
+    /// Mitglied oder nur der Vermerk mit der Rolle der Person.
+    pub fn review_search(
+        &self,
+        search_id: &Uuid,
+        version: i64,
+        reviewed_on: &str,
+        note: &str,
+        reviewer: Option<Uuid>,
+    ) -> Result<()> {
+        let state = self.state()?;
+        require(&state, &self.me.actor_id, &MANAGE_ROLES)?;
+        let searches = self.search_state()?;
+        if searches.get(search_id).and_then(|s| s.version(version)).is_none() {
+            return Err(not_found("Diese Suchversion gibt es nicht."));
+        }
+        if note.trim().is_empty() {
+            return Err(invalid("Der Vermerk fehlt: Wer hat geprüft (Rolle) und mit welchem Ergebnis?"));
+        }
+        if !catalog::is_date(reviewed_on) {
+            return Err(invalid("Das Datum der Prüfung fehlt oder hat nicht die Form JJJJ-MM-TT."));
+        }
+        if reviewer.is_some_and(|r| !state.members.contains_key(&r)) {
+            return Err(not_found("Diese Person ist kein Mitglied des Reviews."));
+        }
+        self.append(
+            "SearchPeerReviewed",
+            None,
+            json!({
+                "search_id": search_id.to_string(), "version": version, "reviewed_on": reviewed_on,
+                "note": note.trim(), "reviewer": reviewer.map(|r| r.to_string()),
+            }),
+        )?;
+        Ok(())
+    }
+
+    // ------------------------------------------------------------ Dubletten
+
+    pub(crate) fn resolutions(&self) -> Result<Resolutions> {
+        Ok(Resolutions::build(&self.store.events_of_types(&["DuplicatesResolved"])?))
+    }
+
+    /// Einträge insgesamt, exakte Dubletten aus dem Import und als Dublette entschiedene.
+    fn duplicate_counts(&self, resolutions: &Resolutions) -> Result<(i64, i64, i64)> {
+        let count = |sql: &str| -> Result<i64> { Ok(self.store.conn().query_row(sql, [], |r| r.get(0))?) };
+        let mut resolved = 0;
+        for id in resolutions.removed.keys() {
+            // Zählt nur, was hier vorhanden und nicht schon exakte Dublette ist.
+            if self.store.record(id)?.is_some_and(|r| r.duplicate_of.is_none()) {
+                resolved += 1;
+            }
+        }
+        Ok((
+            count("SELECT count(*) FROM record")?,
+            count("SELECT count(*) FROM record WHERE duplicate_of IS NOT NULL")?,
+            resolved,
+        ))
+    }
+
+    /// Mögliche Dubletten, über die noch nicht entschieden ist, die sichersten zuerst.
+    pub fn duplicate_candidates(&self) -> Result<DuplicateList> {
+        require(&self.state()?, &self.me.actor_id, &ROLES)?;
+        let resolutions = self.resolutions()?;
+        let found = duplicates::candidates(&self.store.record_keys()?, &resolutions);
+        let sources: BTreeMap<Uuid, String> = self.store.batches()?.into_iter().map(|b| (b.id, b.source)).collect();
+        let source_of = |r: &RecordRow| sources.get(&r.batch_id).cloned().unwrap_or_default();
+        // Vollständiger ist, wer Abstract und DOI hat; bei Gleichstand bleibt der erste.
+        let weight = |r: &RecordRow| {
+            2 * i64::from(!r.abstract_text.is_empty())
+                + 2 * i64::from(!r.doi.is_empty())
+                + i64::from(!r.pmid.is_empty())
+        };
+        let mut pairs = Vec::new();
+        for c in found.iter().take(PAIR_LIMIT) {
+            let (Some(a), Some(b)) = (self.store.record(&c.a)?, self.store.record(&c.b)?) else { continue };
+            pairs.push(DuplicatePair {
+                keep: if weight(&b) > weight(&a) { b.id } else { a.id },
+                a_source: source_of(&a),
+                b_source: source_of(&b),
+                similarity: c.similarity,
+                a: a.into(),
+                b: b.into(),
+            });
+        }
+        let (_, n_exact, n_resolved) = self.duplicate_counts(&resolutions)?;
+        Ok(DuplicateList { pairs, total: found.len(), n_exact, n_resolved, n_distinct: resolutions.distinct.len() })
+    }
+
+    /// Entscheidet Paare: Dublette (mit dem Eintrag, der bleibt) oder keine. Eine spätere Entscheidung
+    /// zum selben Paar ersetzt die frühere. Offene und geschlossene Stufen ändern sich nicht.
+    pub fn resolve_duplicates(&self, pairs: &[PairDecision]) -> Result<usize> {
+        let state = self.state()?;
+        require(&state, &self.me.actor_id, &MANAGE_ROLES)?;
+        if pairs.is_empty() {
+            return Err(invalid("Kein Paar gewählt."));
+        }
+        for pair in pairs {
+            for id in [&pair.a, &pair.b] {
+                let record = self.store.record(id)?.ok_or_else(|| not_found("Eintrag nicht gefunden."))?;
+                if record.duplicate_of.is_some() {
+                    return Err(invalid(format!(
+                        "„{}“ ist schon beim Import als Dublette erkannt.",
+                        record.title.chars().take(60).collect::<String>()
+                    )));
+                }
+            }
+        }
+        for chunk in pairs.chunks(catalog::MAX_PAIRS) {
+            let list: Vec<Value> = chunk
+                .iter()
+                .map(|p| {
+                    let mut pair = json!({"a": p.a.to_string(), "b": p.b.to_string(), "decision": p.decision});
+                    if let Some(keep) = p.keep {
+                        pair["keep"] = json!(keep.to_string());
+                    }
+                    pair
+                })
+                .collect();
+            self.append("DuplicatesResolved", None, json!({ "pairs": list }))?;
+        }
+        Ok(pairs.len())
+    }
+
     pub fn records(&self, query: Option<&str>, include_duplicates: bool) -> Result<Vec<RecordItem>> {
         let rows = self.store.records_where("ORDER BY title, id", &[])?;
         let q = query.map(str::to_lowercase).filter(|q| !q.is_empty());
+        let resolutions = self.resolutions()?;
         Ok(rows
             .into_iter()
-            .filter(|r| include_duplicates || r.duplicate_of.is_none())
+            .filter(|r| include_duplicates || (r.duplicate_of.is_none() && !resolutions.is_removed(&r.id)))
             .filter(|r| {
                 q.as_ref().is_none_or(|q| {
                     r.title.to_lowercase().contains(q)
@@ -835,25 +1254,40 @@ impl Review {
         let state = self.state()?;
         let role =
             state.role_of(&self.me.actor_id).ok_or_else(|| forbidden("Du bist nicht Mitglied dieses Reviews."))?;
-        let count = |sql: &str| -> Result<i64> { Ok(self.store.conn().query_row(sql, [], |r| r.get(0))?) };
+        let (n_records, n_exact, n_resolved) = self.duplicate_counts(&self.resolutions()?)?;
+        let events = self.import_events()?;
+        let imports = self
+            .store
+            .batches()?
+            .into_iter()
+            .map(|batch| {
+                let event = events.iter().find(|e| e.batch_id == Some(batch.id));
+                ImportView {
+                    origin: event.map(|e| e.origin.clone()).unwrap_or_default(),
+                    search_id: event.and_then(|e| e.search).map(|s| s.0),
+                    search_version: event.and_then(|e| e.search).map(|s| s.1),
+                    batch,
+                }
+            })
+            .collect();
         Ok(ReviewDetail {
             id: self.id()?,
             title: state.title.clone(),
             role: role.to_string(),
             me: self.me.actor_id,
             members: self.members()?,
-            n_records: count("SELECT count(*) FROM record")?,
-            n_duplicates: count("SELECT count(*) FROM record WHERE duplicate_of IS NOT NULL")?,
+            n_records,
+            n_duplicates: n_exact + n_resolved,
             criteria: Criteria::from_payload(state.criteria.as_ref()),
             stages: self.list_stages()?,
-            imports: self.store.batches()?,
+            imports,
             workflow: self.workflow_view(&state)?,
         })
     }
 
     fn workflow_view(&self, state: &ReviewState) -> Result<WorkflowView> {
         let workflow = self.workflow()?;
-        let stations = workflow.stations(&self.facts(state)?, &self.stage_states(state)?);
+        let stations = workflow.stations(&self.facts(state, &workflow)?, &self.stage_states(state)?);
         Ok(WorkflowView {
             published: workflow.published(),
             version: workflow.version,
@@ -894,7 +1328,7 @@ impl Review {
         // Station, Sperren und Regeln aus der Vorlage
         let workflow = self.workflow()?;
         let stages = self.stage_states(&state)?;
-        let views = workflow.stations(&self.facts(&state)?, &stages);
+        let views = workflow.stations(&self.facts(&state, &workflow)?, &stages);
         let key = match (&params.station, workflow.published()) {
             (Some(key), _) => key.clone(),
             (None, false) => workflow.template.default_station().map(|s| s.key.clone()).unwrap_or_default(),
@@ -972,6 +1406,7 @@ impl Review {
         }
         let source_stage = params.source_stage.or(view.defaults.as_ref().and_then(|d| d.source_stage));
 
+        let resolutions = self.resolutions()?;
         let mut seed = params.seed;
         let ids: Vec<String> = match params.scope.as_str() {
             "from_stage" => {
@@ -982,6 +1417,8 @@ impl Review {
                     .into_iter()
                     .filter(|(_, d)| d.decision.as_deref() == Some("include"))
                     .map(|(id, _)| id)
+                    // Was inzwischen als Dublette entschieden ist, geht nicht in die Folgestufe.
+                    .filter(|id| !Uuid::parse_str(id).is_ok_and(|id| resolutions.is_removed(&id)))
                     .collect()
             }
             "all" | "sample" => {
@@ -989,6 +1426,7 @@ impl Review {
                     .store
                     .records_where("WHERE duplicate_of IS NULL", &[])?
                     .into_iter()
+                    .filter(|r| !resolutions.is_removed(&r.id))
                     .map(|r| r.id.to_string())
                     .collect();
                 ids.sort();

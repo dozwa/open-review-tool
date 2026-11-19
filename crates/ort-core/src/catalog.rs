@@ -60,7 +60,7 @@ pub struct Spec {
     check: fn(&Value) -> Check,
 }
 
-pub static CATALOG: [Spec; 15] = [
+pub static CATALOG: [Spec; 18] = [
     Spec {
         name: "ReviewCreated",
         version: 1,
@@ -87,7 +87,7 @@ pub static CATALOG: [Spec; 15] = [
     },
     Spec {
         name: "RecordsImported",
-        version: 1,
+        version: 2,
         chain: Chain::Main,
         writer: Writer::Manage,
         stage: StageRule::None,
@@ -181,7 +181,37 @@ pub static CATALOG: [Spec; 15] = [
         stage: StageRule::None,
         check: gate_overridden,
     },
+    Spec {
+        name: "SearchVersionPublished",
+        version: 1,
+        chain: Chain::Main,
+        writer: Writer::Manage,
+        stage: StageRule::None,
+        check: search_version_published,
+    },
+    Spec {
+        name: "SearchPeerReviewed",
+        version: 1,
+        chain: Chain::Main,
+        writer: Writer::Manage,
+        stage: StageRule::None,
+        check: search_peer_reviewed,
+    },
+    Spec {
+        name: "DuplicatesResolved",
+        version: 1,
+        chain: Chain::Main,
+        writer: Writer::Manage,
+        stage: StageRule::None,
+        check: duplicates_resolved,
+    },
 ];
+
+/// Woher die Treffer eines Imports stammen. Der Bericht zählt Datenbanken und Register getrennt von
+/// anderen Wegen.
+pub const ORIGINS: [&str; 4] = ["database", "register", "citation", "other"];
+/// Höchstzahl der Paare in einem `DuplicatesResolved`.
+pub const MAX_PAIRS: usize = 500;
 
 pub fn spec(event_type: &str) -> Option<&'static Spec> {
     CATALOG.iter().find(|s| s.name == event_type)
@@ -221,6 +251,7 @@ pub fn upcast(e: &Event) -> Value {
     match e.event_type.as_str() {
         "CriteriaVersionPublished" => upcast_criteria(&mut payload),
         "StageInstanceOpened" => upcast_stage(&mut payload),
+        "RecordsImported" => upcast_import(&mut payload),
         _ => {}
     }
     payload
@@ -234,6 +265,12 @@ fn upcast_stage(payload: &mut Value) {
     map.entry("decision_rule").or_insert_with(|| Value::from("unanimous"));
     map.entry("conflict_rule").or_insert_with(|| Value::from("discussion"));
     map.entry("reason_required").or_insert_with(|| Value::from(false));
+}
+
+/// Importe aus Version 1 nennen weder Herkunft noch Suchversion. Die leere Herkunft heißt „ohne Angabe“.
+fn upcast_import(payload: &mut Value) {
+    let Some(map) = payload.as_object_mut() else { return };
+    map.entry("origin").or_insert_with(|| Value::String(String::new()));
 }
 
 /// Version 1 kannte Freitext und frei benannte Ausschlussgründe. Der Text wird zu einem Kriterium
@@ -366,7 +403,80 @@ fn criteria_version_published(p: &Value) -> Check {
 fn records_imported(p: &Value) -> Check {
     uuid(p, "batch_id")?;
     filled(p, "records_sha256")?;
-    integer(p, "n_records", 0)
+    integer(p, "n_records", 0)?;
+    // Version 1 kennt die Herkunft nicht; leer bleibt deshalb erlaubt.
+    optional(p, "origin", |p, key| if text(p, key)?.is_empty() { Ok(()) } else { one_of(p, key, &ORIGINS) })?;
+    optional(p, "search_id", uuid)?;
+    match (p.get("search_id").is_some_and(|v| !v.is_null()), p.get("search_version").is_some_and(|v| !v.is_null())) {
+        (true, true) => integer(p, "search_version", 1),
+        (false, false) => Ok(()),
+        _ => Err("Suche und Suchversion gehören zusammen.".into()),
+    }
+}
+
+/// Ob ein Text ein Datum der Form JJJJ-MM-TT ist.
+pub fn is_date(value: &str) -> bool {
+    let b = value.as_bytes();
+    let digits = |range: std::ops::Range<usize>| b[range].iter().all(u8::is_ascii_digit);
+    if b.len() != 10 || b[4] != b'-' || b[7] != b'-' || !digits(0..4) || !digits(5..7) || !digits(8..10) {
+        return false;
+    }
+    let (month, day) = (value[5..7].parse::<u32>().unwrap_or(0), value[8..10].parse::<u32>().unwrap_or(0));
+    (1..=12).contains(&month) && (1..=31).contains(&day)
+}
+
+fn date(p: &Value, key: &str) -> Check {
+    if is_date(text(p, key)?) {
+        return Ok(());
+    }
+    Err(format!("Feld „{key}“ ist kein Datum der Form JJJJ-MM-TT."))
+}
+
+fn search_version_published(p: &Value) -> Check {
+    uuid(p, "search_id")?;
+    integer(p, "version", 1)?;
+    optional(p, "previous_version", |p, key| integer(p, key, 1))?;
+    filled(p, "source")?;
+    one_of(p, "origin", &ORIGINS)?;
+    filled(p, "query")?;
+    date(p, "searched_on")?;
+    for key in ["platform", "limits", "change_note"] {
+        optional(p, key, is_text)?;
+    }
+    optional(p, "hit_limit", |p, key| integer(p, key, 1))?;
+    optional(p, "hits", |p, key| integer(p, key, 0))
+}
+
+fn search_peer_reviewed(p: &Value) -> Check {
+    uuid(p, "search_id")?;
+    integer(p, "version", 1)?;
+    date(p, "reviewed_on")?;
+    filled(p, "note")?;
+    optional(p, "reviewer", uuid)
+}
+
+fn duplicates_resolved(p: &Value) -> Check {
+    let pairs = p.get("pairs").and_then(Value::as_array).ok_or("Feld „pairs“ fehlt oder ist keine Liste.")?;
+    if pairs.is_empty() || pairs.len() > MAX_PAIRS {
+        return Err(format!("Ein Ereignis entscheidet 1 bis {MAX_PAIRS} Paare."));
+    }
+    for pair in pairs {
+        uuid(pair, "a")?;
+        uuid(pair, "b")?;
+        one_of(pair, "decision", &["duplicate", "distinct"])?;
+        let (a, b) = (text(pair, "a")?, text(pair, "b")?);
+        if a == b {
+            return Err("Ein Paar braucht zwei verschiedene Einträge.".into());
+        }
+        let keep = pair.get("keep").and_then(Value::as_str);
+        match (text(pair, "decision")?, keep) {
+            ("duplicate", Some(k)) if k == a || k == b => {}
+            ("duplicate", _) => return Err("Bei einer Dublette muss „keep“ einer der beiden Einträge sein.".into()),
+            (_, None) => {}
+            (_, Some(_)) => return Err("„keep“ gehört nur zu einer Dublette.".into()),
+        }
+    }
+    Ok(())
 }
 
 fn stage_instance_opened(p: &Value) -> Check {
@@ -599,5 +709,56 @@ mod tests {
             let err = validate(event_type, version, stage, &payload).unwrap_err();
             assert!(err.contains(expected), "{event_type}: {err}");
         }
+    }
+
+    #[test]
+    fn search_and_duplicate_payloads_are_checked() {
+        let id = Uuid::new_v4().to_string();
+        let search = json!({
+            "search_id": id, "version": 1, "source": "MEDLINE", "platform": "Ovid", "origin": "database",
+            "query": "headache AND adult", "searched_on": "2026-11-19", "limits": "", "hits": 120,
+        });
+        assert_eq!(validate("SearchVersionPublished", 1, None, &search), Ok(()));
+        for (key, value) in [("searched_on", json!("19.11.2026")), ("origin", json!("web")), ("query", json!(" "))] {
+            let mut bad = search.clone();
+            bad[key] = value;
+            assert!(validate("SearchVersionPublished", 1, None, &bad).is_err(), "{key}");
+        }
+        let review = json!({"search_id": id, "version": 1, "reviewed_on": "2026-11-20", "note": "PRESS, ohne Befund"});
+        assert_eq!(validate("SearchPeerReviewed", 1, None, &review), Ok(()));
+
+        let (a, b) = (Uuid::new_v4().to_string(), Uuid::new_v4().to_string());
+        let pairs = |pair: Value| json!({"pairs": [pair]});
+        let ok = [
+            json!({"a": a, "b": b, "decision": "duplicate", "keep": a}),
+            json!({"a": a, "b": b, "decision": "distinct"}),
+        ];
+        for pair in ok {
+            assert_eq!(validate("DuplicatesResolved", 1, None, &pairs(pair)), Ok(()));
+        }
+        let bad = [
+            json!({"a": a, "b": a, "decision": "distinct"}),
+            json!({"a": a, "b": b, "decision": "duplicate"}),
+            json!({"a": a, "b": b, "decision": "duplicate", "keep": Uuid::new_v4().to_string()}),
+            json!({"a": a, "b": b, "decision": "distinct", "keep": a}),
+        ];
+        for pair in bad {
+            assert!(validate("DuplicatesResolved", 1, None, &pairs(pair)).is_err());
+        }
+        assert!(validate("DuplicatesResolved", 1, None, &json!({"pairs": []})).is_err());
+    }
+
+    #[test]
+    fn imports_name_origin_and_search_together() {
+        let base = json!({"batch_id": Uuid::new_v4().to_string(), "records_sha256": "x", "n_records": 3});
+        assert_eq!(validate("RecordsImported", 1, None, &base), Ok(()));
+        let mut with = base.clone();
+        with["origin"] = json!("register");
+        with["search_id"] = json!(Uuid::new_v4().to_string());
+        assert!(validate("RecordsImported", 2, None, &with).unwrap_err().contains("gehören zusammen"));
+        with["search_version"] = json!(1);
+        assert_eq!(validate("RecordsImported", 2, None, &with), Ok(()));
+        with["origin"] = json!("web");
+        assert!(validate("RecordsImported", 2, None, &with).is_err());
     }
 }

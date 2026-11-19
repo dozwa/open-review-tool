@@ -2,7 +2,7 @@
 
 mod common;
 
-use common::{person, send_package, wire, Team};
+use common::{person, search, send_package, send_return, wire, Team, SECOND_SOURCE};
 use ort_core::error::Error;
 use ort_core::exchange::{
     create_from_package, export_package, export_return, identity_file, merge, read_identity_file, Bundle,
@@ -191,4 +191,118 @@ fn file_from_newer_app_is_rejected_with_a_clear_message() {
     value["version"] = json!(999);
     let err = Bundle::from_json(&value.to_string()).unwrap_err();
     assert!(err.to_string().contains("neueren Version"), "{err}");
+}
+
+/// Kopie der Datei einer Person, in der sie an der App vorbei Ereignisse anhängt.
+fn copy_of(t: &Team, member: &Review) -> (tempfile::TempDir, Review) {
+    let dir = tempfile::TempDir::new().unwrap();
+    let pkg = wire(&export_package(&t.owner, &member.me().actor_id).unwrap());
+    let copy = create_from_package(&dir.path().join("kopie.sqlite"), member.me().clone(), &pkg).unwrap().0;
+    (dir, copy)
+}
+
+#[test]
+fn searches_and_duplicate_decisions_need_the_lead() {
+    let t = Team::new();
+    let made = t.owner.publish_search(&search("MEDLINE", json!({}))).unwrap();
+    let records = t.owner.records(None, false).unwrap();
+    let (a, b) = (records[0].id.to_string(), records[1].id.to_string());
+    assert!(matches!(t.r1.publish_search(&search("Embase", json!({}))), Err(Error::Forbidden(_))));
+    assert!(matches!(t.r1.review_search(&made.id, 1, "2026-11-20", "geprüft", None), Err(Error::Forbidden(_))));
+
+    // r1 umgeht die App: eigene Suche, eigener Prüfvermerk, eigene Dublettenentscheidung.
+    let forged = [
+        (
+            "SearchVersionPublished",
+            search("Embase", json!({"search_id": uuid::Uuid::new_v4().to_string(), "version": 1})),
+        ),
+        (
+            "SearchPeerReviewed",
+            json!({"search_id": made.id.to_string(), "version": 1, "reviewed_on": "2026-11-20", "note": "passt"}),
+        ),
+        ("DuplicatesResolved", json!({"pairs": [{"a": a, "b": b, "decision": "duplicate", "keep": a}]})),
+    ];
+    for (event_type, payload) in forged {
+        let (_dir, copy) = copy_of(&t, &t.r1);
+        copy.store().append(copy.me(), event_type, None, payload).unwrap();
+        let report = merge(&t.owner, &wire(&export_return(&copy).unwrap())).unwrap();
+        assert_eq!(report.accepted, 0, "{event_type}");
+        assert!(report.rejected[0].contains("Owner und Admins"), "{event_type}: {:?}", report.rejected);
+    }
+    assert_eq!(t.owner.searches().unwrap().len(), 1);
+    assert_eq!(t.owner.records(None, false).unwrap().len(), 4);
+}
+
+#[test]
+fn a_second_lead_may_document_searches_but_only_for_known_versions() {
+    let t = Team::new();
+    let made = t.owner.publish_search(&search("MEDLINE", json!({}))).unwrap();
+    t.owner.set_member_role(&t.r1.me().actor_id, "admin").unwrap();
+    send_package(&t.owner, &t.r1);
+
+    // Richtige Rolle, über die App: neue Version, Prüfvermerk und eine Dublettenentscheidung.
+    let next = search("MEDLINE", json!({"search_id": made.id.to_string(), "change_note": "Begriff ergänzt"}));
+    assert_eq!(t.r1.publish_search(&next).unwrap().versions.len(), 2);
+    t.r1.review_search(&made.id, 2, "2026-11-21", "Bibliothekarin, PRESS: ohne Befund", None).unwrap();
+    let report = send_return(&t.r1, &t.owner);
+    assert_eq!((report.accepted, report.rejected.len()), (2, 0), "{:?}", report.rejected);
+    let view = &t.owner.searches().unwrap()[0];
+    assert_eq!(view.versions.len(), 2);
+    assert_eq!(view.versions[1].version.peer_reviews[0].recorded_by, t.r1.me().actor_id);
+
+    // Richtige Rolle, aber an der App vorbei auf eine Suchversion verwiesen, die es nicht gibt.
+    let unknown = uuid::Uuid::new_v4().to_string();
+    let forged = [
+        (
+            "RecordsImported",
+            json!({
+                "batch_id": uuid::Uuid::new_v4().to_string(), "records_sha256": "x", "n_records": 0,
+                "origin": "database", "search_id": unknown, "search_version": 1,
+            }),
+        ),
+        (
+            "RecordsImported",
+            json!({
+                "batch_id": uuid::Uuid::new_v4().to_string(), "records_sha256": "x", "n_records": 0,
+                "origin": "database", "search_id": made.id.to_string(), "search_version": 7,
+            }),
+        ),
+        (
+            "SearchPeerReviewed",
+            json!({"search_id": unknown, "version": 1, "reviewed_on": "2026-11-20", "note": "passt"}),
+        ),
+    ];
+    for (event_type, payload) in forged {
+        let (_dir, copy) = copy_of(&t, &t.r1);
+        copy.store().append(copy.me(), event_type, None, payload).unwrap();
+        let report = merge(&t.owner, &wire(&export_return(&copy).unwrap())).unwrap();
+        assert_eq!(report.accepted, 0, "{event_type}");
+        assert!(report.rejected[0].contains("Suchversion ist hier nicht bekannt"), "{:?}", report.rejected);
+    }
+}
+
+#[test]
+fn duplicate_decisions_reach_everyone_with_the_package() {
+    let t = Team::new();
+    t.owner.import_file("embase.ris", SECOND_SOURCE, "Embase").unwrap();
+    let list = t.owner.duplicate_candidates().unwrap();
+    let decisions: Vec<ort_core::service::PairDecision> = list
+        .pairs
+        .iter()
+        .map(|p| ort_core::service::PairDecision {
+            a: p.a.id,
+            b: p.b.id,
+            decision: "duplicate".into(),
+            keep: Some(p.keep),
+        })
+        .collect();
+    t.owner.resolve_duplicates(&decisions).unwrap();
+    for member in [&t.r1, &t.viewer] {
+        let report = send_package(&t.owner, member);
+        assert_eq!((report.records_added, report.rejected.len()), (3, 0), "{:?}", report.rejected);
+        let detail = member.detail().unwrap();
+        assert_eq!((detail.n_records, detail.n_duplicates), (9, 5));
+        assert_eq!(member.duplicate_candidates().unwrap().total, 0);
+        assert!(matches!(member.resolve_duplicates(&decisions), Err(Error::Forbidden(_))));
+    }
 }

@@ -53,6 +53,27 @@ pub const BIBTEX: &str = "@article{novak2019,
 }
 ";
 
+/// Drei Einträge ohne DOI, die der exakte Abgleich nicht erkennt: zwei sind dieselben Artikel wie in
+/// [`RIS`] und [`BIBTEX`], der dritte hat nur einen ähnlichen Titel.
+pub const SECOND_SOURCE: &str = "TY  - JOUR
+AU  - Miller, Anna
+TI  - Deep learning for headache classification
+PY  - 2021
+ER  -
+
+TY  - JOUR
+AU  - Okafor, C.
+TI  - Knowledge graphs in neurology - a scoping review
+PY  - 2022
+ER  -
+
+TY  - JOUR
+AU  - Lee, Min
+TI  - Large language models for symptoms extraction
+PY  - 2021
+ER  -
+";
+
 /// Kriterien in der Form mit Kürzeln: ein Einschluss- und zwei Ausschlusskriterien.
 pub fn criteria(change_note: &str) -> serde_json::Value {
     serde_json::json!({
@@ -66,6 +87,19 @@ pub fn criteria(change_note: &str) -> serde_json::Value {
         "exclude_keywords": ["review"],
         "change_note": change_note,
     })
+}
+
+/// Eine Suche in einer Datenbank; mit `search_id` in `extra` eine neue Version davon.
+pub fn search(source: &str, extra: serde_json::Value) -> serde_json::Value {
+    let mut data = serde_json::json!({
+        "source": source, "platform": "Ovid", "origin": "database",
+        "query": "(headache OR migraine) AND adult", "searched_on": "2026-11-19",
+        "limits": "ab 2015, Englisch und Deutsch",
+    });
+    for (key, value) in extra.as_object().into_iter().flatten() {
+        data[key] = value.clone();
+    }
+    data
 }
 
 pub fn person(name: &str) -> Identity {

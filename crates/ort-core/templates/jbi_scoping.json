@@ -37,15 +37,16 @@
       "kind": "setup",
       "label": "Suche",
       "description": "Je Quelle eine Suchversion mit Suchstring, Datum und Grenzen festhalten.",
-      "tool": "search"
+      "tool": "search",
+      "gate": [{ "check": "search_documented" }]
     },
     {
       "key": "import",
       "kind": "setup",
       "label": "Import und Dubletten",
-      "description": "Treffer einlesen; Dubletten werden erkannt und gezählt.",
+      "description": "Treffer je Suche einlesen. Gleiche Einträge werden erkannt, mögliche Dubletten einzeln entschieden.",
       "tool": "import",
-      "gate": [{ "check": "records_imported" }]
+      "gate": [{ "check": "records_imported" }, { "check": "no_unresolved_duplicates" }]
     },
     {
       "key": "pilot_title_abstract",

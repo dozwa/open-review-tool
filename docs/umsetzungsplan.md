@@ -205,6 +205,31 @@ Prüfung: Volltext-Ausschluss ohne Hauptgrund wird lokal und beim Einlesen abgew
 
 ### 3 Suche, Import, Dubletten (M)
 
+Stand 19.11.2026: umgesetzt. Festlegungen beim Bau:
+
+- Eine Suche steht für eine Quelle und hat Versionen (`search_id`, `version`). Die Herkunft (`database`,
+  `register`, `citation`, `other`) steht an der Suche und am Import; mit Suchversion übernimmt der Import Quelle
+  und Herkunft von dort. Ein Import ohne Suchversion bleibt möglich und ist in der Oberfläche so gekennzeichnet.
+  `RecordsImported` ist dafür Schema-Version 2; alte Importe haben eine leere Herkunft.
+- Neben dem Trefferlimit hält die Suche die Trefferzahl fest, die die Quelle meldet. Die App zeigt sie neben der
+  Zahl der importierten Einträge und markiert eine Abweichung.
+- `SearchPeerReviewed` nennt keinen Namen: entweder ein Mitglied oder nur den Vermerk mit der Rolle der Person.
+- Beim Einlesen wird ein Import oder ein Prüfvermerk abgewiesen, der eine unbekannte Suchversion nennt.
+- Kandidaten für Dubletten sind eine Projektion und stehen nicht im Log; im Log stehen nur die Entscheidungen.
+  Vorgeschlagen wird ein Paar bei gleichem normalisiertem Titel (Jahr höchstens eins auseinander, Erstautor nicht
+  widersprüchlich), bei gleichem Erstautor und Titelähnlichkeit ab 85 % oder bei Titelähnlichkeit ab 95 % und
+  gleichem Jahr. Zwei verschiedene DOIs oder PMIDs und Titel, die sich in einer Zahl unterscheiden, schließen ein
+  Paar aus. Die Schwellen sind feste Werte im Code. Eine spätere App-Version mit anderem Abgleich kann neue
+  Kandidaten zeigen.
+- `DuplicatesResolved` trägt 1 bis 500 Paare, jeweils „Dublette“ mit dem Eintrag, der bleibt, oder „keine“. Je
+  Paar gilt die letzte Entscheidung. Eine entschiedene Dublette fehlt in jeder neuen Stufe, auch in einer
+  Folgestufe; offene und geschlossene Stufen und ihre Stimmen bleiben unverändert.
+- Die JBI-Vorlage hat zwei neue Gates: `search_documented` an der Station „Suche“ und `no_unresolved_duplicates`
+  an „Import und Dubletten“. Beide sperren den Pilot und lassen sich mit Begründung übersteuern. Reviews, die
+  ihre Vorlage schon im Log haben, behalten sie ohne diese Gates.
+- `import_summary` zählt Treffer je Quelle, exakte und entschiedene Dubletten allein aus dem Log; das ist die
+  Grundlage für den Kopf des Flussdiagramms in Meilenstein 5.
+
 - `SearchVersionPublished` mit Quelle, Plattform, Suchstring, Datum, Limits, Trefferlimit, Vorgänger. Der Import
   wählt eine Suchversion und eine Herkunft (Datenbank, Register, Zitationssuche, andere).
 - PubMed-Format (nbib) in `import.rs`.

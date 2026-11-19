@@ -56,7 +56,7 @@ export function NewReviewPage() {
       const problems: string[] = [];
       for (const file of files) {
         try {
-          const batch = await api.importRecords(review.id, file.path, file.source);
+          const batch = await api.importRecords(review.id, file.path, { source: file.source, origin: "database" });
           if (batch.status === "failed") problems.push(`${fileName(file.path)}: ${batch.error}`);
         } catch (e) {
           problems.push(`${fileName(file.path)}: ${errorText(e)}`);

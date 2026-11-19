@@ -109,4 +109,62 @@ fn format_detection() {
     assert_eq!(detect_format("export", RIS).unwrap(), "ris");
     assert_eq!(detect_format("export", BIBTEX).unwrap(), "bibtex");
     assert!(detect_format("bild.png", "kein Literaturformat").is_err());
+    // PubMed speichert sein Format als .nbib oder .txt; der Dateianfang entscheidet.
+    assert_eq!(detect_format("pubmed.nbib", "").unwrap(), "nbib");
+    assert_eq!(detect_format("pubmed-set.txt", NBIB).unwrap(), "nbib");
+    assert_eq!(detect_format("export.txt", RIS).unwrap(), "ris");
+}
+
+const NBIB: &str = "
+PMID- 31234567
+OWN - NLM
+DP  - 2021 Mar 15
+TI  - Deep learning for headache classification: a multicentre
+      validation study.
+LID - 10.1000/ABC123 [doi]
+LID - e0123456 [pii]
+AB  - BACKGROUND: Headache is common. METHODS: We trained a model
+      on clinical vignettes.
+FAU - Miller, Anna K
+AU  - Miller AK
+FAU - Chen, Li
+AU  - Chen L
+JT  - Journal of tests
+TA  - J Tests
+MH  - Headache/*classification
+MH  - Humans
+OT  - deep learning
+AID - S0000-0000(21)00001-1 [pii]
+SO  - J Tests. 2021 Mar 15;12(3):45-52.
+
+PMID- 29876543
+DP  - 2019
+TI  - Rule-based triage of migraine patients in primary care.
+AU  - Novak P
+TA  - Prim Care Res
+AID - 10.1000/triage2019 [doi]
+";
+
+#[test]
+fn nbib() {
+    let items = parse("nbib", NBIB).unwrap();
+    assert_eq!(items.len(), 2);
+    let first = &items[0];
+    assert_eq!(first.pmid, "31234567");
+    assert_eq!(first.title, "Deep learning for headache classification: a multicentre validation study.");
+    assert_eq!(
+        first.abstract_text,
+        "BACKGROUND: Headache is common. METHODS: We trained a model on clinical vignettes."
+    );
+    assert_eq!(first.authors, "Miller, Anna K; Chen, Li", "ausgeschriebene Namen vor Kurzform");
+    assert_eq!((first.year, first.journal.as_str()), (Some(2021), "Journal of tests"));
+    assert_eq!(first.doi, "10.1000/abc123");
+    assert_eq!(first.keywords, "Headache/*classification; Humans; deep learning");
+    assert_eq!(first.raw["OWN"], "NLM");
+    assert_eq!(first.raw["FAU"], serde_json::json!(["Miller, Anna K", "Chen, Li"]));
+    let second = &items[1];
+    assert_eq!((second.authors.as_str(), second.journal.as_str()), ("Novak P", "Prim Care Res"));
+    assert_eq!((second.doi.as_str(), second.year), ("10.1000/triage2019", Some(2019)));
+    // Derselbe Artikel aus RIS und aus PubMed trifft sich über die DOI.
+    assert_eq!(dedup_key(first), "doi:10.1000/abc123");
 }

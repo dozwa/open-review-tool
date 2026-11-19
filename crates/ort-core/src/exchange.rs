@@ -27,6 +27,7 @@ use crate::criteria::{check_reasons, Criteria};
 use crate::error::{conflict, forbidden, integrity, invalid, not_found, Error, Result};
 use crate::event::{now_timestamp, parse_public_key, stream_for, Event, Identity, PublicIdentity, MAIN_STREAM};
 use crate::projection::{order_key, string_list, ReviewState, StageState};
+use crate::search::Searches;
 use crate::service::{require, stage_criteria, Review, MANAGE_ROLES, ROLES, WRITE_ROLES};
 use crate::store::{AssignmentRow, BatchRow, Head, RecordRow, Store};
 
@@ -350,6 +351,7 @@ pub fn merge(review: &Review, bundle: &Bundle) -> Result<MergeReport> {
             .filter(|s| s.config.reason_required)
             .map(|s| (s.config.id, stage_criteria(&merged_state, s)))
             .collect(),
+        searches: Searches::build(&all_owned).known(),
     };
 
     let mut report = MergeReport::default();
@@ -475,12 +477,22 @@ struct MergeContext<'a> {
     own_votes: BTreeSet<(Uuid, String, Uuid)>,
     /// Kriterien der Stufen, in denen jeder Ausschluss einen Hauptgrund braucht.
     reason_rules: BTreeMap<Uuid, Criteria>,
+    /// Bekannte Suchversionen nach dem Einlesen.
+    searches: BTreeSet<(Uuid, i64)>,
 }
 
 /// Prüft ein einzelnes fremdes Ereignis gegen das Register: Rolle, Kette, Stufe und Payload.
 fn authorize(e: &Event, context: &MergeContext) -> std::result::Result<(), String> {
-    let MergeContext { roles, has_created, known_stages, closed_before, blind_after, own_votes, reason_rules } =
-        context;
+    let MergeContext {
+        roles,
+        has_created,
+        known_stages,
+        closed_before,
+        blind_after,
+        own_votes,
+        reason_rules,
+        searches,
+    } = context;
     let has_created = *has_created;
     let role = roles.get(&e.actor_id).map(String::as_str).unwrap_or("");
     let t = e.event_type.as_str();
@@ -496,6 +508,18 @@ fn authorize(e: &Event, context: &MergeContext) -> std::result::Result<(), Strin
     catalog::validate_event(e)?;
     if stream_for(t, e.stage_instance_id.as_ref()).ok().as_deref() != Some(e.stream.as_str()) {
         return Err("Das Ereignis liegt in der falschen Kette.".into());
+    }
+    // Ein Import oder ein Peer-Review nennt eine Suchversion, die es geben muss.
+    let search_version = match t {
+        "RecordsImported" => e.payload.get("search_version"),
+        "SearchPeerReviewed" => e.payload.get("version"),
+        _ => None,
+    };
+    if let Some(id) = e.payload_str("search_id").filter(|_| search_version.is_some()) {
+        let known = Uuid::parse_str(id).ok().zip(search_version.and_then(|v| v.as_i64()));
+        if !known.is_some_and(|key| searches.contains(&key)) {
+            return Err("Die Suchversion ist hier nicht bekannt.".into());
+        }
     }
     if matches!(spec.stage, StageRule::Open | StageRule::OpenUnblinded) {
         let stage = e.stage_instance_id.ok_or("Stufe fehlt.")?;
@@ -565,6 +589,7 @@ mod tests {
                 blind_after: blind.clone(),
                 own_votes: BTreeSet::new(),
                 reason_rules: BTreeMap::new(),
+                searches: BTreeSet::new(),
             };
         let roles: &'static HashMap<Uuid, String> = Box::leak(Box::new(roles));
         let check =

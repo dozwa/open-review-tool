@@ -4,9 +4,10 @@ use std::path::{Path, PathBuf};
 
 use ort_core::criteria::Criteria;
 use ort_core::exchange::{self, Bundle, MergeReport};
+use ort_core::search::Search;
 use ort_core::service::{
-    ChainReport, Conflict, NextRecord, OpenStage, RecordDetail, RecordFilter, RecordList, ReviewDetail, ReviewListItem,
-    Snapshot, StageDetail, StageView, Summary,
+    ChainReport, Conflict, DuplicateList, ImportSource, NextRecord, OpenStage, PairDecision, RecordDetail,
+    RecordFilter, RecordList, ReviewDetail, ReviewListItem, SearchView, Snapshot, StageDetail, StageView, Summary,
 };
 use ort_core::store::BatchRow;
 use ort_core::workflow::{self, GateResult, TemplateInfo};
@@ -132,11 +133,47 @@ pub async fn records_import(
     state: State<'_, AppState>,
     review_id: String,
     path: String,
-    source: String,
+    from: ImportSource,
 ) -> Res<BatchRow> {
     let bytes = std::fs::read(&path).map_err(err)?;
     let text = String::from_utf8_lossy(&bytes);
-    open(&state, &review_id)?.import_file(&file_name(Path::new(&path)), &text, &source).map_err(err)
+    open(&state, &review_id)?.import_file_with(&file_name(Path::new(&path)), &text, &from).map_err(err)
+}
+
+// ---------------------------------------------------------------- Suche und Dubletten
+
+#[tauri::command]
+pub async fn searches(state: State<'_, AppState>, review_id: String) -> Res<Vec<SearchView>> {
+    open(&state, &review_id)?.searches().map_err(err)
+}
+
+#[tauri::command]
+pub async fn search_publish(state: State<'_, AppState>, review_id: String, data: Value) -> Res<Search> {
+    open(&state, &review_id)?.publish_search(&data).map_err(err)
+}
+
+#[tauri::command]
+pub async fn search_review(
+    state: State<'_, AppState>,
+    review_id: String,
+    search_id: String,
+    version: i64,
+    reviewed_on: String,
+    note: String,
+    reviewer: Option<String>,
+) -> Res<()> {
+    let reviewer = reviewer.filter(|r| !r.is_empty()).map(|r| uuid(&r)).transpose()?;
+    open(&state, &review_id)?.review_search(&uuid(&search_id)?, version, &reviewed_on, &note, reviewer).map_err(err)
+}
+
+#[tauri::command]
+pub async fn duplicates_list(state: State<'_, AppState>, review_id: String) -> Res<DuplicateList> {
+    open(&state, &review_id)?.duplicate_candidates().map_err(err)
+}
+
+#[tauri::command]
+pub async fn duplicates_resolve(state: State<'_, AppState>, review_id: String, pairs: Vec<PairDecision>) -> Res<usize> {
+    open(&state, &review_id)?.resolve_duplicates(&pairs).map_err(err)
 }
 
 // ---------------------------------------------------------------- Stufen

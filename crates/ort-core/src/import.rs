@@ -1,4 +1,4 @@
-//! Import von RIS und BibTeX sowie der Schlüssel für exakte Dubletten.
+//! Import von RIS, BibTeX und dem PubMed-Format (nbib) sowie der Schlüssel für exakte Dubletten.
 //!
 //! Verhalten wie im früheren `importers.py` (rispy, bibtexparser): Listen werden mit „; “ verbunden,
 //! Leerraum wird zusammengefasst, DOIs werden kleingeschrieben und ohne `https://doi.org/` gespeichert.
@@ -32,23 +32,28 @@ pub fn detect_format(filename: &str, text: &str) -> Result<&'static str> {
     if name.ends_with(".bib") || name.ends_with(".bibtex") {
         return Ok("bibtex");
     }
-    if name.ends_with(".ris") || name.ends_with(".txt") || name.ends_with(".nbib") {
+    // PubMed speichert sein Format auch als .txt; der Inhalt entscheidet deshalb vor der Endung.
+    let head: String = text.trim_start_matches('\u{feff}').trim_start().chars().take(200).collect();
+    if name.ends_with(".nbib") || head.starts_with("PMID- ") {
+        return Ok("nbib");
+    }
+    if name.ends_with(".ris") || name.ends_with(".txt") {
         return Ok("ris");
     }
-    let head: String = text.trim_start().chars().take(200).collect();
     if head.starts_with('@') {
         return Ok("bibtex");
     }
     if text.lines().any(|l| l.starts_with("TY  - ")) {
         return Ok("ris");
     }
-    Err(invalid("Format nicht erkannt. Unterstützt werden RIS und BibTeX."))
+    Err(invalid("Format nicht erkannt. Unterstützt werden RIS, BibTeX und das PubMed-Format (nbib)."))
 }
 
 pub fn parse(format: &str, text: &str) -> Result<Vec<Item>> {
     match format {
         "ris" => Ok(parse_ris(text)),
         "bibtex" => parse_bibtex(text),
+        "nbib" => Ok(parse_nbib(text)),
         other => Err(invalid(format!("Unbekanntes Format: {other}"))),
     }
 }
@@ -173,6 +178,84 @@ fn ris_item(entry: BTreeMap<String, Vec<String>>) -> Item {
         pmid: String::new(),
         url: first(&["UR"]),
         keywords: first(&["KW"]),
+        raw: Value::Object(raw),
+    }
+}
+
+// ---------------------------------------------------------------- PubMed (nbib)
+
+/// PubMed-Format: Tag mit bis zu vier Zeichen, aufgefüllt auf vier, dann „- “. Fortsetzungszeilen
+/// beginnen mit sechs Leerzeichen. Ein Eintrag beginnt mit `PMID`.
+pub fn parse_nbib(text: &str) -> Vec<Item> {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let tag_re = RE.get_or_init(|| Regex::new(r"^([A-Z]{2,4}) {0,2}- ?(.*)$").unwrap());
+    let mut out = Vec::new();
+    let mut current: Option<BTreeMap<String, Vec<String>>> = None;
+    let mut last_tag: Option<String> = None;
+    for raw_line in text.lines() {
+        let line = raw_line.trim_start_matches('\u{feff}').trim_end();
+        let tagged = if line.starts_with(' ') { None } else { tag_re.captures(line) };
+        if let Some(caps) = tagged {
+            let tag = caps[1].to_string();
+            let value = caps[2].trim().to_string();
+            if tag == "PMID" {
+                if let Some(entry) = current.take() {
+                    out.push(nbib_item(entry));
+                }
+                current = Some(BTreeMap::new());
+            }
+            if let Some(entry) = current.as_mut() {
+                entry.entry(tag.clone()).or_default().push(value);
+            }
+            last_tag = Some(tag);
+        } else if !line.trim().is_empty() {
+            if let (Some(entry), Some(tag)) = (current.as_mut(), last_tag.as_ref()) {
+                if let Some(last) = entry.get_mut(tag).and_then(|v| v.last_mut()) {
+                    last.push(' ');
+                    last.push_str(line.trim());
+                }
+            }
+        }
+    }
+    if let Some(entry) = current.take() {
+        out.push(nbib_item(entry));
+    }
+    out
+}
+
+fn nbib_item(entry: BTreeMap<String, Vec<String>>) -> Item {
+    let all = |tag: &str| -> Vec<String> {
+        entry.get(tag).into_iter().flatten().map(|v| clean_text(v)).filter(|v| !v.is_empty()).collect()
+    };
+    let first = |tags: &[&str]| -> String {
+        tags.iter().map(|t| all(t).join("; ")).find(|v| !v.is_empty()).unwrap_or_default()
+    };
+    // DOI steht in LID oder AID mit dem Zusatz „[doi]“.
+    let doi = ["LID", "AID"]
+        .iter()
+        .flat_map(|t| all(t))
+        .find_map(|v| v.strip_suffix("[doi]").map(|d| normalize_doi(d.trim())))
+        .unwrap_or_default();
+    let mut keywords = all("MH");
+    keywords.extend(all("OT"));
+    let mut raw = Map::new();
+    for (tag, values) in &entry {
+        let value = match values.as_slice() {
+            [single] => Value::String(single.clone()),
+            many => Value::Array(many.iter().cloned().map(Value::String).collect()),
+        };
+        raw.insert(tag.clone(), value);
+    }
+    Item {
+        title: first(&["TI", "BTI", "TT"]),
+        abstract_text: first(&["AB"]),
+        authors: first(&["FAU", "AU"]),
+        year: year_of(&first(&["DP", "DEP"])),
+        journal: first(&["JT", "TA"]),
+        doi,
+        pmid: first(&["PMID"]).chars().take(32).collect(),
+        url: String::new(),
+        keywords: keywords.join("; "),
         raw: Value::Object(raw),
     }
 }

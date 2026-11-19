@@ -23,10 +23,11 @@ use crate::projection::{order_key, MaybeMode, StageState};
 pub const STATION_KINDS: [&str; 4] = ["setup", "screening", "form", "report"];
 pub const DECISION_RULES: [&str; 3] = ["unanimous", "liberal", "single_verified"];
 pub const CONFLICT_RULES: [&str; 2] = ["discussion", "third_person"];
-const SETUP_CHECKS: [&str; 3] = ["criteria_published", "min_writers", "records_imported"];
+const SETUP_CHECKS: [&str; 5] =
+    ["criteria_published", "min_writers", "records_imported", "search_documented", "no_unresolved_duplicates"];
 const SCREENING_CHECKS: [&str; 3] = ["agreement_min", "all_decided", "no_open_conflicts"];
 /// Werkzeuge für `setup`-Stationen, die diese App-Version schon hat.
-const BUILT_TOOLS: [&str; 2] = ["protocol", "import"];
+const BUILT_TOOLS: [&str; 3] = ["protocol", "search", "import"];
 pub const WORKFLOW_TYPES: [&str; 3] = ["WorkflowVersionPublished", "GateEvaluated", "GateOverridden"];
 
 const BUILTIN: [&str; 2] = [include_str!("../templates/jbi_scoping.json"), include_str!("../templates/free.json")];
@@ -415,7 +416,11 @@ pub struct Workflow {
 pub struct Facts {
     pub criteria_published: bool,
     pub n_writers: i64,
+    /// Einträge ohne Dubletten.
     pub n_records: i64,
+    pub n_searches: i64,
+    /// Mögliche Dubletten, über die noch nicht entschieden ist.
+    pub open_duplicates: i64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -541,6 +546,19 @@ impl Workflow {
                     format!("{} vorhanden", facts.n_writers),
                 )
             }
+            "search_documented" => (
+                "Suche dokumentiert".to_string(),
+                facts.n_searches > 0,
+                match facts.n_searches {
+                    1 => "1 Suche".to_string(),
+                    n => format!("{n} Suchen"),
+                },
+            ),
+            "no_unresolved_duplicates" => (
+                "Mögliche Dubletten entschieden".to_string(),
+                facts.open_duplicates == 0,
+                format!("{} offen", facts.open_duplicates),
+            ),
             _ => (
                 "Treffer importiert".to_string(),
                 facts.n_records > 0,

@@ -3,11 +3,11 @@
 
 mod common;
 
-use common::{criteria, person, send_package, send_return, Team};
+use common::{criteria, person, search, send_package, send_return, Team, SECOND_SOURCE};
 use ort_core::error::Error;
 use ort_core::event::is_blindable;
 use ort_core::exchange::export_package;
-use ort_core::service::OpenStage;
+use ort_core::service::{ImportSource, OpenStage, PairDecision};
 use serde_json::json;
 
 #[test]
@@ -246,4 +246,109 @@ fn last_owner_cannot_be_demoted() {
     let other = person("zweiter Owner");
     t.owner.set_member(&other.public(), "owner").unwrap();
     t.owner.set_member_role(&me, "admin").unwrap();
+}
+
+/// Die Prüfung aus dem Umsetzungsplan: Treffer je Quelle und Dublettenzahl aus dem Log stimmen mit den
+/// Importen überein, bei allen, die nur das Paket kennen.
+#[test]
+fn hits_per_source_and_duplicates_add_up_from_the_log() {
+    let t = Team::new();
+    // Suche festhalten, überarbeiten, prüfen lassen.
+    assert!(matches!(t.owner.publish_search(&search("", json!({}))), Err(Error::Invalid(_))));
+    assert!(matches!(
+        t.owner.publish_search(&search("Embase", json!({"searched_on": "19.11.2026"}))),
+        Err(Error::Invalid(_))
+    ));
+    let embase = t.owner.publish_search(&search("Embase", json!({"hits": 3}))).unwrap();
+    let again = json!({"search_id": embase.id.to_string(), "hits": 4});
+    let err = t.owner.publish_search(&search("Embase", again.clone())).unwrap_err();
+    assert!(err.to_string().contains("geändert"), "{err}");
+    let mut noted = again;
+    noted["change_note"] = json!("Zeitraum erweitert");
+    let embase = t.owner.publish_search(&search("Embase", noted)).unwrap();
+    assert_eq!(
+        embase.versions.iter().map(|v| (v.version, v.previous_version)).collect::<Vec<_>>(),
+        [(1, None), (2, Some(1))]
+    );
+    t.owner
+        .review_search(&embase.id, 2, "2026-11-20", "Bibliothekarin der Einrichtung, PRESS: ohne Befund", None)
+        .unwrap();
+    assert!(matches!(t.owner.review_search(&embase.id, 3, "2026-11-20", "x", None), Err(Error::NotFound(_))));
+    let register =
+        t.owner.publish_search(&search("ClinicalTrials.gov", json!({"origin": "register", "platform": ""}))).unwrap();
+
+    // Importe: ohne Herkunft und mit unbekannter Suche geht es nicht; mit Suche kommen Quelle und Herkunft von dort.
+    assert!(matches!(
+        t.owner.import_file_with("x.ris", SECOND_SOURCE, &ImportSource::default()),
+        Err(Error::Invalid(_))
+    ));
+    let nowhere = ImportSource { search_id: Some(uuid::Uuid::new_v4()), ..ImportSource::default() };
+    assert!(matches!(t.owner.import_file_with("x.ris", SECOND_SOURCE, &nowhere), Err(Error::NotFound(_))));
+    let from = ImportSource { search_id: Some(embase.id), ..ImportSource::default() };
+    let batch = t.owner.import_file_with("embase.ris", SECOND_SOURCE, &from).unwrap();
+    assert_eq!((batch.source.as_str(), batch.n_records, batch.n_duplicates), ("Embase", 3, 0));
+    let from = ImportSource { search_id: Some(register.id), search_version: Some(1), ..ImportSource::default() };
+    let batch = t.owner.import_file_with("ctgov.ris", SECOND_SOURCE, &from).unwrap();
+    assert_eq!((batch.source.as_str(), batch.n_duplicates), ("ClinicalTrials.gov", 3), "dieselbe Datei noch einmal");
+
+    // Zwei der drei Paare sind Dubletten.
+    let list = t.owner.duplicate_candidates().unwrap();
+    let decisions: Vec<PairDecision> = list
+        .pairs
+        .iter()
+        .map(|p| {
+            let duplicate = p.similarity == 100;
+            PairDecision {
+                a: p.a.id,
+                b: p.b.id,
+                decision: if duplicate { "duplicate" } else { "distinct" }.into(),
+                keep: duplicate.then_some(p.keep),
+            }
+        })
+        .collect();
+    t.owner.resolve_duplicates(&decisions).unwrap();
+
+    for member in [&t.r1, &t.viewer] {
+        send_package(&t.owner, member);
+    }
+    let summary = t.owner.import_summary().unwrap();
+    let rows: Vec<_> = summary
+        .sources
+        .iter()
+        .map(|s| (s.source.as_str(), s.origin.as_str(), s.search_version, s.n_imports, s.n_records, s.n_duplicates))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            ("Test", "database", None, 2, 6, 2),
+            ("Embase", "database", Some(2), 1, 3, 0),
+            ("ClinicalTrials.gov", "register", Some(1), 1, 3, 3),
+        ]
+    );
+    assert_eq!(
+        (summary.n_records, summary.n_exact_duplicates, summary.n_resolved_duplicates, summary.n_unique),
+        (12, 5, 2, 5)
+    );
+    for member in [&t.owner, &t.r1, &t.viewer] {
+        // Das Log sagt dasselbe wie die Tabellen, auf jedem Rechner.
+        assert_eq!(member.import_summary().unwrap(), summary);
+        let all = member.records(None, true).unwrap();
+        assert_eq!(all.len() as i64, summary.n_records);
+        assert_eq!(all.iter().filter(|r| r.duplicate_of.is_some()).count() as i64, summary.n_exact_duplicates);
+        assert_eq!(member.records(None, false).unwrap().len() as i64, summary.n_unique);
+        let detail = member.detail().unwrap();
+        assert_eq!(detail.n_records - detail.n_duplicates, summary.n_unique);
+        let imports: Vec<(&str, Option<i64>)> =
+            detail.imports.iter().map(|i| (i.origin.as_str(), i.search_version)).collect();
+        assert_eq!(imports, [("database", None), ("database", None), ("database", Some(2)), ("register", Some(1))]);
+
+        let searches = member.searches().unwrap();
+        assert_eq!(searches.len(), 2);
+        let v2 = &searches[0].versions[1];
+        assert_eq!((v2.version.hits, v2.n_imports, v2.n_records, v2.n_duplicates), (Some(4), 1, 3, 0));
+        assert_eq!(v2.version.peer_reviews.len(), 1);
+        assert_eq!(searches[0].versions[0].n_imports, 0, "der Import nennt die Version, mit der gesucht wurde");
+        assert_eq!(searches[1].versions[0].version.origin, "register");
+    }
+    assert!(t.owner.verify_chain().unwrap().ok);
 }

@@ -6,12 +6,14 @@ Verblindung, Klärung und Snapshots, eine Auswertung der Übereinstimmung mit Ko
 Zusammenarbeit ohne Server über Austauschdateien.
 
 > Status (19.11.2026): Mac-App mit Rust und Tauri 2. Der vollständige Ablauf eines Scoping Reviews wird nach
-> `docs/umsetzungsplan.md` in Meilensteinen gebaut; fertig sind 0 (Fundament), 1 (Vorlage und Ablauf) und 2 (Kriterien und Screening-Ansicht).
+> `docs/umsetzungsplan.md` in Meilensteinen gebaut; fertig sind 0 (Fundament), 1 (Vorlage und Ablauf),
+> 2 (Kriterien und Screening-Ansicht) und 3 (Suche, Import, Dubletten).
 > Enthalten: Identität mit Schlüssel im Schlüsselbund, Reviews mit Rollen, Review-Typ als Vorlage mit Stationen,
-> Gates und Runden, Kriterien mit Kürzeln und Erläuterungen, Import von RIS und BibTeX, Stufen mit drei
+> Gates und Runden, Kriterien mit Kürzeln und Erläuterungen, Suchen mit Versionen und Peer-Review-Vermerk, Import
+> von RIS, BibTeX und PubMed (nbib) mit Suchversion und Herkunft, exakte und unscharfe Dubletten, Stufen mit drei
 > Auswahlregeln, verblindetes Screening in drei Spalten mit Filtern, Pflichtgrund im Volltext, Konflikte und
 > Konsens (auch als Dritt-Entscheid), Übereinstimmung, CSV-Export, Pakete und Rückmeldungen.
-> Noch nicht enthalten: Suchdokumentation, Volltexte, Zotero, Charting, Bericht, signierte und notarisierte App.
+> Noch nicht enthalten: Volltexte, Zotero, Charting, Bericht, signierte und notarisierte App.
 
 ## So arbeitet ein Team
 
@@ -20,8 +22,8 @@ Es gibt keinen Server. Jede Person hat die App und eine eigene Kopie des Reviews
 
 1. **Mitmachen:** Jede Person speichert in der App ihre Identitätsdatei (`.ortid`) und schickt sie der Person, die
    das Review leitet.
-2. **Anlegen:** Die Leitung legt das Review an, importiert RIS oder BibTeX, fügt Mitglieder über deren `.ortid` hinzu
-   und öffnet eine Stufe.
+2. **Anlegen:** Die Leitung legt das Review an, hält die Suchen fest, importiert die Treffer (RIS, BibTeX oder
+   PubMed), entscheidet mögliche Dubletten, fügt Mitglieder über deren `.ortid` hinzu und öffnet eine Stufe.
 3. **Verteilen:** Für jedes Mitglied speichert die Leitung ein Paket (`.ortpkg`). Bei einer verblindeten Stufe
    enthält das Paket nur die eigenen Stimmen der Person. Was nicht in der Datei steht, kann niemand sehen; die
    Verblindung hängt also nicht an der Oberfläche.
@@ -52,7 +54,7 @@ die Schlüsselbund-Sicherung von macOS.
 
 | Pfad | Inhalt |
 | --- | --- |
-| `crates/ort-core/` | Fachkern ohne Oberfläche: Event-Log (`event.rs`, `store.rs`), Register der Ereignistypen (`catalog.rs`), Projektionen, Vorlagen und Ablauf (`workflow.rs`), Kriterien (`criteria.rs`), Übereinstimmung, Import, Fachlogik (`service.rs`), Austausch (`exchange.rs`) |
+| `crates/ort-core/` | Fachkern ohne Oberfläche: Event-Log (`event.rs`, `store.rs`), Register der Ereignistypen (`catalog.rs`), Projektionen, Vorlagen und Ablauf (`workflow.rs`), Kriterien (`criteria.rs`), Suchen (`search.rs`), Dubletten (`duplicates.rs`), Übereinstimmung, Import, Fachlogik (`service.rs`), Austausch (`exchange.rs`) |
 | `crates/ort-core/templates/` | Mitgelieferte Vorlagen: „JBI Scoping Review“ und „Freier Ablauf“ |
 | `crates/ort-core/tests/` | Tests für Log, Projektionen, Referenzwerte, Import, Austausch, Vorlagen und Gates und den Ablauf mit vier Personen |
 | `app/src-tauri/` | Tauri-Hülle: Befehle für die Oberfläche, Identität und Schlüsselbund |
@@ -65,7 +67,7 @@ Tauri 2 mit der WebView von macOS, React 18.
 
 ## Wie es geprüft ist
 
-- **Kern:** 86 Tests. Darunter die Referenzwerte der früheren SQL-Tests (Cohen's Kappa gegen scikit-learn,
+- **Kern:** 102 Tests. Darunter die Referenzwerte der früheren SQL-Tests (Cohen's Kappa gegen scikit-learn,
   Fleiss' Kappa am Wikipedia-Beispiel, Krippendorffs Alpha am publizierten Beispiel mit 0,743, PABAK, Prozent,
   sechs `final_decision`-Szenarien, Maybe-Regel). Die Werte erzeugt `crates/ort-core/tests/fixtures/make_agreement_fixtures.py`.
 - **Austausch:** veränderte Datei, nachträglich neu gehashte Datei ohne Signatur, Außenstehende, Lücken in einer
@@ -76,6 +78,10 @@ Tauri 2 mit der WebView von macOS, React 18.
 - **Kriterien und Gründe:** Volltext-Ausschluss ohne Hauptgrund oder mit unbekanntem Kürzel wird in der App und
   beim Einlesen abgewiesen, ebenso ein solcher Konsens; eine Stufe prüft gegen ihre eigene Kriterienversion;
   Filter nach Konflikt, Person und Stimmenzahl sind verblindet auch bei der Leitung gesperrt.
+- **Suche und Dubletten:** Ohne Suche und mit offenen Dublettenpaaren ist der Pilot gesperrt; derselbe Artikel
+  mit und ohne DOI wird vorgeschlagen, Titel mit anderer Zahl nicht; eine entschiedene Dublette fehlt in neuen
+  Stufen, offene Stufen bleiben; ein Import mit unbekannter Suchversion wird beim Einlesen abgewiesen; Treffer je
+  Quelle und Dublettenzahl aus dem Log stimmen auf jedem Rechner mit den Tabellen überein.
 - **Ablauf:** Owner, zwei Reviewer und eine Person mit Leserecht mit getrennten Dateien, nur über Pakete und
   Rückmeldungen: verblindetes Screening, Paket ohne fremde Stimmen, Entblinden, Konflikte, Konsens, Revision,
   CSV, Abschluss mit Snapshot, abgewiesene Nachzügler, Folgestufe, Prüfung aller Ketten.
@@ -113,11 +119,15 @@ Nur für Entwicklung und Tests.
 - **Betrieb:** Mac-App mit Austauschdateien statt Team-Server (Entscheidung vom 18.11.2026, siehe Anforderungsanalyse).
 - **Event-Log:** je Person eine Kette für Verwaltung und je Stufe eine für Stimmen, statt einer Kette je Review.
   Grund: Pakete lassen verblindete Stimmen als ganze Ketten weg, ohne Lücken zu reißen.
-- **Dubletten:** exakter Abgleich über DOI oder normalisierten Titel plus Jahr. Ein unscharfer Abgleich fehlt noch.
+- **Dubletten:** Der Import erkennt exakt gleiche Einträge (DOI oder normalisierter Titel plus Jahr). Ähnliche
+  Paare schlägt die App vor; jedes entscheidet die Leitung. Die Vorschläge sind berechnet und stehen nicht im
+  Log, nur die Entscheidungen. Eine spätere Version mit anderem Abgleich kann deshalb neue Paare zeigen.
+- **Suche:** Ein Import ohne Suchversion bleibt möglich. Die Vorlage „JBI Scoping Review“ verlangt nur, dass
+  mindestens eine Suche festgehalten ist, nicht dass jeder Import eine nennt.
 - **Rollenprüfung beim Einlesen:** nach dem Stand nach dem Zusammenführen, nicht zum Zeitpunkt jedes Ereignisses.
 - **Gates:** Das Ergebnis wird beim Schließen einer Stufe auf dem Rechner der Leitung berechnet und als
   `GateEvaluated` festgehalten. Schließen ist auch mit nicht erfülltem Gate möglich; gesperrt wird die nächste
-  Station. Stationen, die die App noch nicht bearbeiten kann (Suche, Volltexte, Charting, Bericht), stehen in der
+  Station. Stationen, die die App noch nicht bearbeiten kann (Volltexte, Charting, Bericht), stehen in der
   Leiste als „folgt“ und sperren nichts.
 - **Eine Stimme mit Prüfung (`single_verified`):** Die Stufe ist nie verblindet, weil die zweite Person die
   Ausschlüsse sehen muss. Wer was schon bewertet hat, weiß eine Person erst nach dem nächsten Paket.

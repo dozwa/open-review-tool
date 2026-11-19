@@ -13,10 +13,12 @@ import {
   gateText,
   importSummary,
   Member,
+  ORIGIN_LABEL,
   reasonsOf,
   ReviewDetail,
   RULE_LABEL,
   safeFileName,
+  Search,
   Stage,
   StageDefaults,
   StageParams,
@@ -25,12 +27,14 @@ import {
   term,
 } from "./api";
 import { CriteriaEditor, CriteriaView } from "./Criteria";
+import { Duplicates } from "./Duplicates";
+import { searchName, SearchTab } from "./Search";
 import { ROLE_LABEL, useRefreshSidebar } from "./shared";
 import { Avatar, Banner, Empty, Group, Icon, PageHeader, Pill, Row, Segmented, Stat } from "./ui";
 
 const IMPORT_STATUS: Record<string, string> = { running: "läuft", done: "fertig", failed: "fehlgeschlagen" };
 
-type Tab = "overview" | "exchange" | "members" | "imports" | "criteria" | "proof";
+type Tab = "overview" | "exchange" | "members" | "search" | "imports" | "criteria" | "proof";
 
 export function stageState(stage: Stage): string {
   if (stage.closed) return "Geschlossen";
@@ -84,6 +88,7 @@ export function ReviewPage() {
     { value: "overview", label: "Ablauf", icon: "stack" },
     { value: "exchange", label: "Austausch", icon: "exchange" },
     { value: "members", label: "Mitglieder", icon: "people" },
+    { value: "search", label: "Suche", icon: "search" },
     { value: "imports", label: "Import", icon: "upload" },
     { value: "criteria", label: "Kriterien", icon: "list" },
     { value: "proof", label: "Nachweis", icon: "shield" },
@@ -111,6 +116,7 @@ export function ReviewPage() {
         {tab === "overview" && <OverviewTab review={review} run={run} goTo={setTab} />}
         {tab === "exchange" && <ExchangeTab review={review} run={run} />}
         {tab === "members" && <MembersTab review={review} run={run} />}
+        {tab === "search" && <SearchTab review={review} run={run} />}
         {tab === "imports" && <ImportsTab review={review} run={run} />}
         {tab === "criteria" && <CriteriaTab review={review} run={run} />}
         {tab === "proof" && <ProofTab review={review} />}
@@ -125,7 +131,8 @@ const STATE_LABEL: Record<Station["state"], string> = { locked: "Gesperrt", open
 const STATE_TONE: Record<Station["state"], string | undefined> = { locked: undefined, open: "blue", running: "yellow", done: "green" };
 const TOOL_TABS: Record<string, { tab: Tab; label: string }[]> = {
   protocol: [{ tab: "criteria", label: "Kriterien" }, { tab: "members", label: "Mitglieder" }],
-  import: [{ tab: "imports", label: "Import" }],
+  search: [{ tab: "search", label: "Suche" }],
+  import: [{ tab: "imports", label: "Import und Dubletten" }],
 };
 
 /** Stationen der Vorlage als Leiste: Wo steht das Review? */
@@ -603,17 +610,28 @@ function MembersTab({ review, run }: { review: ReviewDetail; run: Run }) {
 
 function ImportsTab({ review, run }: { review: ReviewDetail; run: Run }) {
   const manage = canManage(review.role);
+  const [searches, setSearches] = useState<Search[]>([]);
+  // ID einer Suche oder leer für einen Import ohne Suchversion
+  const [searchId, setSearchId] = useState("");
   const [source, setSource] = useState("");
+  const [origin, setOrigin] = useState("database");
+
+  useEffect(() => {
+    api.searches(review.id).then((list) => {
+      setSearches(list);
+      setSearchId((current) => (list.some((s) => s.id === current) ? current : list.length === 1 ? list[0].id : ""));
+    }).catch(() => setSearches([]));
+  }, [review]);
 
   async function choose() {
     const path = await open({
       multiple: false,
       directory: false,
-      filters: [{ name: "RIS oder BibTeX", extensions: ["ris", "bib", "bibtex", "txt", "nbib"] }],
+      filters: [{ name: "RIS, BibTeX oder PubMed", extensions: ["ris", "bib", "bibtex", "nbib", "txt"] }],
     });
     if (typeof path !== "string") return;
     await run(async () => {
-      const batch = await api.importRecords(review.id, path, source);
+      const batch = await api.importRecords(review.id, path, searchId ? { search_id: searchId } : { source, origin });
       setSource("");
       return batch.status === "failed"
         ? `Import fehlgeschlagen: ${batch.error}`
@@ -621,10 +639,15 @@ function ImportsTab({ review, run }: { review: ReviewDetail; run: Run }) {
     });
   }
 
+  const nameOf = (id: string | null) => {
+    const search = searches.find((s) => s.id === id);
+    return search ? searchName(search) : "";
+  };
+
   return (
     <>
       {review.imports.length === 0 ? (
-        <Empty icon="upload" title="Noch nichts importiert">Exportiere die Treffer deiner Suche aus PubMed, Scopus oder Zotero als RIS oder BibTeX.</Empty>
+        <Empty icon="upload" title="Noch nichts importiert">Exportiere die Treffer jeder Suche als RIS, BibTeX oder im PubMed-Format und lies sie hier ein.</Empty>
       ) : (
         <Group title="Importe">
           {review.imports.map((b) => (
@@ -636,6 +659,8 @@ function ImportsTab({ review, run }: { review: ReviewDetail; run: Run }) {
                   <small>
                     {b.status === "failed" ? b.error : `${b.n_records} Einträge · ${b.n_duplicates} Dubletten`}
                     {b.source && ` · ${b.source}`}
+                    {b.origin && ` · ${ORIGIN_LABEL[b.origin] ?? b.origin}`}
+                    {b.status !== "failed" && (b.search_version != null ? ` · Suchversion ${b.search_version}` : " · ohne Suchversion")}
                   </small>
                 </span>
               </span>
@@ -644,14 +669,37 @@ function ImportsTab({ review, run }: { review: ReviewDetail; run: Run }) {
           ))}
         </Group>
       )}
+      <Duplicates review={review} run={run} />
       {manage && (
-        <Group title="Datei importieren" footer="Dubletten werden über die DOI oder den Titel mit Jahr erkannt und nicht gescreent.">
+        <Group
+          title="Datei importieren"
+          footer="Gleiche Einträge werden über die DOI oder den Titel mit Jahr erkannt und nicht gescreent. Was nur ähnlich ist, erscheint danach unter „Mögliche Dubletten“."
+        >
           <Row>
-            <label htmlFor="import-source">Quelle</label>
-            <input id="import-source" value={source} onChange={(e) => setSource(e.target.value)} placeholder="z. B. PubMed" />
+            <label htmlFor="import-search">Suche <small>die neueste Version; festgehalten im Reiter „Suche“</small></label>
+            <select id="import-search" value={searchId} onChange={(e) => setSearchId(e.target.value)}>
+              <option value="">ohne Suchversion</option>
+              {searches.map((s) => (
+                <option key={s.id} value={s.id}>{nameOf(s.id)} (Version {s.versions[s.versions.length - 1].version})</option>
+              ))}
+            </select>
           </Row>
+          {!searchId && (
+            <>
+              <Row>
+                <label htmlFor="import-source">Quelle</label>
+                <input id="import-source" value={source} onChange={(e) => setSource(e.target.value)} placeholder="z. B. Handsuche" />
+              </Row>
+              <Row>
+                <label htmlFor="import-origin">Herkunft</label>
+                <select id="import-origin" value={origin} onChange={(e) => setOrigin(e.target.value)}>
+                  {Object.entries(ORIGIN_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+              </Row>
+            </>
+          )}
           <Row>
-            <span className="muted">RIS oder BibTeX</span>
+            <span className="muted">RIS, BibTeX oder PubMed (nbib)</span>
             <button className="primary" onClick={choose}><Icon name="upload" size={14} /> Datei wählen …</button>
           </Row>
         </Group>

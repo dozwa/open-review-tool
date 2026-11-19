@@ -5,12 +5,12 @@ mod common;
 
 use std::collections::BTreeMap;
 
-use common::{criteria, person, send_package, send_return, wire, Team};
+use common::{criteria, person, search, send_package, send_return, wire, Team, SECOND_SOURCE};
 use ort_core::error::Error;
 use ort_core::event::sha256_hex;
 use ort_core::exchange::{export_return, merge};
 use ort_core::projection::Verify;
-use ort_core::service::{OpenStage, RecordFilter, StageView};
+use ort_core::service::{OpenStage, PairDecision, RecordFilter, StageView};
 use ort_core::workflow::{builtin_template, StationView};
 use ort_core::Review;
 use serde_json::json;
@@ -65,6 +65,7 @@ fn vote_all(t: &Team, stage: &Uuid, r1: &[&str], r2: &[&str]) {
 fn jbi_team_with_protocol() -> Team {
     let t = Team::with_template(JBI);
     t.owner.publish_criteria(&criteria("")).unwrap();
+    t.owner.publish_search(&search("MEDLINE", json!({}))).unwrap();
     t
 }
 
@@ -81,7 +82,7 @@ fn review_carries_its_template_in_the_log() {
     // Was die App noch nicht kann, steht in der Leiste, ist aber als nicht verfügbar gekennzeichnet.
     let available: Vec<&str> =
         detail.workflow.stations.iter().filter(|s| s.available).map(|s| s.key.as_str()).collect();
-    assert_eq!(available, ["protocol", "import", "pilot_title_abstract", "title_abstract", "fulltext"]);
+    assert_eq!(available, ["protocol", "search", "import", "pilot_title_abstract", "title_abstract", "fulltext"]);
     assert!(Review::create_in_memory_with(person("x"), "X", Some("gibtsnicht")).is_err());
 }
 
@@ -101,7 +102,14 @@ fn protocol_gate_locks_the_pilot() {
     assert!(err.to_string().contains("Protokoll und Team"), "{err}");
 
     t.owner.publish_criteria(&criteria("")).unwrap();
-    assert_eq!(states(&t.owner)["pilot_title_abstract"], "open");
+    // Als Nächstes fehlt die Suche; sie lässt sich festhalten oder mit Begründung übersteuern.
+    let s = states(&t.owner);
+    assert_eq!((s["protocol"], s["search"], s["pilot_title_abstract"]), ("done", "open", "locked"));
+    assert!(t.owner.open_stage(&params).unwrap_err().to_string().contains("„Suche“"));
+    t.owner.publish_search(&search("MEDLINE", json!({}))).unwrap();
+    let s = states(&t.owner);
+    assert_eq!((s["search"], s["pilot_title_abstract"]), ("done", "open"));
+    assert_eq!(station(&t.owner, "search").checks[0].detail, "1 Suche");
     // Ohne Station geht es in einem Review mit Vorlage nicht, und nicht jede Station hat Stufen.
     assert!(t.owner.open_stage(&OpenStage { name: "x".into(), ..params.clone() }).is_ok());
     let no_station = OpenStage { station: None, ..params.clone() };
@@ -174,7 +182,7 @@ fn failed_gate_can_be_overridden_with_a_reason() {
 
     assert!(matches!(t.owner.override_gate("pilot_title_abstract", "  "), Err(Error::Invalid(_))));
     assert!(matches!(t.r1.override_gate("pilot_title_abstract", "Grund"), Err(Error::Forbidden(_))));
-    assert!(matches!(t.owner.override_gate("search", "Grund"), Err(Error::Invalid(_))), "sperrt nichts");
+    assert!(matches!(t.owner.override_gate("fulltext_retrieval", "Grund"), Err(Error::Invalid(_))), "sperrt nichts");
     t.owner.override_gate("pilot_title_abstract", "Team hat sich mündlich abgestimmt").unwrap();
     let view = station(&t.owner, "pilot_title_abstract");
     assert_eq!(view.state, "done");
@@ -671,6 +679,113 @@ fn list_filters_are_locked_while_the_stage_is_blind() {
     assert!(matches!(t.r1.stage_record(&stage, &Uuid::new_v4().to_string()), Err(Error::NotFound(_))));
 }
 
+/// Entscheidung über ein vorgeschlagenes Paar: Dublette mit dem vorgeschlagenen Eintrag oder keine.
+fn decide(pair: &ort_core::service::DuplicatePair, duplicate: bool) -> PairDecision {
+    PairDecision {
+        a: pair.a.id,
+        b: pair.b.id,
+        decision: if duplicate { "duplicate" } else { "distinct" }.into(),
+        keep: duplicate.then_some(pair.keep),
+    }
+}
+
+#[test]
+fn open_duplicate_candidates_lock_the_pilot_until_each_pair_is_decided() {
+    let t = jbi_team_with_protocol();
+    assert_eq!(states(&t.owner)["import"], "done");
+    let batch = t.owner.import_file("embase.ris", SECOND_SOURCE, "Embase").unwrap();
+    assert_eq!((batch.n_records, batch.n_duplicates), (3, 0), "der exakte Abgleich erkennt nichts");
+
+    let s = states(&t.owner);
+    assert_eq!((s["import"], s["pilot_title_abstract"]), ("running", "locked"));
+    let check = station(&t.owner, "import").checks.into_iter().find(|c| c.check == "no_unresolved_duplicates").unwrap();
+    assert_eq!((check.passed, check.detail.as_str()), (Some(false), "3 offen"));
+
+    let list = t.owner.duplicate_candidates().unwrap();
+    assert_eq!((list.total, list.n_exact, list.n_resolved, list.n_distinct), (3, 2, 0, 0));
+    let similar = list.pairs.iter().find(|p| p.similarity < 100).unwrap();
+    assert!(similar.a.title.starts_with("Large language") && similar.b.title.starts_with("Large language"));
+    assert_eq!(list.pairs.iter().filter(|p| p.similarity == 100).count(), 2);
+    for pair in &list.pairs {
+        // Vorschlag: der Eintrag mit DOI bleibt; er stammt aus dem ersten Import.
+        let kept = if pair.keep == pair.a.id { (&pair.a, &pair.a_source) } else { (&pair.b, &pair.b_source) };
+        assert!(!kept.0.doi.is_empty() && kept.1 == "Test", "{}", kept.0.title);
+    }
+
+    let decisions: Vec<PairDecision> = list.pairs.iter().map(|p| decide(p, p.similarity == 100)).collect();
+    assert!(matches!(t.r1.resolve_duplicates(&decisions), Err(Error::Forbidden(_))));
+    assert!(matches!(t.owner.resolve_duplicates(&[]), Err(Error::Invalid(_))));
+    assert_eq!(t.owner.resolve_duplicates(&decisions).unwrap(), 3);
+
+    let list = t.owner.duplicate_candidates().unwrap();
+    assert_eq!((list.total, list.n_exact, list.n_resolved, list.n_distinct), (0, 2, 2, 1));
+    let detail = t.owner.detail().unwrap();
+    assert_eq!((detail.n_records, detail.n_duplicates), (9, 4));
+    assert_eq!(t.owner.records(None, false).unwrap().len(), 5);
+    let s = states(&t.owner);
+    assert_eq!((s["import"], s["pilot_title_abstract"]), ("done", "open"));
+
+    // Der Pilot enthält die fünf Einträge, die übrig sind: vier von vorher und den ähnlichen, aber eigenen.
+    let pilot = open(&t, "pilot_title_abstract", |_| {});
+    assert_eq!(pilot.n_records, 5);
+    let removed: Vec<Uuid> =
+        decisions.iter().filter(|d| d.keep.is_some()).map(|d| if d.keep == Some(d.a) { d.b } else { d.a }).collect();
+    let in_stage = order_of(&t.owner, &pilot.id);
+    assert!(removed.iter().all(|id| !in_stage.contains(&id.to_string())));
+
+    // Eine spätere Entscheidung zum selben Paar ersetzt die frühere. Die offene Stufe bleibt, wie sie ist.
+    let back = decisions.iter().find(|d| d.keep.is_some()).unwrap();
+    let back = PairDecision { decision: "distinct".into(), keep: None, ..back.clone() };
+    t.owner.resolve_duplicates(&[back]).unwrap();
+    let list = t.owner.duplicate_candidates().unwrap();
+    assert_eq!((list.total, list.n_resolved, list.n_distinct), (0, 1, 2));
+    assert_eq!(order_of(&t.owner, &pilot.id), in_stage);
+    send_package(&t.owner, &t.viewer);
+    assert_eq!(t.viewer.records(None, false).unwrap().len(), 6);
+}
+
+#[test]
+fn new_stages_leave_out_decided_duplicates_and_open_stages_stay() {
+    let t = Team::new();
+    let first = open(&t, "screening", |_| {});
+    assert_eq!(first.n_records, 4);
+    let before = order_of(&t.owner, &first.id);
+
+    // Erst nach dem Öffnen kommt eine zweite Quelle dazu. Ein Eintrag der offenen Stufe erweist sich
+    // als Dublette; hier bleibt ausdrücklich der neue.
+    t.owner.import_file("embase.ris", SECOND_SOURCE, "Embase").unwrap();
+    let list = t.owner.duplicate_candidates().unwrap();
+    let pair = list.pairs.iter().find(|p| p.a.title.starts_with("Knowledge")).unwrap();
+    let (old, new) =
+        if before.contains(&pair.a.id.to_string()) { (pair.a.id, pair.b.id) } else { (pair.b.id, pair.a.id) };
+    let decision = PairDecision { a: pair.a.id, b: pair.b.id, decision: "duplicate".into(), keep: Some(new) };
+    // Wer bleibt, muss einer der beiden sein; ein Eintrag ist nicht seine eigene Dublette.
+    let wrong = PairDecision { keep: Some(Uuid::new_v4()), ..decision.clone() };
+    assert!(matches!(t.owner.resolve_duplicates(&[wrong]), Err(Error::Invalid(_))));
+    let same = PairDecision { b: pair.a.id, keep: Some(pair.a.id), ..decision.clone() };
+    assert!(matches!(t.owner.resolve_duplicates(&[same]), Err(Error::Invalid(_))));
+    t.owner.resolve_duplicates(&[decision]).unwrap();
+
+    assert_eq!(order_of(&t.owner, &first.id), before, "die offene Stufe ändert sich nicht");
+    let second = open(&t, "screening", |p| p.name = "Zweiter Durchgang".into());
+    let ids = order_of(&t.owner, &second.id);
+    assert_eq!(ids.len(), 6, "vier von vorher, drei neue, einer entfernt");
+    assert!(ids.contains(&new.to_string()) && !ids.contains(&old.to_string()));
+
+    // Auch die Folgestufe lässt den entfernten Eintrag weg, obwohl er in der Quellstufe eingeschlossen wurde.
+    vote_all(&t, &first.id, &["include"; 4], &["include"; 4]);
+    if first.blind_active {
+        t.owner.unblind_stage(&first.id).unwrap();
+    }
+    let follow = open(&t, "screening", |p| {
+        (p.name, p.scope, p.source_stage) = ("Volltext".into(), "from_stage".into(), Some(first.id));
+    });
+    let ids = order_of(&t.owner, &follow.id);
+    assert_eq!(ids.len(), 3);
+    assert!(!ids.contains(&old.to_string()));
+    assert_eq!(t.owner.final_decisions(&first.id).unwrap().len(), 4, "die Stimmen der ersten Stufe bleiben");
+}
+
 /// Derselbe Ablauf für jede Vorlage: Stationen der Reihe nach, bis alle abgeschlossen sind, die die
 /// App bearbeiten kann. Im Test steht kein Schlüssel einer Station.
 fn walk(template: &str) {
@@ -681,8 +796,10 @@ fn walk(template: &str) {
         assert_ne!(now.state, "locked", "{template}: {} ist gesperrt durch {:?}", now.label, now.blocked_by);
         match now.kind.as_str() {
             "setup" => {
-                if now.tool.as_deref() == Some("protocol") {
-                    t.owner.publish_criteria(&criteria("")).unwrap();
+                match now.tool.as_deref() {
+                    Some("protocol") => drop(t.owner.publish_criteria(&criteria("")).unwrap()),
+                    Some("search") => drop(t.owner.publish_search(&search("MEDLINE", json!({}))).unwrap()),
+                    _ => {}
                 }
                 if now.blocking {
                     assert_eq!(station(&t.owner, &now.key).state, "done", "{template}: {}", now.label);

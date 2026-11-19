@@ -63,6 +63,9 @@ fn large_review() {
     });
 
     timed("Review-Übersicht (detail)", || owner.detail().unwrap());
+    let found = timed("Mögliche Dubletten (duplicate_candidates)", || owner.duplicate_candidates().unwrap().total);
+    println!("  {found} Kandidaten");
+    timed("Treffer je Quelle (import_summary)", || owner.import_summary().unwrap());
     timed("Stufe (stage_detail)", || owner.stage_detail(&stage.id).unwrap());
     timed("Nächster Eintrag (next_record)", || owner.next_record(&stage.id).unwrap());
     timed("Liste der Screening-Seite (stage_records)", || {

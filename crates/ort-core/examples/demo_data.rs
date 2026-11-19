@@ -10,11 +10,11 @@ use std::path::{Path, PathBuf};
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
 use ort_core::exchange::{create_from_package, export_package, export_return, merge, Bundle};
-use ort_core::service::OpenStage;
+use ort_core::service::{ImportSource, OpenStage};
 use ort_core::{Identity, Review};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
-use serde_json::json;
+use serde_json::{json, Value};
 use uuid::Uuid;
 
 fn wire(b: &Bundle) -> Bundle {
@@ -203,8 +203,36 @@ fn main() {
     let truth = move |title: &str| truth_table.iter().find(|(t, _)| t == title).is_none_or(|(_, inc)| *inc);
     let ris_a: String = list[..34].iter().map(|s| s.ris.as_str()).collect();
     let ris_b: String = list[30..].iter().map(|s| s.ris.as_str()).collect();
-    owner.import_file("pubmed_2026-11-02.ris", &ris_a, "PubMed").unwrap();
-    owner.import_file("scopus_2026-11-02.ris", &ris_b, "Scopus").unwrap();
+    // Je Quelle eine Suche; die in MEDLINE wurde einmal überarbeitet und geprüft.
+    let search = |source: &str, platform: &str, hits: i64, extra: Value| {
+        let mut data = json!({
+            "source": source, "platform": platform, "origin": "database",
+            "query": "(migraine[tiab] OR \"Migraine Disorders\"[mh]) AND (app[tiab] OR telemedicine[tiab] OR digital[tiab])",
+            "searched_on": "2026-11-02", "limits": "ab 2015, Englisch und Deutsch", "hits": hits,
+        });
+        for (key, value) in extra.as_object().into_iter().flatten() {
+            data[key] = value.clone();
+        }
+        owner.publish_search(&data).unwrap()
+    };
+    let medline = search("MEDLINE", "PubMed", 31, json!({}));
+    let medline = search(
+        "MEDLINE",
+        "PubMed",
+        34,
+        json!({"search_id": medline.id.to_string(), "change_note": "Freitext „digital“ ergänzt"}),
+    );
+    owner
+        .review_search(&medline.id, 2, "2026-11-03", "Bibliothekarin der Einrichtung, PRESS: ohne Befund", None)
+        .unwrap();
+    let scopus = search("Scopus", "Elsevier", 16, json!({}));
+    let from = |id: Uuid| ImportSource { search_id: Some(id), ..ImportSource::default() };
+    owner.import_file_with("pubmed_2026-11-02.ris", &ris_a, &from(medline.id)).unwrap();
+    owner.import_file_with("scopus_2026-11-02.ris", &ris_b, &from(scopus.id)).unwrap();
+    // Handsuche ohne DOI: Der exakte Abgleich erkennt den Eintrag nicht, er steht als mögliche Dublette an.
+    let hand = format!("TY  - JOUR\nTI  - {}\nER  - \n\n", list[2].title);
+    let other = ImportSource { source: "Handsuche".into(), origin: "other".into(), ..ImportSource::default() };
+    owner.import_file_with("handsuche.ris", &hand, &other).unwrap();
 
     let members: Vec<Review> = people
         .iter()

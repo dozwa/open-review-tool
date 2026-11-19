@@ -184,6 +184,81 @@ export interface ImportBatch {
   n_duplicates: number;
   error: string;
   created_at: string;
+  /** Leer bei Importen aus der Zeit vor der Angabe. */
+  origin: string;
+  search_id: string | null;
+  search_version: number | null;
+}
+
+export const ORIGIN_LABEL: Record<string, string> = {
+  database: "Datenbank",
+  register: "Register",
+  citation: "Zitationssuche",
+  other: "Andere Quelle",
+};
+
+/** Woher die Treffer eines Imports stammen: eine Suche oder Quelle mit Herkunft. */
+export interface ImportSource {
+  source?: string;
+  origin?: string;
+  search_id?: string | null;
+  search_version?: number | null;
+}
+
+export interface PeerReview {
+  reviewed_on: string;
+  note: string;
+  reviewer: string | null;
+  recorded_by: string;
+}
+
+export interface SearchVersion {
+  version: number;
+  previous_version: number | null;
+  source: string;
+  platform: string;
+  origin: string;
+  query: string;
+  searched_on: string;
+  limits: string;
+  hit_limit: number | null;
+  hits: number | null;
+  change_note: string;
+  published_at: string;
+  peer_reviews: PeerReview[];
+  n_imports: number;
+  n_records: number;
+  n_duplicates: number;
+}
+
+export interface Search {
+  id: string;
+  versions: SearchVersion[];
+}
+
+export interface DuplicatePair {
+  a: RecordItem;
+  b: RecordItem;
+  a_source: string;
+  b_source: string;
+  similarity: number;
+  /** Vorschlag, welcher Eintrag bleibt. */
+  keep: string;
+}
+
+export interface DuplicateList {
+  pairs: DuplicatePair[];
+  total: number;
+  n_exact: number;
+  n_resolved: number;
+  n_distinct: number;
+}
+
+export interface PairDecision {
+  a: string;
+  b: string;
+  decision: "duplicate" | "distinct";
+  keep?: string | null;
 }
 
 export interface Member {
@@ -424,8 +499,16 @@ export const api = {
     call<void>("member_set_role", { reviewId, actorId, role }),
   publishCriteria: (reviewId: string, data: Record<string, unknown>) =>
     call<Criteria>("criteria_publish", { reviewId, data }),
-  importRecords: (reviewId: string, path: string, source: string) =>
-    call<ImportBatch>("records_import", { reviewId, path, source }),
+  importRecords: (reviewId: string, path: string, from: ImportSource) =>
+    call<ImportBatch>("records_import", { reviewId, path, from }),
+  searches: (reviewId: string) => call<Search[]>("searches", { reviewId }),
+  publishSearch: (reviewId: string, data: Record<string, unknown>) =>
+    call<Search>("search_publish", { reviewId, data }),
+  reviewSearch: (reviewId: string, searchId: string, version: number, reviewedOn: string, note: string, reviewer: string | null) =>
+    call<void>("search_review", { reviewId, searchId, version, reviewedOn, note, reviewer }),
+  duplicates: (reviewId: string) => call<DuplicateList>("duplicates_list", { reviewId }),
+  resolveDuplicates: (reviewId: string, pairs: PairDecision[]) =>
+    call<number>("duplicates_resolve", { reviewId, pairs }),
   verifyChain: (reviewId: string) => call<ChainReport>("chain_verify", { reviewId }),
 
   openStage: (reviewId: string, params: StageParams) => call<Stage>("stage_open", { reviewId, params }),

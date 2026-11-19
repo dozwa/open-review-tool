@@ -67,9 +67,15 @@ const jbiStations = [
       { check: "min_writers", label: "Mindestens 2 Personen mit Schreibrecht", passed: true, detail: "4 vorhanden" },
     ],
   }),
-  station("search", "setup", "Suche", "Je Quelle eine Suchversion mit Suchstring, Datum und Grenzen festhalten.", { state: "open", tool: "search", blocked_by: [] }),
-  station("import", "setup", "Import und Dubletten", "Treffer einlesen; Dubletten werden erkannt und gezählt.", {
-    ...done, tool: "import", checks: [{ check: "records_imported", label: "Treffer importiert", passed: true, detail: "38 Einträge" }],
+  station("search", "setup", "Suche", "Je Quelle eine Suchversion mit Suchstring, Datum und Grenzen festhalten.", {
+    ...done, tool: "search", checks: [{ check: "search_documented", label: "Suche dokumentiert", passed: true, detail: "2 Suchen" }],
+  }),
+  station("import", "setup", "Import und Dubletten", "Treffer je Suche einlesen. Gleiche Einträge werden erkannt, mögliche Dubletten einzeln entschieden.", {
+    ...done, tool: "import", overridden: "Die zwei offenen Paare klären wir nach dem Pilot.",
+    checks: [
+      { check: "records_imported", label: "Treffer importiert", passed: true, detail: "38 Einträge" },
+      { check: "no_unresolved_duplicates", label: "Mögliche Dubletten entschieden", passed: false, detail: "2 offen" },
+    ],
   }),
   station("pilot_title_abstract", "screening", "Pilot Titel/Abstract", "Das ganze Team bewertet eine Zufallsstichprobe. Weiter geht es ab 75 % Übereinstimmung; sonst Kriterien überarbeiten und eine neue Runde öffnen.", {
     ...done,
@@ -159,6 +165,44 @@ const listState: Record<string, { mine: string | null; primary: string | null; n
   "rec-7": { mine: null, primary: null, n: 1, status: "needs_clarification" },
   "rec-8": { mine: null, primary: null, n: 0, status: "pending" },
 };
+const query = `(migraine[tiab] OR "Migraine Disorders"[mh])
+AND (app[tiab] OR "mobile health"[tiab] OR telemedicine[tiab] OR digital[tiab])`;
+const version = (n: number, extra: Record<string, unknown>) => ({
+  version: n, previous_version: n > 1 ? n - 1 : null, source: "MEDLINE", platform: "PubMed", origin: "database", query,
+  searched_on: "2026-11-02", limits: "ab 2015, Englisch und Deutsch", hit_limit: null, hits: 35, change_note: "",
+  published_at: "", peer_reviews: [], n_imports: 0, n_records: 0, n_duplicates: 0, ...extra,
+});
+let searches = [
+  {
+    id: "q1",
+    versions: [
+      version(1, { hits: 31, query: query.replace(" OR digital[tiab]", "") }),
+      version(2, {
+        change_note: "Freitext „digital“ ergänzt", n_imports: 1, n_records: 35,
+        peer_reviews: [{ reviewed_on: "2026-11-03", note: "Bibliothekarin der Einrichtung, PRESS: ohne Befund", reviewer: null, recorded_by: "p0" }],
+      }),
+    ],
+  },
+  { id: "q2", versions: [version(1, { source: "Scopus", platform: "Elsevier", hits: 6, n_imports: 1, n_records: 5, n_duplicates: 2, query: "TITLE-ABS-KEY(migraine AND (app OR telemedicine OR digital))" })] },
+];
+const dupRecord = (id: string, extra: Record<string, unknown>) => ({
+  id, title: "Smartphone-based headache diary for adults with episodic migraine: a randomised trial", abstract: "",
+  authors: "Keller, Jana; Moreau, Luc", year: 2023, journal: "Cephalalgia Reports", doi: "", url: "", keywords: "", duplicate_of: null, ...extra,
+});
+let duplicatePairs = [
+  {
+    a: dupRecord("d1", { abstract: "Background: Paper diaries are often incomplete.", doi: "10.5555/mig.2023.1004" }),
+    b: dupRecord("d2", { title: "Smartphone-based headache diary for adults with episodic migraine - a randomised trial.", authors: "Keller, J.", journal: "" }),
+    a_source: "MEDLINE", b_source: "Handsuche", similarity: 100, keep: "d1",
+  },
+  {
+    a: dupRecord("d3", { title: "Telemedicine follow-up for chronic migraine in rural areas", authors: "Okafor, Chidi", year: 2022, journal: "Neurology Practice", doi: "10.5555/mig.2022.1011", abstract: "Cohort study." }),
+    b: dupRecord("d4", { title: "Telemedicine follow up for chronic migraine in rural regions", authors: "Okafor, C.", year: 2022, journal: "Neurol Pract" }),
+    a_source: "MEDLINE", b_source: "Scopus", similarity: 93, keep: "d3",
+  },
+];
+let duplicateCounts = { n_resolved: 0, n_distinct: 0 };
+
 const stageOf = (id: unknown) => [...stages, fulltextStage].find((x) => x.id === id) ?? stages[1];
 const nextOpen = () => records.find((r) => !listState[r.id].mine) ?? null;
 const doneCount = () => records.filter((r) => listState[r.id].mine).length;
@@ -187,10 +231,37 @@ export function installMock() {
         stages: a.reviewId === "r2" ? [] : stages,
         workflow: a.reviewId === "r2" ? freeWorkflow : jbiWorkflow,
         imports: [
-          { id: "i1", filename: "pubmed_2026-11-02.ris", format: "ris", source: "PubMed", status: "done", n_records: 35, n_duplicates: 0, error: "", created_at: "" },
-          { id: "i2", filename: "scopus_2026-11-02.bib", format: "bibtex", source: "Scopus", status: "done", n_records: 5, n_duplicates: 2, error: "", created_at: "" },
+          { id: "i1", filename: "pubmed_2026-11-02.nbib", format: "nbib", source: "MEDLINE", status: "done", n_records: 35, n_duplicates: 0, error: "", created_at: "", origin: "database", search_id: "q1", search_version: 2 },
+          { id: "i2", filename: "scopus_2026-11-02.bib", format: "bibtex", source: "Scopus", status: "done", n_records: 5, n_duplicates: 2, error: "", created_at: "", origin: "database", search_id: "q2", search_version: 1 },
+          { id: "i3", filename: "handsuche.ris", format: "ris", source: "Handsuche", status: "done", n_records: 1, n_duplicates: 0, error: "", created_at: "", origin: "other", search_id: null, search_version: null },
         ],
       };
+      case "searches": return a.reviewId === "r2" ? [] : searches;
+      case "search_publish": {
+        const d = a.data as Record<string, unknown>;
+        const existing = searches.find((x) => x.id === d.search_id);
+        const entry = version(existing ? existing.versions.length + 1 : 1, { ...d, published_at: "" });
+        if (existing) existing.versions.push(entry);
+        else searches = [...searches, { id: `q${searches.length + 1}`, versions: [entry] }];
+        return existing ?? searches[searches.length - 1];
+      }
+      case "search_review": {
+        const target = searches.find((x) => x.id === a.searchId)?.versions.find((v) => v.version === a.version);
+        target?.peer_reviews.push({ reviewed_on: String(a.reviewedOn), note: String(a.note), reviewer: (a.reviewer as string | null) ?? null, recorded_by: "p0" } as never);
+        return null;
+      }
+      case "duplicates_list": return a.reviewId === "r2"
+        ? { pairs: [], total: 0, n_exact: 0, n_resolved: 0, n_distinct: 0 }
+        : { pairs: duplicatePairs, total: duplicatePairs.length, n_exact: 2, ...duplicateCounts };
+      case "duplicates_resolve": {
+        const decided = a.pairs as { a: string; b: string; decision: string }[];
+        for (const d of decided) {
+          duplicatePairs = duplicatePairs.filter((p) => !(p.a.id === d.a && p.b.id === d.b));
+          if (d.decision === "duplicate") duplicateCounts = { ...duplicateCounts, n_resolved: duplicateCounts.n_resolved + 1 };
+          else duplicateCounts = { ...duplicateCounts, n_distinct: duplicateCounts.n_distinct + 1 };
+        }
+        return decided.length;
+      }
       case "stage_detail": {
         const s = stageOf(a.stageId);
         const old = s.criteria_version === "1";

@@ -342,6 +342,18 @@ pub struct RecordRow {
     pub duplicate_of: Option<Uuid>,
 }
 
+/// Was der Abgleich unscharfer Dubletten von einem Eintrag braucht; ohne Abstract und Rohdaten.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RecordKey {
+    pub id: Uuid,
+    pub title: String,
+    pub authors: String,
+    pub year: Option<i64>,
+    pub doi: String,
+    pub pmid: String,
+    pub duplicate_of: Option<Uuid>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AssignmentRow {
     pub stage_instance_id: Uuid,
@@ -443,6 +455,25 @@ impl Store {
                 keywords: r.get("keywords")?,
                 raw: serde_json::from_str(&raw).unwrap_or(Value::Null),
                 dedup_key: r.get("dedup_key")?,
+                duplicate_of: dup.map(parse_uuid).transpose()?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Alle Einträge in der schlanken Form für den Dublettenabgleich, nach ID sortiert.
+    pub fn record_keys(&self) -> Result<Vec<RecordKey>> {
+        let mut stmt =
+            self.conn.prepare("SELECT id, title, authors, year, doi, pmid, duplicate_of FROM record ORDER BY id")?;
+        let rows = stmt.query_map([], |r| {
+            let dup: Option<String> = r.get("duplicate_of")?;
+            Ok(RecordKey {
+                id: parse_uuid(r.get("id")?)?,
+                title: r.get("title")?,
+                authors: r.get("authors")?,
+                year: r.get("year")?,
+                doi: r.get("doi")?,
+                pmid: r.get("pmid")?,
                 duplicate_of: dup.map(parse_uuid).transpose()?,
             })
         })?;
