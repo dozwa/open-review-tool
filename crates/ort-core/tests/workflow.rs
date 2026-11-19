@@ -81,7 +81,7 @@ fn review_carries_its_template_in_the_log() {
     assert_eq!(detail.workflow.stations.len(), 12);
     let created = &t.r1.events().unwrap()[0];
     assert_eq!(created.payload["review_type"], "scoping");
-    // Was die App noch nicht kann, steht in der Leiste, ist aber als nicht verfügbar gekennzeichnet.
+    // Alle Stationen der Vorlage kann die App bearbeiten.
     let available: Vec<&str> =
         detail.workflow.stations.iter().filter(|s| s.available).map(|s| s.key.as_str()).collect();
     assert_eq!(
@@ -96,6 +96,8 @@ fn review_carries_its_template_in_the_log() {
             "fulltext",
             "citation_search",
             "bundling",
+            "charting_pilot",
+            "charting",
             "report"
         ]
     );
@@ -1249,6 +1251,471 @@ fn citation_search_runs_as_a_further_round_and_bundles_count_once() {
     assert!(t.owner.verify_chain().unwrap().ok);
 }
 
+/// Auswahl abgeschlossen, Zitationssuche übersteuert, jede der vier Quellen hat eine Quellenart:
+/// drei Primärstudien und ein Review.
+fn team_before_charting() -> Team {
+    let t = team_with_fulltexts();
+    let ft = open(&t, "fulltext", |_| {});
+    vote_all(&t, &ft.id, &["include"; 4], &["include"; 4]);
+    t.owner.unblind_stage(&ft.id).unwrap();
+    assert!(t.owner.close_stage(&ft.id).unwrap().gate.unwrap().passed);
+    t.owner.override_gate("citation_search", "Keine Zitationssuche in diesem Review").unwrap();
+    let ids: Vec<Uuid> = t.owner.sources().unwrap().sources.iter().map(|s| s.id).collect();
+    t.owner.set_source_type(&ids[..3], "primary_study").unwrap();
+    t.owner.set_source_type(&ids[3..], "review").unwrap();
+    assert_eq!(states(&t.owner)["bundling"], "done");
+    t
+}
+
+fn charting_form(extra: serde_json::Value) -> serde_json::Value {
+    let mut data = json!({
+        "purpose": "charting", "name": "Charting", "change_note": "",
+        "fields": [
+            {"key": "country", "label": "Land", "type": "text", "required": true},
+            {"key": "design", "label": "Design", "type": "choice", "required": true, "options": ["Kohorte", "RCT"]},
+            {"key": "n", "label": "Stichprobe", "type": "integer"},
+            {"key": "themes", "label": "Themen", "type": "multi_choice", "options": ["Diagnose", "Therapie"]},
+        ],
+    });
+    for (key, value) in extra.as_object().into_iter().flatten() {
+        data[key] = value.clone();
+    }
+    data
+}
+
+fn sources_of(review: &Review, stage: &Uuid) -> Vec<String> {
+    review.form_stage(stage).unwrap().rows.iter().map(|r| r.record_id.to_string()).collect()
+}
+
+fn chart(review: &Review, stage: &Uuid, record: &str, country: &str, design: &str) {
+    review.record_form_value(stage, record, "country", &json!(country)).unwrap();
+    review.record_form_value(stage, record, "design", &json!(design)).unwrap();
+    review.complete_form_entry(stage, record, Some(120)).unwrap();
+}
+
+#[test]
+fn charting_runs_blind_and_differences_show_only_after_unblinding() {
+    let t = team_before_charting();
+    // Ohne Formular keine Stufe; nur die Leitung veröffentlicht eines.
+    let no_form = t.owner.open_stage(&t.owner.stage_defaults("charting_pilot").unwrap()).unwrap_err();
+    assert!(no_form.to_string().contains("kein Formular"), "{no_form}");
+    assert_eq!(t.owner.forms().unwrap().starters.len(), 1, "die Vorlage bringt ein Startformular mit");
+    assert!(matches!(t.r1.publish_form(&charting_form(json!({}))), Err(Error::Forbidden(_))));
+    let form = t.owner.publish_form(&charting_form(json!({}))).unwrap();
+    assert_eq!((form.current().version, form.confirmed), (1, false));
+    assert!(t.owner.forms().unwrap().starters.is_empty());
+
+    // Pilot: je Quellenart höchstens zwei Quellen, verblindet.
+    let pilot = open(&t, "charting_pilot", |_| {});
+    assert_eq!((pilot.n_records, pilot.blind_active, pilot.form_version), (3, true, Some(1)));
+    assert!(pilot.seed.is_some());
+    let records = sources_of(&t.r1, &pilot.id);
+    let (a, b, c) = (&records[0], &records[1], &records[2]);
+    assert!(matches!(t.r1.cast_vote(&pilot.id, a, "include", None, &[], ""), Err(Error::Invalid(_))));
+    assert!(matches!(t.viewer.record_form_value(&pilot.id, a, "country", &json!("CZ")), Err(Error::Forbidden(_))));
+
+    // Werte müssen zum Feld passen; der Abschluss verlangt die Pflichtfelder.
+    assert!(matches!(t.r1.record_form_value(&pilot.id, a, "n", &json!("viele")), Err(Error::Invalid(_))));
+    assert!(matches!(t.r1.record_form_value(&pilot.id, a, "design", &json!("Fallserie")), Err(Error::Invalid(_))));
+    assert!(matches!(t.r1.record_form_value(&pilot.id, a, "gibtsnicht", &json!("x")), Err(Error::Invalid(_))));
+    assert!(t.r1.record_form_value(&pilot.id, a, "country", &json!(" Tschechien ")).unwrap());
+    assert!(!t.r1.record_form_value(&pilot.id, a, "country", &json!("Tschechien")).unwrap(), "unverändert");
+    let missing = t.r1.complete_form_entry(&pilot.id, a, None).unwrap_err();
+    assert!(missing.to_string().contains("Pflichtfelder: Design"), "{missing}");
+    assert_eq!(t.r1.form_stage(&pilot.id).unwrap().rows[0].mine, "draft");
+    t.r1.record_form_value(&pilot.id, a, "n", &json!(120)).unwrap();
+    t.r1.record_form_value(&pilot.id, a, "themes", &json!(["Therapie", "Diagnose"])).unwrap();
+    chart(&t.r1, &pilot.id, a, "Tschechien", "Kohorte");
+    chart(&t.r1, &pilot.id, b, "Polen", "RCT");
+    chart(&t.r1, &pilot.id, c, "Ungarn", "RCT");
+    // r2 weicht bei einer Quelle in einem Feld ab.
+    t.r2.record_form_value(&pilot.id, a, "n", &json!(120)).unwrap();
+    t.r2.record_form_value(&pilot.id, a, "themes", &json!(["Diagnose", "Therapie"])).unwrap();
+    chart(&t.r2, &pilot.id, a, "Tschechien", "Kohorte");
+    chart(&t.r2, &pilot.id, b, "Polen", "Kohorte");
+    chart(&t.r2, &pilot.id, c, "Ungarn", "RCT");
+    send_return(&t.r1, &t.owner);
+    send_return(&t.r2, &t.owner);
+
+    // Verblindet: kein Abgleich, kein Export, keine Klärung; das Paket trägt keine fremden Werte.
+    let view = t.owner.form_stage(&pilot.id).unwrap();
+    assert!(view.counts.is_none() && view.rows.iter().all(|r| r.status.is_none() && r.n_completed.is_none()));
+    assert!(
+        view.rows.iter().all(|r| r.cells.iter().all(|cell| cell.value.is_null())),
+        "die Leitung hat nichts eingetragen"
+    );
+    assert!(t.owner.form_entry(&pilot.id, b).unwrap().compared.is_none());
+    assert!(matches!(t.owner.form_file(&pilot.id, "table"), Err(Error::Forbidden(_))));
+    assert!(matches!(t.owner.form_frequencies(&pilot.id), Err(Error::Forbidden(_))));
+    assert!(matches!(t.r1.record_form_consensus(&pilot.id, b, "design", &json!("RCT"), ""), Err(Error::Forbidden(_))));
+    send_package(&t.owner, &t.r2);
+    let foreign = |review: &Review| {
+        let me = review.me().actor_id;
+        review
+            .events()
+            .unwrap()
+            .iter()
+            .filter(|e| e.event_type.starts_with("Form") && e.stream != "main" && e.actor_id != me)
+            .count()
+    };
+    assert_eq!(foreign(&t.r2), 0);
+    assert_eq!(t.r2.form_stage(&pilot.id).unwrap().mine_done, 3);
+
+    // Entblindet: Die Abweichung erscheint mit beiden Werten.
+    t.owner.unblind_stage(&pilot.id).unwrap();
+    send_package(&t.owner, &t.r1);
+    send_package(&t.owner, &t.r2);
+    assert!(foreign(&t.r2) > 0);
+    let view = t.r2.form_stage(&pilot.id).unwrap();
+    let counts = view.counts.unwrap();
+    assert_eq!((counts.conflict, counts.done, counts.open), (1, 2, 0));
+    assert_eq!(
+        view.times.iter().map(|x| (x.source_type.as_str(), x.n, x.seconds)).collect::<Vec<_>>(),
+        [("primary_study", 4, 120), ("review", 2, 120)]
+    );
+    let entry = t.r2.form_entry(&pilot.id, b).unwrap();
+    let compared = entry.compared.unwrap();
+    let design = compared.cells.iter().find(|cell| cell.field == "design").unwrap();
+    assert_eq!((compared.status, design.status), ("conflict", "differs"));
+    let mut given: Vec<(&str, &str)> =
+        design.values.iter().map(|g| (g.name.as_str(), g.value.as_str().unwrap())).collect();
+    given.sort();
+    assert_eq!(given, [("r1", "RCT"), ("r2", "Kohorte")]);
+    let same = t.r2.form_entry(&pilot.id, a).unwrap().compared.unwrap();
+    assert!(same.cells.iter().all(|cell| cell.status == "agreed"), "Listen zählen ohne Reihenfolge");
+
+    // Klärung je Feld.
+    t.r1.record_form_consensus(&pilot.id, b, "design", &json!("RCT"), "im Volltext nachgesehen").unwrap();
+    send_return(&t.r1, &t.owner);
+    let counts = t.owner.form_stage(&pilot.id).unwrap().counts.unwrap();
+    assert_eq!((counts.conflict, counts.done), (0, 3));
+
+    // Gate des Pilots ist die Bestätigung des Formulars durch die Leitung.
+    assert!(!t.owner.close_stage(&pilot.id).unwrap().gate.unwrap().passed);
+    assert_eq!((states(&t.owner)["charting_pilot"], states(&t.owner)["charting"]), ("open", "locked"));
+    assert!(matches!(t.r1.confirm_form(&form.id), Err(Error::Forbidden(_))));
+    t.owner.confirm_form(&form.id).unwrap();
+    assert!(matches!(t.owner.confirm_form(&form.id), Err(Error::Conflict(_))));
+    assert_eq!((states(&t.owner)["charting_pilot"], states(&t.owner)["charting"]), ("done", "open"));
+    send_package(&t.owner, &t.r1);
+    assert!(matches!(t.r1.record_form_value(&pilot.id, a, "country", &json!("CZ")), Err(Error::Conflict(_))));
+
+    // Charting: alle vier Quellen, auch die aus dem Pilot.
+    let charting = open(&t, "charting", |_| {});
+    assert_eq!((charting.n_records, charting.round), (4, 1));
+    let records = sources_of(&t.r1, &charting.id);
+    for reviewer in [&t.r1, &t.r2] {
+        for record in &records {
+            chart(reviewer, &charting.id, record, "Polen", "RCT");
+        }
+        send_return(reviewer, &t.owner);
+    }
+    t.owner.unblind_stage(&charting.id).unwrap();
+    assert_eq!(t.owner.form_stage(&charting.id).unwrap().counts.unwrap().done, 4);
+
+    // Änderung nach dem Pilot: Begründung Pflicht, der Typ eines Feldes bleibt.
+    let with_setting = |note: &str| {
+        let mut data = charting_form(json!({"form_id": form.id, "change_note": note}));
+        let field = json!({"key": "setting", "label": "Setting", "type": "text", "required": true});
+        data["fields"].as_array_mut().unwrap().push(field);
+        data
+    };
+    assert!(matches!(t.owner.publish_form(&with_setting("")), Err(Error::Invalid(_))));
+    let mut retyped = with_setting("n als Text");
+    retyped["fields"][2]["type"] = json!("text");
+    assert!(matches!(t.owner.publish_form(&retyped), Err(Error::Invalid(_))));
+    let changed = t.owner.publish_form(&with_setting("Setting fehlte im Pilot")).unwrap();
+    let current = changed.current();
+    assert_eq!((current.version, current.after_confirmation, current.confirmed), (2, true, false));
+    assert_eq!(current.change_note, "Setting fehlte im Pilot");
+    assert!(matches!(t.owner.publish_form(&with_setting("noch einmal")), Err(Error::Conflict(_))));
+
+    // Fertige Quellen sind nachzutragen; das Gate hält die Station offen.
+    let view = t.owner.form_stage(&charting.id).unwrap();
+    assert_eq!(view.counts.unwrap().incomplete, 4);
+    assert_eq!(t.owner.gate_preview(&charting.id).unwrap().unwrap().checks[0].numerator, 0);
+    for reviewer in [&t.r1, &t.r2] {
+        send_package(&t.owner, reviewer);
+        let view = reviewer.form_stage(&charting.id).unwrap();
+        assert_eq!((view.todo, view.form.version, view.rows[0].mine), (4, 2, "todo"));
+        assert_eq!(reviewer.form_entry(&charting.id, &records[0]).unwrap().missing, ["Setting"]);
+        for record in &records {
+            reviewer.record_form_value(&charting.id, record, "setting", &json!("Hausarztpraxis")).unwrap();
+        }
+        assert_eq!(reviewer.form_stage(&charting.id).unwrap().todo, 0);
+        let report = send_return(reviewer, &t.owner);
+        assert_eq!((report.accepted, report.rejected.len()), (4, 0), "{:?}", report.rejected);
+    }
+
+    // Tabelle und Häufigkeiten.
+    let frequencies = t.owner.form_frequencies(&charting.id).unwrap();
+    let design = &frequencies[0];
+    assert_eq!((design.label.as_str(), design.n_empty, design.n_open), ("Design", 0, 0));
+    assert_eq!(
+        design.counts.iter().map(|x| (x.option.as_str(), x.n)).collect::<Vec<_>>(),
+        [("Kohorte", 0), ("RCT", 4)]
+    );
+    assert_eq!(frequencies[1].n_empty, 4, "Themen hat niemand gewählt");
+    let table = t.owner.form_file(&charting.id, "table").unwrap();
+    assert_eq!(table.filename, "extraktion-tabelle.csv");
+    assert!(table.content.lines().next().unwrap().ends_with("status,Land,Design,Stichprobe,Themen,Setting"));
+    assert_eq!(table.content.lines().filter(|l| l.contains(",done,Polen,RCT,,,Hausarztpraxis")).count(), 4);
+    assert!(t.owner.form_file(&charting.id, "frequencies").unwrap().content.contains("design,Design,RCT,4"));
+
+    let closed = t.owner.close_stage(&charting.id).unwrap();
+    assert!(closed.gate.unwrap().passed);
+    assert_eq!((states(&t.owner)["charting"], states(&t.owner)["report"]), ("done", "open"));
+    assert_eq!(t.owner.report().unwrap().problems, Vec::<String>::new(), "Formular-Stufen sind keine Ebene");
+    for member in [&t.r1, &t.r2, &t.viewer] {
+        send_package(&t.owner, member);
+        assert_eq!(states(member), states(&t.owner));
+        assert!(member.verify_chain().unwrap().ok);
+    }
+    assert_eq!(t.viewer.form_stage(&charting.id).unwrap().counts.unwrap().done, 4);
+}
+
+#[test]
+fn update_runs_as_further_rounds_and_the_report_names_protocol_and_deviations() {
+    let t = team_before_charting();
+    let item = |review: &Review, number: i64| {
+        review.report().unwrap().checklist.unwrap().items.into_iter().find(|i| i.number == number).unwrap()
+    };
+    let kinds = |review: &Review| review.protocol().unwrap().deviations.iter().map(|d| d.kind).collect::<Vec<_>>();
+
+    // Ohne Registrierung stehen nur die übersteuerten Gates in der Liste.
+    assert!(t.owner.protocol().unwrap().registration.is_none());
+    assert_eq!(kinds(&t.owner), ["gate", "gate"]);
+    assert_eq!(
+        (item(&t.owner, 5).status, item(&t.owner, 6).status, item(&t.owner, 1).status),
+        ("open", "ready", "manual")
+    );
+    assert_eq!((item(&t.owner, 12).status, item(&t.owner, 15).status), ("optional", "open"));
+    assert!(matches!(t.r1.register_protocol("2026-01-10", "OSF", "osf.io/abc12", ""), Err(Error::Forbidden(_))));
+    assert!(matches!(t.owner.register_protocol("10.01.2026", "OSF", "", ""), Err(Error::Invalid(_))));
+    assert!(matches!(t.owner.register_protocol("2026-01-10", " ", "", ""), Err(Error::Invalid(_))));
+    let registered = t.owner.register_protocol("2026-01-10", "OSF", "osf.io/abc12", "").unwrap();
+    let first = registered.registration.unwrap();
+    assert_eq!((first.registry.as_str(), first.corrected), ("OSF", false));
+    assert_eq!(item(&t.owner, 5).status, "ready");
+
+    // Charting ohne Pilot: Formular bestätigen, Pilot mit Begründung übergehen.
+    let form = t.owner.publish_form(&charting_form(json!({}))).unwrap();
+    t.owner.confirm_form(&form.id).unwrap();
+    t.owner.override_gate("charting_pilot", "Formular aus dem Vorprojekt übernommen").unwrap();
+    let assigned = |review: &Review| {
+        station(review, "charting").checks.into_iter().find(|c| c.check == "all_sources_assigned").unwrap()
+    };
+    assert_eq!((assigned(&t.owner).passed, assigned(&t.owner).detail.as_str()), (Some(false), "4 ohne Runde"));
+    let charting = open(&t, "charting", |_| {});
+    let chart_all = |stage: &StageView, country: &str| {
+        for reviewer in [&t.r1, &t.r2] {
+            for record in sources_of(reviewer, &stage.id) {
+                chart(reviewer, &stage.id, &record, country, "RCT");
+            }
+            send_return(reviewer, &t.owner);
+        }
+        t.owner.unblind_stage(&stage.id).unwrap();
+        assert!(t.owner.close_stage(&stage.id).unwrap().gate.unwrap().passed);
+    };
+    assert_eq!(
+        t.owner.report().unwrap().table,
+        ort_core::report::TableInfo { n_sources: 4, n_charted: 0, n_fields: 4 }
+    );
+    assert!(t.owner.report_file("table").unwrap().content.lines().skip(1).all(|l| l.contains(",blind")));
+    chart_all(&charting, "Polen");
+    assert_eq!(states(&t.owner)["charting"], "done");
+    assert_eq!(t.owner.report().unwrap().table.n_charted, 4);
+
+    // Update: Kriterien bleiben, die Suche wird wiederholt und bringt zwei neue Einträge.
+    let medline = t.owner.searches().unwrap()[0].id;
+    let again = search(
+        "MEDLINE",
+        json!({"search_id": medline.to_string(), "searched_on": "2027-03-01", "change_note": "Update nach einem Jahr"}),
+    );
+    t.owner.publish_search(&again).unwrap();
+    let from = ImportSource { search_id: Some(medline), ..ImportSource::default() };
+    let batch = t.owner.import_file_with("update.ris", CITATIONS, &from).unwrap();
+    assert_eq!((batch.n_records, batch.n_duplicates), (3, 1), "{}", batch.error);
+    let close = |stage: &StageView| {
+        t.owner.unblind_stage(&stage.id).unwrap();
+        assert!(t.owner.close_stage(&stage.id).unwrap().gate.unwrap().passed);
+    };
+    let ta = open(&t, "title_abstract", |_| {});
+    assert_eq!((ta.round, ta.n_records), (2, 2));
+    vote_all(&t, &ta.id, &["include"; 2], &["include"; 2]);
+    close(&ta);
+    retrieve_fulltexts(&t);
+    let ft = open(&t, "fulltext", |_| {});
+    assert_eq!((ft.round, ft.n_records), (2, 2));
+    let new = order_of(&t.owner, &ft.id);
+    for reviewer in [&t.r1, &t.r2] {
+        reviewer.cast_vote(&ft.id, &new[0], "include", None, &[], "").unwrap();
+        reviewer.cast_vote(&ft.id, &new[1], "exclude", Some("E1"), &[], "").unwrap();
+        send_return(reviewer, &t.owner);
+    }
+    close(&ft);
+
+    // Die neue Quelle hält das Charting wieder offen, bis sie in einer Runde liegt.
+    t.owner.set_source_type(&[Uuid::parse_str(&new[0]).unwrap()], "primary_study").unwrap();
+    assert_eq!((assigned(&t.owner).passed, assigned(&t.owner).detail.as_str()), (Some(false), "1 ohne Runde"));
+    assert_ne!(states(&t.owner)["charting"], "done");
+    let table = t.owner.report_file("table").unwrap();
+    assert_eq!(table.filename, "tabelle-quellen.csv");
+    assert_eq!(table.content.lines().filter(|l| l.contains(",not_assigned")).count(), 1);
+    let round2 = open(&t, "charting", |_| {});
+    assert_eq!((round2.round, round2.n_records), (2, 1));
+    chart_all(&round2, "Ungarn");
+    assert_eq!((assigned(&t.owner).passed, states(&t.owner)["charting"]), (Some(true), "done"));
+
+    // Tabelle: eine Zeile je Quelle, Werte aus der Runde, in der die Quelle lag.
+    let report = t.owner.report().unwrap();
+    assert_eq!(report.problems, Vec::<String>::new());
+    assert_eq!(report.table, ort_core::report::TableInfo { n_sources: 5, n_charted: 5, n_fields: 4 });
+    let table = t.owner.report_file("table").unwrap().content;
+    assert!(table.lines().next().unwrap().ends_with("doi,status,Land,Design,Stichprobe,Themen"), "{table}");
+    assert_eq!(table.lines().filter(|l| l.ends_with(",done,Polen,RCT,,")).count(), 4, "{table}");
+    assert_eq!(table.lines().filter(|l| l.ends_with(",done,Ungarn,RCT,,")).count(), 1, "{table}");
+
+    // Abweichungen: was nach der Registrierung neu versioniert wurde, in der Reihenfolge des Logs.
+    t.owner.publish_criteria(&criteria("E2 genauer gefasst")).unwrap();
+    assert_eq!(kinds(&t.owner), ["gate", "gate", "gate", "search", "criteria"]);
+    let corrected = t.owner.register_protocol("2026-01-12", "OSF", "osf.io/abc12", "Datum berichtigt").unwrap();
+    let registration = corrected.registration.unwrap();
+    assert_eq!((registration.registered_on.as_str(), registration.corrected), ("2026-01-12", true));
+    assert_eq!(registration.recorded_at, first.recorded_at, "der Bezugspunkt bleibt der erste Eintrag");
+    assert_eq!(corrected.deviations.len(), 5);
+    let deviations = t.owner.report_file("deviations").unwrap().content;
+    assert!(deviations.contains("Protokoll registriert am 12.01.2026: OSF (osf.io/abc12)."), "{deviations}");
+    assert!(deviations
+        .contains("Suche in MEDLINE geändert oder wiederholt (Version 2). Begründung: Update nach einem Jahr"));
+    assert!(deviations.contains("Kriterien geändert (Version 2). Begründung: E2 genauer gefasst"));
+
+    // Methodentext und Checkliste.
+    let methods = t.owner.report_file("methods").unwrap().content;
+    for part in [
+        "Das Protokoll wurde am 12.01.2026 registriert: OSF (osf.io/abc12).",
+        "Die Suche in MEDLINE wurde nach dem 19.11.2026 geändert oder wiederholt, zuletzt am 01.03.2027 (Version 2).",
+        "## Charting\n\nExtrahiert wurde mit dem Formular „Charting“ (Version 1).",
+        "von mindestens 2 Personen unabhängig extrahiert",
+        "Erhoben wurden 4 Angaben:",
+        "- Design (Kohorte, RCT)",
+        "Runde 1: 4 Quellen, 2 Personen beteiligt. Abgeglichen: 4.",
+        "Runde 2: 1 Quellen, 2 Personen beteiligt. Abgeglichen: 1.",
+        "Kriterien geändert (Version 2): E2 genauer gefasst",
+        "„Charting-Pilot“ wurde von der Leitung ohne erfülltes Gate freigegeben",
+    ] {
+        assert!(methods.contains(part), "fehlt: {part}\n{methods}");
+    }
+    assert_eq!(
+        (item(&t.owner, 10).status, item(&t.owner, 15).status, item(&t.owner, 20).status),
+        ("ready", "ready", "ready")
+    );
+    let checklist = t.owner.report_file("checklist").unwrap().content;
+    assert!(checklist.starts_with("# Checkliste PRISMA-ScR"));
+    assert_eq!(checklist.lines().filter(|l| l.starts_with("| ")).count(), 24, "Kopf, Trennzeile und 22 Punkte");
+
+    // Alle sehen dasselbe; eine Registrierung von r1 an der App vorbei wird beim Einlesen abgewiesen.
+    for member in [&t.r1, &t.r2, &t.viewer] {
+        send_package(&t.owner, member);
+        assert_eq!(member.protocol().unwrap(), t.owner.protocol().unwrap());
+        assert_eq!(member.report().unwrap().table.n_charted, 5);
+    }
+    let forged = json!({"registered_on": "2025-01-01", "registry": "PROSPERO", "identifier": "", "note": ""});
+    t.r1.store().append(t.r1.me(), "ProtocolRegistered", None, forged).unwrap();
+    let report = merge(&t.owner, &wire(&export_return(&t.r1).unwrap())).unwrap();
+    assert!(report.rejected.iter().any(|r| r.contains("Owner und Admins")), "{:?}", report.rejected);
+    assert_eq!(t.owner.protocol().unwrap().registration.unwrap().registry, "OSF");
+}
+
+#[test]
+fn reviews_without_a_checklist_in_the_template_get_none() {
+    let t = Team::with_template(Some("free"));
+    let report = t.owner.report().unwrap();
+    assert!(report.checklist.is_none() && report.protocol.deviations.is_empty());
+    assert!(matches!(t.owner.report_file("checklist"), Err(Error::Invalid(_))));
+    assert_eq!(report.table, ort_core::report::TableInfo::default());
+}
+
+#[test]
+fn single_extraction_is_checked_by_a_second_person() {
+    let t = team_before_charting();
+    t.owner.publish_form(&charting_form(json!({}))).unwrap();
+    t.owner.override_gate("charting_pilot", "Formular aus einem früheren Review").unwrap();
+    assert!(t
+        .owner
+        .open_stage(&OpenStage { decision_rule: Some("liberal".into()), ..t.owner.stage_defaults("charting").unwrap() })
+        .is_err());
+    let stage = open(&t, "charting", |p| {
+        p.decision_rule = Some("single_verified".into());
+        p.blind = false;
+    });
+    let record = &sources_of(&t.r1, &stage.id)[0];
+    chart(&t.r1, &stage.id, record, "Polen", "RCT");
+    send_return(&t.r1, &t.owner);
+    assert_eq!(t.owner.form_stage(&stage.id).unwrap().counts.unwrap().extracted, 1);
+
+    // Die zweite Person sieht die Werte, trägt nichts Eigenes ein und korrigiert über geklärte Werte.
+    send_package(&t.owner, &t.r2);
+    let entry = t.r2.form_entry(&stage.id, record).unwrap();
+    assert_eq!((entry.mode, t.r2.form_stage(&stage.id).unwrap().rows[0].mine), ("verify", "to_verify"));
+    assert!(matches!(t.r2.record_form_value(&stage.id, record, "country", &json!("CZ")), Err(Error::Conflict(_))));
+    t.r2.record_form_consensus(&stage.id, record, "country", &json!("Tschechien"), "Tabelle 1").unwrap();
+    t.r2.complete_form_entry(&stage.id, record, None).unwrap();
+    // Wer extrahiert hat, kann die eigene Arbeit nicht selbst prüfen.
+    t.r1.complete_form_entry(&stage.id, record, None).unwrap();
+    assert_eq!(t.r1.form_entry(&stage.id, record).unwrap().compared.unwrap().status, "extracted");
+    send_return(&t.r2, &t.owner);
+    send_return(&t.r1, &t.owner);
+    let compared = t.owner.form_entry(&stage.id, record).unwrap().compared.unwrap();
+    assert_eq!(compared.status, "done");
+    let country = compared.cells.iter().find(|cell| cell.field == "country").unwrap();
+    assert_eq!((country.status, country.value.as_str()), ("consensus", Some("Tschechien")));
+    let counts = t.owner.form_stage(&stage.id).unwrap().counts.unwrap();
+    assert_eq!((counts.done, counts.open), (1, 3));
+    assert!(!t.owner.close_stage(&stage.id).unwrap().gate.unwrap().passed, "drei Quellen fehlen noch");
+}
+
+#[test]
+fn form_events_are_checked_when_a_file_is_read() {
+    let t = team_before_charting();
+    let form = t.owner.publish_form(&charting_form(json!({}))).unwrap();
+    let pilot = open(&t, "charting_pilot", |_| {});
+    send_package(&t.owner, &t.viewer);
+    let record = sources_of(&t.r1, &pilot.id)[0].clone();
+    let value = |field: &str, value: serde_json::Value| json!({"record_id": record, "field": field, "group_index": 0, "value": value, "form_version": 1});
+    let rejected = |from: &Review, event_type: &str, stage: Option<Uuid>, payload: serde_json::Value| {
+        from.store().append(from.me(), event_type, stage, payload).unwrap();
+        let report = merge(&t.owner, &wire(&export_return(from).unwrap())).unwrap();
+        // Eine abgewiesene Kette bleibt stehen und wird bei jedem Einlesen wieder gemeldet.
+        report.rejected.iter().find(|r| r.contains(event_type)).expect("das Ereignis wird abgewiesen").clone()
+    };
+    // richtige Rolle, passender Wert
+    t.r1.record_form_value(&pilot.id, &record, "country", &json!("Polen")).unwrap();
+    assert_eq!(send_return(&t.r1, &t.owner).rejected, Vec::<String>::new());
+    // falsche Rolle
+    assert!(rejected(&t.viewer, "FormValueRecorded", Some(pilot.id), value("country", json!("Polen")))
+        .contains("darf nicht abstimmen"));
+    let published = charting_form(json!({"form_id": form.id, "version": 2}));
+    assert!(rejected(&t.r1, "FormVersionPublished", None, published).contains("Owner und Admins"));
+    // Wert passt nicht zum Feld, Stimme in einer Formular-Stufe, Klärung in einer verblindeten Stufe
+    assert!(rejected(&t.r1, "FormValueRecorded", Some(pilot.id), value("n", json!("viele"))).contains("ganze Zahl"));
+    let vote = json!({"record_id": record, "decision": "include"});
+    assert!(rejected(&t.r2, "VoteCast", Some(pilot.id), vote).contains("Formular"));
+    assert!(rejected(&t.r2, "FormConsensusRecorded", Some(pilot.id), value("country", json!("Polen")))
+        .contains("verblindet"));
+    // geschlossene Stufe
+    let late = person("spät");
+    t.owner.set_member(&late.public(), "reviewer").unwrap();
+    let pkg = wire(&ort_core::exchange::export_package(&t.owner, &late.actor_id).unwrap());
+    let late = ort_core::exchange::create_from_package(&t.dir.path().join("late.sqlite"), late, &pkg).unwrap().0;
+    late.record_form_value(&pilot.id, &record, "country", &json!("Polen")).unwrap();
+    t.owner.unblind_stage(&pilot.id).unwrap();
+    t.owner.close_stage(&pilot.id).unwrap();
+    let report = send_return(&late, &t.owner);
+    assert!(report.rejected[0].contains("bereits geschlossen"), "{:?}", report.rejected);
+    assert!(t.owner.verify_chain().unwrap().ok);
+}
+
 /// Derselbe Ablauf für jede Vorlage: Stationen der Reihe nach, bis alle abgeschlossen sind, die die
 /// App bearbeiten kann. Im Test steht kein Schlüssel einer Station.
 fn walk(template: &str) {
@@ -1288,6 +1755,39 @@ fn walk(template: &str) {
                 }
                 let closed = t.owner.close_stage(&stage.id).unwrap();
                 assert_eq!(closed.gate.is_some(), now.blocking);
+                assert!(closed.gate.is_none_or(|g| g.passed), "{template}: {}", now.label);
+                assert_eq!(station(&t.owner, &now.key).state, "done", "{template}: {}", now.label);
+            }
+            "form" => {
+                if let Some(starter) = t.owner.forms().unwrap().starters.first() {
+                    t.owner.publish_form(&serde_json::to_value(starter).unwrap()).unwrap();
+                }
+                let stage = open(&t, &now.key, |_| {});
+                let view = t.owner.form_stage(&stage.id).unwrap();
+                for reviewer in [&t.r1, &t.r2] {
+                    for row in &view.rows {
+                        let record = row.record_id.to_string();
+                        for field in view.form.fields.iter().filter(|f| f.required) {
+                            let value = match field.kind.as_str() {
+                                "integer" => json!(1),
+                                "decimal" => json!("1,5"),
+                                "choice" => json!(field.options[0]),
+                                "multi_choice" => json!([field.options[0]]),
+                                _ => json!("x"),
+                            };
+                            reviewer.record_form_value(&stage.id, &record, &field.key, &value).unwrap();
+                        }
+                        reviewer.complete_form_entry(&stage.id, &record, Some(60)).unwrap();
+                    }
+                    send_return(reviewer, &t.owner);
+                }
+                if stage.blind_active {
+                    t.owner.unblind_stage(&stage.id).unwrap();
+                }
+                if !view.form.confirmed {
+                    t.owner.confirm_form(&view.form.id).unwrap();
+                }
+                let closed = t.owner.close_stage(&stage.id).unwrap();
                 assert!(closed.gate.is_none_or(|g| g.passed), "{template}: {}", now.label);
                 assert_eq!(station(&t.owner, &now.key).state, "done", "{template}: {}", now.label);
             }

@@ -9,7 +9,9 @@
 //! [`store`] (einzige Schreibstelle) →
 //! [`projection`], [`workflow`] und [`agreement`] (aus dem Log berechnet) → [`service`] (Fachlogik,
 //! Rechte, Verblindung) → [`exchange`] (Dateien zwischen Personen). [`report`] rechnet aus alldem
-//! das Flussdiagramm und die Anhänge, [`sources`] bündelt Einträge zu Quellen.
+//! das Flussdiagramm und die Anhänge, [`sources`] bündelt Einträge zu Quellen, [`forms`] hält Formulare,
+//! Werte und den Abgleich je Feld, [`protocol`] die Registrierung des Protokolls, die Abweichungen danach
+//! und die Checkliste des Berichts.
 
 pub mod agreement;
 pub mod canonical;
@@ -19,9 +21,11 @@ pub mod duplicates;
 pub mod error;
 pub mod event;
 pub mod exchange;
+pub mod forms;
 pub mod fulltext;
 pub mod import;
 pub mod projection;
+pub mod protocol;
 pub mod report;
 pub mod search;
 pub mod service;

@@ -14,6 +14,7 @@ export const REVIEW_TABS = [
   { value: "imports", label: "Import", icon: "upload" },
   { value: "fulltext", label: "Volltexte", icon: "file" },
   { value: "sources", label: "Quellen", icon: "stack" },
+  { value: "forms", label: "Formular", icon: "list" },
   { value: "report", label: "Bericht", icon: "chart" },
   { value: "members", label: "Mitglieder", icon: "people" },
   { value: "exchange", label: "Austausch", icon: "exchange" },

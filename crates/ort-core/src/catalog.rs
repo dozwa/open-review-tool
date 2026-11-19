@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use crate::criteria::valid_code;
 use crate::event::Event;
+use crate::forms::{self, Field, PURPOSES};
 use crate::service::ROLES;
 use crate::workflow::{GateResult, Template, CONFLICT_RULES, DECISION_RULES};
 
@@ -60,7 +61,7 @@ pub struct Spec {
     check: fn(&Value) -> Check,
 }
 
-pub static CATALOG: [Spec; 23] = [
+pub static CATALOG: [Spec; 29] = [
     Spec {
         name: "ReviewCreated",
         version: 1,
@@ -244,6 +245,54 @@ pub static CATALOG: [Spec; 23] = [
         writer: Writer::Manage,
         stage: StageRule::None,
         check: source_type_set,
+    },
+    Spec {
+        name: "ProtocolRegistered",
+        version: 1,
+        chain: Chain::Main,
+        writer: Writer::Manage,
+        stage: StageRule::None,
+        check: protocol_registered,
+    },
+    Spec {
+        name: "FormVersionPublished",
+        version: 1,
+        chain: Chain::Main,
+        writer: Writer::Manage,
+        stage: StageRule::None,
+        check: form_version_published,
+    },
+    Spec {
+        name: "FormConfirmed",
+        version: 1,
+        chain: Chain::Main,
+        writer: Writer::Manage,
+        stage: StageRule::None,
+        check: form_confirmed,
+    },
+    Spec {
+        name: "FormValueRecorded",
+        version: 1,
+        chain: Chain::Stage,
+        writer: Writer::Write,
+        stage: StageRule::Open,
+        check: form_value_recorded,
+    },
+    Spec {
+        name: "FormEntryCompleted",
+        version: 1,
+        chain: Chain::Stage,
+        writer: Writer::Write,
+        stage: StageRule::Open,
+        check: form_entry_completed,
+    },
+    Spec {
+        name: "FormConsensusRecorded",
+        version: 1,
+        chain: Chain::Main,
+        writer: Writer::Write,
+        stage: StageRule::OpenUnblinded,
+        check: form_value_recorded,
     },
 ];
 
@@ -638,6 +687,56 @@ fn source_type_set(p: &Value) -> Check {
     Ok(())
 }
 
+/// Registrierung des Protokolls: Tag, Register und Kennung. Die Kennung darf leer sein, etwa bei
+/// einem Protokoll, das nur intern vorliegt.
+fn protocol_registered(p: &Value) -> Check {
+    date(p, "registered_on")?;
+    filled(p, "registry")?;
+    for key in ["registry", "identifier"] {
+        if text(p, key)?.chars().count() > MAX_LABEL {
+            return Err(format!("Feld „{key}“ hat höchstens {MAX_LABEL} Zeichen."));
+        }
+    }
+    optional(p, "note", is_text)
+}
+
+/// Eine Formularversion: Zweck, Name und Felder. Ob ein Feld seinen Typ behält, prüft der Dienst.
+fn form_version_published(p: &Value) -> Check {
+    uuid(p, "form_id")?;
+    integer(p, "version", 1)?;
+    one_of(p, "purpose", &PURPOSES)?;
+    filled(p, "name")?;
+    optional(p, "change_note", is_text)?;
+    let fields = p.get("fields").cloned().ok_or("Feld „fields“ fehlt.")?;
+    let fields: Vec<Field> =
+        serde_json::from_value(fields).map_err(|_| "Die Felder des Formulars sind nicht lesbar.".to_string())?;
+    forms::check_fields(&fields)
+}
+
+fn form_confirmed(p: &Value) -> Check {
+    uuid(p, "form_id")?;
+    integer(p, "version", 1)
+}
+
+/// Wert eines Feldes, von einer Person oder als geklärter Wert. Ob er zum Feld passt, prüfen Dienst
+/// und Einlesen gegen das Formular der Stufe.
+fn form_value_recorded(p: &Value) -> Check {
+    uuid(p, "record_id")?;
+    if !forms::valid_key(text(p, "field")?) {
+        return Err("Feld „field“ ist kein Schlüssel eines Formularfeldes.".into());
+    }
+    integer(p, "group_index", 0)?;
+    integer(p, "form_version", 1)?;
+    forms::check_shape(p.get("value").unwrap_or(&Value::Null))?;
+    optional(p, "note", is_text)
+}
+
+fn form_entry_completed(p: &Value) -> Check {
+    uuid(p, "record_id")?;
+    integer(p, "form_version", 1)?;
+    optional(p, "seconds", |p, key| integer(p, key, 0))
+}
+
 fn stage_instance_opened(p: &Value) -> Check {
     filled(p, "name")?;
     if !p.get("blind").is_some_and(Value::is_boolean) {
@@ -655,6 +754,8 @@ fn stage_instance_opened(p: &Value) -> Check {
         true => Ok(()),
         false => Err(format!("Feld „{key}“ ist kein Wahrheitswert.")),
     })?;
+    optional(p, "form_id", uuid)?;
+    optional(p, "form_version", |p, key| integer(p, key, 1))?;
     optional(p, "verify", |p, key| {
         let v = &p[key];
         one_of(v, "scope", &["all", "sample"]).map_err(|e| format!("Feld „{key}“: {e}"))?;
@@ -900,6 +1001,14 @@ mod tests {
         assert!(kind(json!([]), "review").is_err());
         assert!(kind(json!([a]), &"x".repeat(MAX_LABEL + 1)).is_err());
         assert!(validate("SourceTypeSet", 1, None, &json!({"records": [a]})).is_err());
+        // Registrierung des Protokolls: Datum und Register sind Pflicht, die Kennung darf leer sein.
+        let protocol = json!({"registered_on": "2026-01-10", "registry": "OSF", "identifier": ""});
+        assert_eq!(validate("ProtocolRegistered", 1, None, &protocol), Ok(()));
+        for (key, bad) in [("registered_on", json!("10.01.2026")), ("registry", json!(" ")), ("identifier", json!(7))] {
+            let mut changed = protocol.clone();
+            changed[key] = bad;
+            assert!(validate("ProtocolRegistered", 1, None, &changed).is_err(), "{key}");
+        }
     }
 
     #[test]

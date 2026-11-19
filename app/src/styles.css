@@ -730,6 +730,10 @@ button.small { height: 26px; padding: 0 10px; }
   font: inherit; font-size: 13px; line-height: 1.55; -webkit-user-select: text; user-select: text;
 }
 
+.checklist td { vertical-align: top; }
+.checklist td:first-child { width: 36px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.checklist td:nth-child(3) { white-space: nowrap; }
+
 /* Quellen bündeln */
 .source { padding: 12px 14px; }
 .source + .source { border-top: 0.5px solid var(--line); }
@@ -749,3 +753,45 @@ button.small { height: 26px; padding: 0 10px; }
   .source-side { align-items: stretch; width: 100%; }
   .source-type { width: 100%; }
 }
+
+/* ---------- Formulare ---------- */
+.small-text { font-size: 12px; }
+.form-editor { max-width: 760px; }
+.field-draft { border: 0.5px solid var(--line); border-radius: 10px; padding: 10px 14px 12px; margin: 0 0 12px; background: var(--surface); }
+.field-draft legend { padding: 0 6px; font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.field-draft legend small { font-weight: 400; }
+.field-draft-grid { display: grid; grid-template-columns: 2fr 1fr 1fr auto; gap: 10px 12px; align-items: end; }
+.field-draft-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--ink-2); min-width: 0; }
+.field-draft-grid label.wide { grid-column: 1 / -1; }
+.field-draft-grid label.check { flex-direction: row; align-items: center; gap: 6px; padding-bottom: 6px; color: var(--ink); }
+.field-draft-grid input:not([type="checkbox"]), .field-draft-grid select, .field-draft-grid textarea { width: 100%; }
+.field-draft-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+.inline-actions.center { justify-content: center; margin-top: 12px; }
+
+/* Die Tabelle ist so breit wie das Formular lang; sie scrollt in ihrem Rahmen, nicht die Seite. */
+.form-table-wrap { overflow-x: auto; }
+.form-table th, .form-table td { white-space: nowrap; vertical-align: top; }
+.form-table .form-source { white-space: normal; min-width: 260px; max-width: 360px; }
+.form-table .form-cell { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.form-cell.c-differs { color: var(--c-exc); font-weight: 500; }
+.form-cell.c-consensus { color: var(--c-inc); }
+
+.form-entry .screening-columns { grid-template-columns: minmax(0, 1fr) 400px; }
+.form-panel h3.form-group-title { margin: 18px 0 8px; padding-top: 12px; border-top: 0.5px solid var(--line); font-size: 12px; font-weight: 600; color: var(--ink-2); text-transform: uppercase; letter-spacing: 0.04em; }
+.form-field { margin-top: 12px; }
+.form-field > label { display: block; font-weight: 500; margin-bottom: 3px; }
+.form-field .required { color: var(--c-exc); }
+.form-field textarea, .form-field select { width: 100%; }
+.form-field textarea { resize: vertical; }
+.form-field p { margin: 0 0 4px; }
+.check-list { display: flex; flex-direction: column; gap: 4px; }
+.check-list .check { display: flex; align-items: center; gap: 6px; font-weight: 400; }
+.cell-compare { margin-top: 6px; padding: 6px 8px; border-radius: 8px; font-size: 12px; background: color-mix(in srgb, var(--ink-2) 8%, transparent); }
+.cell-compare.c-differs { background: color-mix(in srgb, var(--c-exc) 12%, transparent); }
+.cell-compare.c-consensus { background: color-mix(in srgb, var(--c-inc) 12%, transparent); }
+.cell-compare .cell-line { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; margin: 0 0 2px; }
+.cell-resolve { margin-top: 6px; display: flex; flex-direction: column; gap: 6px; }
+.form-actions { position: sticky; bottom: -28px; margin: 18px -16px -28px; padding: 12px 16px 16px; background: var(--surface); border-top: 0.5px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
+.form-panel .reading-note { margin: 10px 0 0; }
+.form-source a { color: var(--ink); font-weight: 500; text-decoration: none; }
+.form-source a:hover { text-decoration: underline; }

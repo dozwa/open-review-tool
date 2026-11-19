@@ -4,6 +4,7 @@ import { HashRouter, Link, NavLink, Route, Routes, useLocation, useMatch, useNav
 import { open, save } from "@tauri-apps/plugin-dialog";
 
 import { api, BUNDLE_FILTER, errorText, importSummary, Person, ReviewListItem, safeFileName } from "./api";
+import { FormEntryPage, FormStagePage } from "./FormStage";
 import { NewReviewPage } from "./NewReview";
 import { ReviewPage } from "./ReviewPage";
 import { ScreeningPage } from "./Screening";
@@ -251,6 +252,8 @@ function Shell({ me }: { me: Person }) {
               <Route path="/reviews/:reviewId" element={<ReviewPage />} />
               <Route path="/reviews/:reviewId/stages/:stageId" element={<StagePage />} />
               <Route path="/reviews/:reviewId/stages/:stageId/screen" element={<ScreeningPage />} />
+              <Route path="/reviews/:reviewId/forms/:stageId" element={<FormStagePage />} />
+              <Route path="/reviews/:reviewId/forms/:stageId/:recordId" element={<FormEntryPage />} />
               <Route path="*" element={<p>Seite nicht gefunden.</p>} />
             </Routes>
           </main>

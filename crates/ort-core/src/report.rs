@@ -16,21 +16,27 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::agreement::{self, Metric};
+use crate::criteria::Criteria;
 use crate::error::{invalid, Result};
+use crate::forms::{Field, StageSummary};
 use crate::projection::{MaybeMode, StageState};
+use crate::protocol::{self, Checklist, Evidence, Protocol};
 use crate::service::{csv_field, require, stage_criteria, Review, SourceCount, BOOTSTRAP_N, BOOTSTRAP_SEED, ROLES};
 use crate::sources::{self, TypeCount, Unit as SourceUnit};
 use crate::store::RecordRow;
 use crate::workflow::{Station, Workflow};
 
 /// Dateien, die der Bericht ausgibt: Schlüssel und vorgeschlagener Dateiname.
-pub const REPORT_FILES: [(&str, &str); 6] = [
+pub const REPORT_FILES: [(&str, &str); 9] = [
     ("diagram", "flussdiagramm.svg"),
     ("excluded", "ausgeschlossene-volltexte.csv"),
     ("included", "eingeschlossen.ris"),
     ("sources", "eingeschlossene-quellen.csv"),
     ("search", "suchanhang.md"),
     ("methods", "methoden-auswahl.md"),
+    ("table", "tabelle-quellen.csv"),
+    ("deviations", "protokoll-abweichungen.md"),
+    ("checklist", "checkliste.md"),
 ];
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -191,6 +197,20 @@ pub struct Report {
     pub search_appendix: String,
     /// Zeilen des Exports der ausgeschlossenen und nicht beschafften Volltexte.
     pub n_excluded_rows: i64,
+    /// Registrierung des Protokolls und was danach geändert wurde.
+    pub protocol: Protocol,
+    /// Checkliste des Berichts mit Stand je Punkt; fehlt, wenn die Vorlage keine nennt.
+    pub checklist: Option<Checklist>,
+    pub table: TableInfo,
+}
+
+/// Umfang der Tabelle der eingeschlossenen Quellen.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct TableInfo {
+    pub n_sources: i64,
+    /// Quellen, die extrahiert und abgeglichen sind.
+    pub n_charted: i64,
+    pub n_fields: i64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -242,6 +262,20 @@ pub(crate) struct Selection {
     /// Name der letzten Ebene.
     pub level: Option<String>,
     pub complete: bool,
+}
+
+/// Formular-Station mit ihren Stufen in der Reihenfolge der Runden.
+struct ChartStation<'a> {
+    station: &'a Station,
+    stages: Vec<(&'a StageState, StageSummary)>,
+}
+
+/// Zeile der Tabelle der eingeschlossenen Quellen.
+struct TableRow<'a> {
+    unit: &'a SourceUnit,
+    /// Stand aus dem Formular, sonst `blind` oder `not_assigned`.
+    status: &'static str,
+    values: Vec<String>,
 }
 
 /// Herkunft außerhalb von Datenbanken und Registern.
@@ -513,17 +547,104 @@ impl Review {
         })
     }
 
-    /// Flussdiagramm, Methodentext und Suchanhang auf dem Stand des Logs.
+    /// Flussdiagramm, Methodentext, Suchanhang, Protokoll und Checkliste auf dem Stand des Logs.
     pub fn report(&self) -> Result<Report> {
         let data = self.report_data()?;
+        let charting = self.charting(&data);
+        let protocol = self.protocol()?;
+        let (methods, n_limitations) = self.methods_text(&data, &charting, &protocol)?;
+        let (fields, rows) = table_rows(&data, &charting);
+        let table = TableInfo {
+            n_sources: rows.len() as i64,
+            n_charted: rows.iter().filter(|r| r.status == "done").count() as i64,
+            n_fields: fields.len() as i64,
+        };
+        let checklist = self.checklist(&data, &charting, &protocol, &table, n_limitations)?;
         Ok(Report {
             problems: data.flow.check(),
             svg: diagram_svg(&data.flow),
-            methods: self.methods_text(&data)?,
+            methods,
             search_appendix: self.search_appendix()?,
             n_excluded_rows: data.excluded.len() as i64,
-            flow: data.flow,
+            flow: data.flow.clone(),
+            protocol,
+            checklist,
+            table,
         })
+    }
+
+    /// Formular-Stationen mit dem Stand ihrer Stufen. Eine Stufe, deren Formular hier fehlt, bleibt weg.
+    fn charting<'a>(&self, data: &'a Data) -> Vec<ChartStation<'a>> {
+        let mut out = Vec::new();
+        for station in data.workflow.template.stations.iter().filter(|s| s.kind == "form") {
+            let mut stages: Vec<(&StageState, StageSummary)> = stages_of(&data.workflow, &data.stages, station)
+                .into_iter()
+                .filter_map(|stage| self.form_summary(stage).ok().map(|summary| (stage, summary)))
+                .collect();
+            stages.sort_by_key(|(stage, _)| stage.config.round);
+            if !stages.is_empty() {
+                out.push(ChartStation { station, stages });
+            }
+        }
+        out
+    }
+
+    fn checklist(
+        &self,
+        data: &Data,
+        charting: &[ChartStation],
+        protocol: &Protocol,
+        table: &TableInfo,
+        n_limitations: i64,
+    ) -> Result<Option<Checklist>> {
+        let forms = self.form_defs()?;
+        let fields = || forms.list.iter().flat_map(|f| f.current().fields.iter());
+        let have = Evidence {
+            registered: protocol.registration.is_some(),
+            criteria_version: Criteria::from_payload(self.state()?.criteria.as_ref()).version,
+            n_searches: self.searches()?.len() as i64,
+            selection_started: data.stages.iter().any(|s| s.config.form_id.is_none()),
+            has_levels: !data.flow.levels.is_empty(),
+            form_published: !forms.list.is_empty(),
+            charting_started: !charting.is_empty(),
+            analysis_planned: fields().any(|f| !f.analysis.trim().is_empty()),
+            n_charted: table.n_charted,
+            has_choice_fields: fields().any(|f| matches!(f.kind.as_str(), "choice" | "multi_choice")),
+            n_limitations,
+        };
+        Ok(protocol::checklist(&data.workflow, &have))
+    }
+
+    /// Tabelle der eingeschlossenen Quellen mit den gültigen Werten aus dem Formular.
+    fn table_csv(&self, data: &Data, charting: &[ChartStation]) -> Result<String> {
+        let known = &data.workflow.template.source_types;
+        let studies = self.studies()?;
+        let (fields, rows) = table_rows(data, charting);
+        let line = |cells: Vec<String>| cells.iter().map(|c| csv_field(c)).collect::<Vec<_>>().join(",") + "\n";
+        let mut head: Vec<String> =
+            ["nr", "bundle", "source_type", "authors", "year", "title", "doi", "status"].map(String::from).into();
+        head.extend(fields.iter().map(|f| f.label.clone()));
+        let mut out = line(head);
+        for (number, row) in rows.iter().enumerate() {
+            let unit = row.unit;
+            let Some(r) = self.store.record(&unit.primary)? else { continue };
+            let label = unit.study.and_then(|s| studies.list.get(&s)).map(|s| s.label.clone()).unwrap_or_default();
+            let kind = known.iter().find(|k| k.key == unit.source_type).map_or(&unit.source_type, |k| &k.label);
+            let mut cells = vec![
+                (number + 1).to_string(),
+                label,
+                kind.clone(),
+                r.authors,
+                r.year.map(|y| y.to_string()).unwrap_or_default(),
+                r.title,
+                r.doi,
+                row.status.to_string(),
+            ];
+            cells.extend(row.values.iter().cloned());
+            cells.resize(8 + fields.len(), String::new());
+            out.push_str(&line(cells));
+        }
+        Ok(out)
     }
 
     /// Eine Datei des Berichts: `diagram`, `excluded`, `included`, `sources`, `search` oder `methods`.
@@ -534,6 +655,9 @@ impl Review {
             .map(|(_, name)| name.to_string())
             .ok_or_else(|| invalid("Diese Datei kennt der Bericht nicht."))?;
         let data = self.report_data()?;
+        let methods = |review: &Review| -> Result<(String, i64)> {
+            review.methods_text(&data, &review.charting(&data), &review.protocol()?)
+        };
         let content = match kind {
             "diagram" => diagram_svg(&data.flow),
             "excluded" => self.excluded_csv(&data)?,
@@ -549,7 +673,22 @@ impl Review {
             }
             "sources" => self.sources_csv(&data)?,
             "search" => self.search_appendix()?,
-            _ => self.methods_text(&data)?,
+            "table" => self.table_csv(&data, &self.charting(&data))?,
+            "deviations" => deviations_markdown(&self.protocol()?),
+            "checklist" => {
+                let charting = self.charting(&data);
+                let protocol = self.protocol()?;
+                let (fields, rows) = table_rows(&data, &charting);
+                let table = TableInfo {
+                    n_sources: rows.len() as i64,
+                    n_charted: rows.iter().filter(|r| r.status == "done").count() as i64,
+                    n_fields: fields.len() as i64,
+                };
+                let list = self.checklist(&data, &charting, &protocol, &table, methods(self)?.1)?;
+                let list = list.ok_or_else(|| invalid("Die Vorlage dieses Reviews nennt keine Checkliste."))?;
+                protocol::checklist_markdown(&list)
+            }
+            _ => methods(self)?.0,
         };
         Ok(ReportFile { filename, content })
     }
@@ -706,7 +845,7 @@ impl Review {
 
     /// Methodentext zur Auswahl als Markdown: Regel, Personenzahl, Pilot mit Runden, Übereinstimmung,
     /// Klärung und die Limitation bei abgekürzter Auswahl. Namen stehen nicht darin.
-    fn methods_text(&self, data: &Data) -> Result<String> {
+    fn methods_text(&self, data: &Data, charting: &[ChartStation], protocol: &Protocol) -> Result<(String, i64)> {
         let (flow, workflow) = (&data.flow, &data.workflow);
         let records = &flow.records_term;
         let mut out = format!("# Methoden: Auswahl der {}\n\n", flow.sources_term);
@@ -717,6 +856,14 @@ impl Review {
             ));
         } else {
             out.push_str("Das Review lief ohne feste Vorlage.");
+        }
+        if let Some(r) = &protocol.registration {
+            let identifier = if r.identifier.is_empty() { String::new() } else { format!(" ({})", r.identifier) };
+            out.push_str(&format!(
+                " Das Protokoll wurde am {} registriert: {}{identifier}.",
+                german_date(&r.registered_on),
+                r.registry
+            ));
         }
         if !flow.complete {
             out.push_str(" Stand: Die Auswahl ist noch nicht abgeschlossen; die Zahlen sind vorläufig.");
@@ -748,6 +895,18 @@ impl Review {
              Suchstrings, Datum und Grenzen je Quelle stehen im Suchanhang.\n",
             flow.exact_duplicates, flow.resolved_duplicates, flow.unique
         ));
+        for search in self.searches()? {
+            let (Some(first), Some(last)) = (search.versions.first(), search.versions.last()) else { continue };
+            if search.versions.len() > 1 {
+                out.push_str(&format!(
+                    "\nDie Suche in {} wurde nach dem {} geändert oder wiederholt, zuletzt am {} (Version {}).\n",
+                    last.version.source,
+                    german_date(&first.version.searched_on),
+                    german_date(&last.version.searched_on),
+                    last.version.version
+                ));
+            }
+        }
 
         let mut limitations: Vec<String> = Vec::new();
         for station in workflow.template.stations.iter().filter(|s| s.kind == "screening") {
@@ -769,6 +928,16 @@ impl Review {
             }
         }
 
+        for chart in charting {
+            out.push_str(&format!("\n## {}\n\n", chart.station.label));
+            out.push_str(&charting_text(data, chart, &mut limitations));
+        }
+
+        let changes = protocol.deviations.iter().filter(|d| d.kind != "gate").map(|d| {
+            let note = if d.note.is_empty() { String::new() } else { format!(": {}", one_line(&d.note)) };
+            format!("- {}: {}{note}\n", german_date(&d.at[..d.at.len().min(10)]), d.title)
+        });
+        limitations.extend(changes);
         let overrides: Vec<String> = workflow
             .overrides
             .iter()
@@ -812,7 +981,7 @@ impl Review {
                 }
             }
         }
-        Ok(out)
+        Ok((out, (limitations.len() + overrides.len()) as i64))
     }
 
     fn station_text(
@@ -966,6 +1135,169 @@ impl Review {
         }
         out
     }
+}
+
+/// Felder und Zeilen der Tabelle der eingeschlossenen Quellen. Die Werte kommen aus der letzten
+/// Formular-Station, die alle Quellen bearbeitet; für eine Quelle gilt ihre späteste Runde.
+fn table_rows<'a>(data: &'a Data, charting: &[ChartStation]) -> (Vec<Field>, Vec<TableRow<'a>>) {
+    let main = charting.iter().rev().find(|c| !is_sample(c.station));
+    let fields = main.and_then(|c| c.stages.last()).map(|(_, s)| s.fields.clone()).unwrap_or_default();
+    let mut found: BTreeMap<Uuid, (&'static str, Vec<String>)> = BTreeMap::new();
+    for (_, summary) in main.into_iter().flat_map(|c| &c.stages) {
+        for row in &summary.rows {
+            found.insert(row.record_id, (row.status, row.values.clone()));
+        }
+    }
+    let rows = data
+        .units
+        .iter()
+        .map(|unit| match unit.records.iter().find_map(|r| found.get(r)) {
+            Some((status, values)) => TableRow { unit, status, values: values.clone() },
+            None => TableRow { unit, status: "not_assigned", values: Vec::new() },
+        })
+        .collect();
+    (fields, rows)
+}
+
+/// Abschnitt des Methodentexts zu einer Formular-Station.
+fn charting_text(data: &Data, chart: &ChartStation, limitations: &mut Vec<String>) -> String {
+    let (source, sources) = (&data.flow.source_term, &data.flow.sources_term);
+    let label = &chart.station.label;
+    let Some((last, summary)) = chart.stages.last() else { return String::new() };
+    let config = &last.config;
+    let mut out = String::new();
+    let rounds = count(chart.stages.len() as i64, "Runde", "Runden");
+    if is_sample(chart.station) {
+        out.push_str(&format!(
+            "Das Formular „{}“ wurde in {rounds} an einer Zufallsstichprobe je Quellenart erprobt und im Team abgestimmt. ",
+            summary.form_name
+        ));
+        out.push_str(match summary.confirmed {
+            true => "Danach bestätigte die Leitung das Formular. ",
+            false => "Das Formular ist noch nicht bestätigt. ",
+        });
+    } else {
+        out.push_str(&format!(
+            "Extrahiert wurde mit dem Formular „{}“ (Version {}). ",
+            summary.form_name, summary.form_version
+        ));
+    }
+    match (config.decision_rule.as_str(), config.min_reviewers.max(1), config.blind) {
+        ("single_verified", _, _) => {
+            out.push_str(&format!(
+                "Eine Person extrahierte jede {source}; eine zweite prüfte die Angaben und berichtigte sie. "
+            ));
+            limitations.push(format!(
+                "- In „{label}“ extrahierte nur eine Person jede {source}; eine zweite prüfte die Angaben. \
+                 Das weicht von zwei unabhängigen Extraktionen ab.\n"
+            ));
+        }
+        (_, 1, _) => {
+            out.push_str(&format!("Jede {source} wurde von einer Person extrahiert. "));
+            limitations.push(format!(
+                "- In „{label}“ extrahierte nur eine Person jede {source}, ohne Prüfung durch eine zweite.\n"
+            ));
+        }
+        (_, n, true) => out.push_str(&format!(
+            "Jede {source} wurde von mindestens {n} Personen unabhängig extrahiert; die Angaben der anderen waren bis \
+             zum Entblinden nicht sichtbar. Abweichungen wurden je Feld geklärt. "
+        )),
+        (_, n, false) => {
+            out.push_str(&format!(
+                "Jede {source} wurde von mindestens {n} Personen extrahiert; die Angaben waren gegenseitig sichtbar. \
+                 Abweichungen wurden je Feld geklärt. "
+            ));
+            limitations.push(format!("- In „{label}“ waren die Angaben nicht verblindet.\n"));
+        }
+    }
+    out.push('\n');
+    if !is_sample(chart.station) {
+        out.push_str(&format!("\nErhoben wurden {}:\n\n", count(summary.fields.len() as i64, "Angabe", "Angaben")));
+        for field in &summary.fields {
+            let mut line = format!("- {}", field.label);
+            if !field.description.trim().is_empty() {
+                line.push_str(&format!(": {}", one_line(&field.description)));
+            }
+            if !field.options.is_empty() {
+                line.push_str(&format!(" ({})", field.options.join(", ")));
+            }
+            if !field.analysis.trim().is_empty() {
+                line.push_str(&format!(" Auswertung: {}.", one_line(field.analysis.trim_end_matches('.'))));
+            }
+            out.push_str(&line);
+            out.push('\n');
+        }
+    }
+    for (stage, s) in &chart.stages {
+        let head = match chart.stages.len() {
+            1 => format!("\n{} {sources}", s.n_sources),
+            _ => format!("\nRunde {}: {} {sources}", stage.config.round, s.n_sources),
+        };
+        out.push_str(&head);
+        let (Some(counts), Some(people)) = (&s.counts, s.n_people) else {
+            out.push_str("; die Stufe ist noch verblindet, Zahlen folgen nach dem Entblinden.\n");
+            continue;
+        };
+        out.push_str(&format!(", {} beteiligt. Abgeglichen: {}", count(people, "Person", "Personen"), counts.done));
+        for (n, what) in [
+            (counts.conflict, "mit offener Abweichung"),
+            (counts.incomplete, "mit leerem Pflichtfeld"),
+            (counts.extracted, "wartet auf Prüfung"),
+            (counts.open, "noch offen"),
+        ] {
+            if n > 0 {
+                out.push_str(&format!(", {what}: {n}"));
+            }
+        }
+        out.push_str(". ");
+        if s.n_resolved > 0 {
+            out.push_str(&format!(
+                "{} in der Klärung festgelegt. ",
+                count(s.n_resolved, "Feld wurde", "Felder wurden")
+            ));
+        }
+        if !stage.closed {
+            out.push_str("Die Stufe ist noch offen. ");
+        }
+        out.push('\n');
+    }
+    out
+}
+
+/// Registrierung und Abweichungen als Markdown.
+fn deviations_markdown(protocol: &Protocol) -> String {
+    let mut out = String::from("# Protokoll und Abweichungen\n\n");
+    match &protocol.registration {
+        Some(r) => {
+            let identifier = if r.identifier.is_empty() { String::new() } else { format!(" ({})", r.identifier) };
+            out.push_str(&format!(
+                "Protokoll registriert am {}: {}{identifier}.",
+                german_date(&r.registered_on),
+                r.registry
+            ));
+            if !r.note.is_empty() {
+                out.push_str(&format!(" {}", one_line(&r.note)));
+            }
+            out.push_str(&format!(
+                "\n\nIm Review festgehalten am {}. Neue Versionen von Kriterien, Suchen und Ablauf seit diesem Tag \
+                 stehen unten.\n",
+                german_date(&r.recorded_at[..r.recorded_at.len().min(10)])
+            ));
+        }
+        None => out.push_str(
+            "Es ist kein Protokoll registriert. Ohne diesen Bezugspunkt stehen hier nur Formularänderungen nach der \
+             Bestätigung und übersteuerte Gates.\n",
+        ),
+    }
+    out.push_str("\n## Abweichungen\n\n");
+    if protocol.deviations.is_empty() {
+        out.push_str("Keine.\n");
+    }
+    for d in &protocol.deviations {
+        let note = if d.note.is_empty() { "ohne Begründung".to_string() } else { one_line(&d.note) };
+        out.push_str(&format!("- {}: {}. Begründung: {note}\n", german_date(&d.at[..d.at.len().min(10)]), d.title));
+    }
+    out
 }
 
 /// Übereinstimmung vor der Klärung: Prozent und Krippendorffs Alpha, beide mit Intervall.

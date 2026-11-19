@@ -8,7 +8,8 @@ Zusammenarbeit ohne Server über Austauschdateien.
 > Status (19.11.2026): Mac-App mit Rust und Tauri 2. Der vollständige Ablauf eines Scoping Reviews wird nach
 > `docs/umsetzungsplan.md` in Meilensteinen gebaut; fertig sind 0 (Fundament), 1 (Vorlage und Ablauf),
 > 2 (Kriterien und Screening-Ansicht), 3 (Suche, Import, Dubletten), 4 (Volltext, ohne das Markieren),
-> 5 (Bericht, Teil 1) und 6 (Zitationssuche, Bündeln, Quellenart).
+> 5 (Bericht, Teil 1), 6 (Zitationssuche, Bündeln, Quellenart), 7 (Formulare und Charting) und 8 (Bericht,
+> Teil 2 und Update, ohne das Rückschreiben nach Zotero).
 > Enthalten: Identität mit Schlüssel im Schlüsselbund, Reviews mit Rollen, Review-Typ als Vorlage mit Stationen,
 > Gates und Runden, Kriterien mit Kürzeln und Erläuterungen, Suchen mit Versionen und Peer-Review-Vermerk, Import
 > von RIS, BibTeX und PubMed (nbib) mit Suchversion und Herkunft, exakte und unscharfe Dubletten, Stufen mit drei
@@ -16,9 +17,11 @@ Zusammenarbeit ohne Server über Austauschdateien.
 > mit Prüfsumme und Vorschau in der App, Pflichtgrund im Volltext, Konflikte und Konsens (auch als
 > Dritt-Entscheid), Übereinstimmung, CSV-Export, Pakete und Rückmeldungen, Bericht mit Flussdiagramm (SVG),
 > ausgeschlossenen Volltexten mit Grund, Eingeschlossenen als RIS, Suchanhang und Methodentext zur Auswahl,
-> Zitationssuche als weitere Runde mit eigenem Zweig im Diagramm, Bündeln von Einträgen zu Quellen mit Quellenart.
-> Noch nicht enthalten: Markieren im Volltext, Rückschreiben nach Zotero, Charting, Checkliste
-> PRISMA-ScR, signierte und notarisierte App.
+> Zitationssuche als weitere Runde mit eigenem Zweig im Diagramm, Bündeln von Einträgen zu Quellen mit Quellenart,
+> Formulare mit Versionen, verblindetes Charting doppelt oder einfach mit Prüfung, Abgleich je Feld, Tabelle und
+> Häufigkeiten als CSV, Registrierung des Protokolls mit Liste der Abweichungen, Checkliste PRISMA-ScR mit Stand
+> je Punkt, Methodentext zum Charting, Tabelle der eingeschlossenen Quellen, Update als weitere Runden.
+> Noch nicht enthalten: Markieren im Volltext, Rückschreiben nach Zotero, signierte und notarisierte App.
 
 ## So arbeitet ein Team
 
@@ -72,7 +75,7 @@ Tauri 2 mit der WebView von macOS, React 18.
 
 ## Wie es geprüft ist
 
-- **Kern:** 122 Tests, dazu 2 für das Lesen der Zotero-Antworten in der App. Darunter die Referenzwerte der früheren SQL-Tests (Cohen's Kappa gegen scikit-learn,
+- **Kern:** 130 Tests, dazu 2 für das Lesen der Zotero-Antworten in der App. Darunter die Referenzwerte der früheren SQL-Tests (Cohen's Kappa gegen scikit-learn,
   Fleiss' Kappa am Wikipedia-Beispiel, Krippendorffs Alpha am publizierten Beispiel mit 0,743, PABAK, Prozent,
   sechs `final_decision`-Szenarien, Maybe-Regel). Die Werte erzeugt `crates/ort-core/tests/fixtures/make_agreement_fixtures.py`.
 - **Austausch:** veränderte Datei, nachträglich neu gehashte Datei ohne Signatur, Außenstehende, Lücken in einer
@@ -177,8 +180,24 @@ Nur für Entwicklung und Tests.
 - **Rollenprüfung beim Einlesen:** nach dem Stand nach dem Zusammenführen, nicht zum Zeitpunkt jedes Ereignisses.
 - **Gates:** Das Ergebnis wird beim Schließen einer Stufe auf dem Rechner der Leitung berechnet und als
   `GateEvaluated` festgehalten. Schließen ist auch mit nicht erfülltem Gate möglich; gesperrt wird die nächste
-  Station. Stationen, die die App noch nicht bearbeiten kann (Charting), stehen in der Leiste als „folgt“ und
-  sperren nichts.
+  Station.
+- **Protokoll und Abweichungen:** Die Liste ist eine Projektion. Als Abweichung zählt jede neue Version von
+  Kriterien, Suchen und Ablauf seit dem ersten Eintrag der Registrierung im Review (nicht seit dem Datum der
+  Registrierung), dazu jede Formularänderung nach der Bestätigung und jedes übersteuerte Gate. Ohne Registrierung
+  fehlen die ersten drei. Eine wiederholte Suche (Update) steht ebenfalls in der Liste, weil sie eine neue
+  Suchversion ist. Geänderte Regeln einer einzelnen Stufe stehen nicht darin.
+- **Checkliste:** Die Punkte der PRISMA-ScR stehen in eigenen Worten in der App. Der Stand je Punkt sagt nur, ob
+  das Review Material dafür hergibt; ob der Bericht den Punkt erfüllt, prüft das Team. Ein eigener Haken je Punkt
+  wird nicht gespeichert. Die für 2026 angekündigte neue Fassung ist nicht eingearbeitet.
+- **Update:** Es gibt keinen eigenen Knopf. Ein Update ist eine neue Suchversion, ein Import dazu und je Station
+  eine weitere Runde, die nur das Neue bekommt. Die Charting-Station der JBI-Vorlage gilt erst wieder als fertig,
+  wenn jede eingeschlossene Quelle in einer Runde liegt. Das Flussdiagramm zählt Update und erste Suche zusammen.
+- **Charting:** Jeder Wert ist ein eigenes Ereignis, geschrieben beim Verlassen des Feldes. Eine Formular-Stufe
+  arbeitet immer mit der neuesten Formularversion; ein Feld behält seinen Typ über alle Versionen. Beim Einlesen
+  wird geprüft, ob ein Wert zum Feld passt, nicht ob beim Abschluss alle Pflichtfelder gefüllt waren; fehlende
+  Pflichtfelder hält das Gate der Station auf. Wiederholbare Gruppen (Arm, Zeitpunkt) gibt es noch nicht. Tabelle
+  und Häufigkeiten gelten je Stufe, nicht über alle Runden einer Station. Reviews, die vor diesem Stand mit der
+  JBI-Vorlage angelegt wurden, haben für die Charting-Stationen kein Gate im Log; das Charting geht dort trotzdem.
 - **Eine Stimme mit Prüfung (`single_verified`):** Die Stufe ist nie verblindet, weil die zweite Person die
   Ausschlüsse sehen muss. Wer was schon bewertet hat, weiß eine Person erst nach dem nächsten Paket.
 - **Gründe:** Ausschlussgründe sind die Kürzel der Ausschlusskriterien. Beim Einlesen werden sie nur in Stufen

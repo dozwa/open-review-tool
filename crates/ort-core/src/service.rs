@@ -20,6 +20,7 @@ use crate::criteria::{check_reasons, Criteria};
 use crate::duplicates::{self, Resolutions};
 use crate::error::{conflict, forbidden, invalid, not_found, Result};
 use crate::event::{now_timestamp, parse_public_key, sha256_hex, Event, Identity, PublicIdentity};
+use crate::forms::PILOT_PER_TYPE;
 use crate::fulltext::FullText;
 use crate::import;
 use crate::projection::{FinalDecision, MaybeMode, ReviewState, StageState, Verify};
@@ -79,6 +80,8 @@ pub struct StageView {
     pub conflict_rule: String,
     pub verify: Option<Verify>,
     pub reason_required: bool,
+    pub form_id: Option<Uuid>,
+    pub form_version: Option<i64>,
 }
 
 /// Ablauf des Reviews für die Oberfläche: Vorlage, Begriffe und Stationen mit Zustand.
@@ -437,6 +440,8 @@ pub struct OpenStage {
     pub verify: Option<Verify>,
     /// Ausschluss nur mit Hauptgrund. Ohne Angabe gilt die Station der Vorlage.
     pub reason_required: Option<bool>,
+    /// Formular einer Formular-Stufe. Ohne Angabe das einzige mit dem Zweck der Station.
+    pub form_id: Option<Uuid>,
 }
 
 impl Default for OpenStage {
@@ -456,6 +461,7 @@ impl Default for OpenStage {
             conflict_rule: None,
             verify: None,
             reason_required: None,
+            form_id: None,
         }
     }
 }
@@ -653,7 +659,16 @@ impl Review {
             }
             false => (0, 0),
         };
+        let mut sources_without_round = BTreeMap::new();
+        for station in &workflow.template.stations {
+            if station.kind == "form" && station.gate.iter().any(|g| g.check == "all_sources_assigned") {
+                sources_without_round
+                    .insert(station.key.clone(), self.sources_without_round(workflow, stages, station)?);
+            }
+        }
         Ok(Facts {
+            sources_without_round,
+            forms_confirmed: self.form_defs()?.confirmed_purposes(),
             n_citation_searches,
             unassigned_records,
             n_sources,
@@ -730,6 +745,7 @@ impl Review {
             conflict_rule: Some(d.rules.conflict_rule.value),
             verify: None,
             reason_required: Some(d.reason_required),
+            form_id: None,
         })
     }
 
@@ -788,6 +804,9 @@ impl Review {
 
     fn evaluate_gate(&self, workflow: &Workflow, stage: &StageState) -> Result<Option<GateResult>> {
         let Some(station) = workflow.station_of(stage).filter(|s| !s.gate.is_empty()) else { return Ok(None) };
+        if stage.config.form_id.is_some() {
+            return Ok(Some(self.form_gate(station, stage)?));
+        }
         let assigned: Vec<String> =
             self.store.assignments(Some(&stage.config.id))?.into_iter().map(|a| a.record_id.to_string()).collect();
         Ok(Some(workflow::evaluate_gate(station, stage, &assigned)))
@@ -1405,9 +1424,15 @@ impl Review {
             (None, true) => return Err(invalid("Zu welcher Station gehört die Stufe? Die Angabe fehlt.")),
         };
         let station = workflow.template.station(&key).ok_or_else(|| not_found("Diese Station gibt es nicht."))?;
-        if station.kind != "screening" {
-            return Err(invalid(format!("Die Station „{}“ arbeitet nicht mit Screening-Stufen.", station.label)));
+        let is_form = station.kind == "form";
+        if !is_form && station.kind != "screening" {
+            return Err(invalid(format!("Die Station „{}“ arbeitet nicht mit Stufen.", station.label)));
         }
+        // Formular-Stufen arbeiten mit der geltenden Version; die Nummer beim Öffnen steht im Log.
+        let form = match is_form {
+            true => Some(self.form_for(station, params.form_id.as_ref())?),
+            false => None,
+        };
         let view = views.iter().find(|v| v.key == key).ok_or_else(|| not_found("Diese Station gibt es nicht."))?;
         if let Some(blocker) = view.blocked_by.first() {
             return Err(conflict(format!(
@@ -1424,6 +1449,9 @@ impl Review {
         let conflict_rule = params.conflict_rule.clone().unwrap_or_else(|| rules.conflict_rule.value.clone());
         if !workflow::DECISION_RULES.contains(&decision_rule.as_str()) {
             return Err(invalid("Unbekannte Auswahlregel."));
+        }
+        if is_form && decision_rule == "liberal" {
+            return Err(invalid("Extrahiert wird doppelt oder einfach mit Prüfung."));
         }
         if !workflow::CONFLICT_RULES.contains(&conflict_rule.as_str()) {
             return Err(invalid("Unbekannte Klärungsregel."));
@@ -1480,6 +1508,11 @@ impl Review {
         let sample_scope = params.scope == "sample";
         let mut seed = params.seed;
         let ids: Vec<String> = match params.scope.as_str() {
+            "all" | "sample" if is_form => {
+                let per_type = sample_scope.then(|| params.sample_size.unwrap_or(PILOT_PER_TYPE));
+                self.form_stage_ids(per_type, &mut seed)?
+            }
+            _ if is_form => return Err(invalid("Eine Formular-Stufe bekommt alle Quellen oder eine Stichprobe.")),
             "from_stage" => {
                 let source_id = source_stage.ok_or_else(|| invalid("Quellstufe fehlt."))?;
                 let source = self.stage_state(&source_id)?;
@@ -1553,6 +1586,7 @@ impl Review {
             .collect();
         if ids.is_empty() {
             return Err(invalid(match (station.requires_fulltext, earlier.is_empty()) {
+                _ if is_form && earlier.is_empty() => "Es gibt noch keine eingeschlossenen Quellen.",
                 (true, true) => "Für diese Stufe ist noch kein Volltext beschafft.",
                 (true, false) => "Seit der letzten Runde ist kein weiterer Volltext beschafft worden.",
                 (false, true) => "Für diese Stufe gibt es keine Records.",
@@ -1568,20 +1602,21 @@ impl Review {
                 position: position as i64,
             })?;
         }
-        self.append(
-            "StageInstanceOpened",
-            Some(stage_id),
-            json!({
-                "name": name, "kind": params.kind, "blind": params.blind, "min_reviewers": params.min_reviewers,
-                "maybe_as": params.maybe_as, "criteria_version": criteria.version.to_string(),
-                "scope": params.scope, "sample_size": if sample_scope { Some(ids.len()) } else { None },
-                "seed": if sample_scope { seed } else { None },
-                "source_stage": if params.scope == "from_stage" { source_stage.map(|s| s.to_string()) } else { None },
-                "n_records": ids.len(), "record_ids_sha256": self.store.assignment_digest(&stage_id)?,
-                "station": key, "round": round, "decision_rule": decision_rule, "conflict_rule": conflict_rule,
-                "verify": verify, "reason_required": reason_required,
-            }),
-        )?;
+        let mut payload = json!({
+            "name": name, "kind": params.kind, "blind": params.blind, "min_reviewers": params.min_reviewers,
+            "maybe_as": params.maybe_as, "criteria_version": criteria.version.to_string(),
+            "scope": params.scope, "sample_size": if sample_scope { Some(ids.len()) } else { None },
+            "seed": if sample_scope { seed } else { None },
+            "source_stage": if params.scope == "from_stage" { source_stage.map(|s| s.to_string()) } else { None },
+            "n_records": ids.len(), "record_ids_sha256": self.store.assignment_digest(&stage_id)?,
+            "station": key, "round": round, "decision_rule": decision_rule, "conflict_rule": conflict_rule,
+            "verify": verify, "reason_required": reason_required,
+        });
+        if let Some(form) = &form {
+            payload["form_id"] = json!(form.id);
+            payload["form_version"] = json!(form.current().version);
+        }
+        self.append("StageInstanceOpened", Some(stage_id), payload)?;
         tx.commit()?;
         self.get_stage(&stage_id)
     }
@@ -1664,6 +1699,9 @@ impl Review {
         let state = self.state()?;
         require(&state, &self.me.actor_id, &WRITE_ROLES)?;
         let stage = self.stage_state(stage_id)?;
+        if stage.config.form_id.is_some() {
+            return Err(invalid("Diese Stufe arbeitet mit einem Formular, nicht mit Stimmen."));
+        }
         if stage.closed {
             return Err(conflict("Die Stufe ist geschlossen."));
         }
@@ -1700,6 +1738,9 @@ impl Review {
         let state = self.state()?;
         require(&state, &self.me.actor_id, &WRITE_ROLES)?;
         let stage = self.stage_state(stage_id)?;
+        if stage.config.form_id.is_some() {
+            return Err(invalid("Diese Stufe arbeitet mit einem Formular, nicht mit Stimmen."));
+        }
         if stage.closed {
             return Err(conflict("Die Stufe ist geschlossen."));
         }
@@ -1722,6 +1763,9 @@ impl Review {
         let state = self.state()?;
         require(&state, &self.me.actor_id, &WRITE_ROLES)?;
         let stage = self.stage_state(stage_id)?;
+        if stage.config.form_id.is_some() {
+            return Err(invalid("Diese Stufe arbeitet mit einem Formular, nicht mit Stimmen."));
+        }
         if stage.closed {
             return Err(conflict("Die Stufe ist geschlossen."));
         }
@@ -2104,7 +2148,7 @@ pub(crate) fn stage_criteria(state: &ReviewState, stage: &StageState) -> Criteri
     Criteria::from_payload(payload)
 }
 
-fn stage_view(s: &StageState) -> StageView {
+pub(crate) fn stage_view(s: &StageState) -> StageView {
     let c = &s.config;
     StageView {
         id: c.id,
@@ -2130,5 +2174,7 @@ fn stage_view(s: &StageState) -> StageView {
         conflict_rule: c.conflict_rule.clone(),
         verify: c.verify.clone(),
         reason_required: c.reason_required,
+        form_id: c.form_id,
+        form_version: c.form_version,
     }
 }

@@ -111,13 +111,16 @@
       "key": "charting_pilot",
       "kind": "form",
       "label": "Charting-Pilot",
-      "description": "Je Quellenart zwei bis drei Quellen unabhängig extrahieren und das Formular abstimmen."
+      "description": "Je Quellenart zwei Quellen unabhängig extrahieren, das Formular abstimmen und bestätigen.",
+      "input": { "scope": "sample", "sample_size": 2 },
+      "gate": [{ "check": "form_confirmed" }]
     },
     {
       "key": "charting",
       "kind": "form",
       "label": "Charting",
-      "description": "Alle Quellen mit dem abgestimmten Formular extrahieren und abgleichen."
+      "description": "Alle Quellen mit dem abgestimmten Formular extrahieren und abgleichen. Später dazugekommene Quellen laufen als weitere Runde.",
+      "gate": [{ "check": "all_sources_assigned" }, { "check": "all_extracted" }, { "check": "no_open_differences" }]
     },
     {
       "key": "report",
@@ -126,6 +129,103 @@
       "description": "Flussdiagramm, Tabellen und Methodentext."
     }
   ],
-  "forms": [],
+  "forms": [
+    {
+      "purpose": "charting",
+      "name": "Charting-Formular",
+      "fields": [
+        {
+          "key": "country",
+          "label": "Land",
+          "description": "Land, in dem die Arbeit entstand oder durchgeführt wurde.",
+          "type": "text",
+          "required": true,
+          "group": "Quelle",
+          "analysis": "Häufigkeit je Land"
+        },
+        {
+          "key": "aim",
+          "label": "Ziel oder Fragestellung",
+          "description": "Ziel der Quelle in eigenen Worten.",
+          "type": "text",
+          "required": true,
+          "group": "Quelle",
+          "analysis": ""
+        },
+        {
+          "key": "design",
+          "label": "Design oder Art der Arbeit",
+          "description": "Zum Beispiel Kohortenstudie, Interviewstudie, Leitlinie.",
+          "type": "text",
+          "required": true,
+          "group": "Methodik",
+          "analysis": "Häufigkeit je Design"
+        },
+        {
+          "key": "population",
+          "label": "Population",
+          "description": "Wer wurde untersucht oder ist gemeint?",
+          "type": "text",
+          "required": true,
+          "group": "PCC",
+          "analysis": ""
+        },
+        {
+          "key": "sample_size",
+          "label": "Stichprobengröße",
+          "description": "Zahl der Teilnehmenden, falls berichtet.",
+          "type": "integer",
+          "required": false,
+          "group": "PCC",
+          "analysis": ""
+        },
+        {
+          "key": "concept",
+          "label": "Concept",
+          "description": "Was wird in Bezug auf die Fragestellung untersucht oder beschrieben?",
+          "type": "text",
+          "required": true,
+          "group": "PCC",
+          "analysis": "Kategorien bilden, Häufigkeit je Kategorie"
+        },
+        {
+          "key": "context",
+          "label": "Context",
+          "description": "Setting, Versorgungsbereich oder Region.",
+          "type": "text",
+          "required": true,
+          "group": "PCC",
+          "analysis": ""
+        },
+        {
+          "key": "key_findings",
+          "label": "Zentrale Ergebnisse",
+          "description": "Ergebnisse mit Bezug zur Fragestellung des Reviews.",
+          "type": "text",
+          "required": true,
+          "group": "Ergebnisse",
+          "analysis": ""
+        },
+        {
+          "key": "quote",
+          "label": "Belegzitat",
+          "description": "Wörtliche Stelle mit Seitenangabe.",
+          "type": "quote",
+          "required": false,
+          "group": "Ergebnisse",
+          "analysis": ""
+        },
+        {
+          "key": "notes",
+          "label": "Anmerkungen",
+          "description": "",
+          "type": "text",
+          "required": false,
+          "group": "Ergebnisse",
+          "analysis": ""
+        }
+      ]
+    }
+  ],
   "report": { "checklist": "PRISMA-ScR", "diagram": "prisma_scr" }
 }

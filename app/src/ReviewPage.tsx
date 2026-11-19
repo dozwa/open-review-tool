@@ -28,6 +28,7 @@ import {
 } from "./api";
 import { CriteriaEditor, CriteriaView } from "./Criteria";
 import { Duplicates } from "./Duplicates";
+import { FormsTab } from "./Forms";
 import { FullTextTab } from "./FullTexts";
 import { ReportTab } from "./Report";
 import { SourcesTab } from "./Sources";
@@ -118,6 +119,7 @@ export function ReviewPage() {
         {tab === "fulltext" && <FullTextTab review={review} run={run} />}
         {tab === "sources" && <SourcesTab review={review} run={run} />}
         {tab === "criteria" && <CriteriaTab review={review} run={run} />}
+        {tab === "forms" && <FormsTab review={review} run={run} />}
         {tab === "report" && <ReportTab review={review} run={run} />}
         {tab === "proof" && <ProofTab review={review} />}
       </div>
@@ -137,6 +139,9 @@ const TOOL_TABS: Record<string, { tab: Tab; label: string }[]> = {
   citation: [{ tab: "search", label: "Suche festhalten" }, { tab: "imports", label: "Treffer einlesen" }],
   bundling: [{ tab: "sources", label: "Quellen bündeln" }],
 };
+
+/** Auswahlregeln heißen beim Extrahieren anders als beim Screening. */
+const FORM_RULE_LABEL: Record<string, string> = { unanimous: "Doppelt, unabhängig", single_verified: "Einfach mit Prüfung" };
 
 /** Stationen der Vorlage als Leiste: Wo steht das Review? */
 function StationBar({ stations }: { stations: Station[] }) {
@@ -181,7 +186,7 @@ function OverviewTab({ review, run, goTo }: { review: ReviewDetail; run: Run; go
   const unique = review.n_records - review.n_duplicates;
   const blocking = workflow.stations.filter((s) => s.blocking);
   // Stationen ohne Abschlussregel werden nie „fertig“; sie taugen nicht als nächster Schritt.
-  const next = workflow.stations.find((s) => s.available && s.state !== "done" && s.state !== "locked" && (s.blocking || s.kind === "screening"));
+  const next = workflow.stations.find((s) => s.available && s.state !== "done" && s.state !== "locked" && (s.blocking || s.kind === "screening" || s.kind === "form"));
   const openStages = review.stages.filter((s) => !s.closed).length;
 
   return (
@@ -204,9 +209,11 @@ function OverviewTab({ review, run, goTo }: { review: ReviewDetail; run: Run; go
 
       <div className="stations">
         {workflow.stations.map((station, i) => {
-          const canOpen = manage && station.kind === "screening" && station.state !== "locked" && (station.free_rounds || station.rounds.every((r) => r.closed));
+          const staged = station.kind === "screening" || station.kind === "form";
+          const canOpen = manage && staged && station.state !== "locked" && (station.free_rounds || station.rounds.every((r) => r.closed));
           const canOverride = manage && station.blocking && station.state !== "done" && station.state !== "locked" && station.rounds.every((r) => r.closed);
-          const failed = station.kind === "screening" && station.checks.some((c) => c.passed === false);
+          // Die Bestätigung des Formulars hängt nicht an einer Runde; eine neue Runde hilft dort nicht.
+          const failed = staged && station.rounds.length > 0 && station.rounds.every((r) => r.closed) && station.checks.some((c) => c.passed === false && c.check !== "form_confirmed");
           return (
             <section key={station.key} id={`station-${station.key}`} className={`station s-${station.state}${station.available ? "" : " s-later"}`}>
               <header>
@@ -237,8 +244,9 @@ function OverviewTab({ review, run, goTo }: { review: ReviewDetail; run: Run; go
                         </div>
                         <h3>{stage.name}</h3>
                         <p className="muted">
-                          {stage.n_records.toLocaleString("de-DE")} {records} · {RULE_LABEL[stage.decision_rule] ?? stage.decision_rule}
-                          {stage.decision_rule === "unanimous" && ` · mind. ${stage.min_reviewers} Stimmen`}
+                          {stage.n_records.toLocaleString("de-DE")} {stage.form_id ? term(workflow.terms, "sources", "Quellen") : records} ·{" "}
+                          {stage.form_id ? FORM_RULE_LABEL[stage.decision_rule] ?? stage.decision_rule : RULE_LABEL[stage.decision_rule] ?? stage.decision_rule}
+                          {stage.decision_rule === "unanimous" && ` · mind. ${stage.min_reviewers} ${stage.form_id ? "Personen" : "Stimmen"}`}
                           {stage.maybe_as && ` · Maybe zählt als ${stage.maybe_as === "include" ? "Include" : "Exclude"}`}
                         </p>
                         {round.gate && (
@@ -247,14 +255,21 @@ function OverviewTab({ review, run, goTo }: { review: ReviewDetail; run: Run; go
                           </p>
                         )}
                         <div className="stage-card-actions">
-                          {canVote(review.role) && !stage.closed && (
+                          {stage.form_id && (
+                            <Link className={canVote(review.role) && !stage.closed ? "button primary" : "button"} to={`/reviews/${review.id}/forms/${stage.id}`}>
+                              <Icon name="list" size={14} /> {canVote(review.role) && !stage.closed ? "Extrahieren" : "Tabelle"}
+                            </Link>
+                          )}
+                          {!stage.form_id && canVote(review.role) && !stage.closed && (
                             <Link className="button primary" to={`/reviews/${review.id}/stages/${stage.id}/screen`}>
                               <Icon name="play" size={14} /> Screenen
                             </Link>
                           )}
-                          <Link className="button" to={`/reviews/${review.id}/stages/${stage.id}`}>
-                            <Icon name="chart" size={14} /> Auswertung
-                          </Link>
+                          {!stage.form_id && (
+                            <Link className="button" to={`/reviews/${review.id}/stages/${stage.id}`}>
+                              <Icon name="chart" size={14} /> Auswertung
+                            </Link>
+                          )}
                         </div>
                       </article>
                     );
@@ -266,6 +281,7 @@ function OverviewTab({ review, run, goTo }: { review: ReviewDetail; run: Run; go
                 {(TOOL_TABS[station.tool ?? ""] ?? []).map((t) => (
                   <button key={t.tab} onClick={() => goTo(t.tab)}>{t.label} öffnen</button>
                 ))}
+                {station.kind === "form" && <button onClick={() => goTo("forms")}>Formular öffnen</button>}
                 {station.kind === "report" && station.available && (
                   <button onClick={() => goTo("report")}>Bericht öffnen</button>
                 )}
@@ -347,6 +363,8 @@ function StageForm({ review, station, defaults, onSubmit, onCancel }: {
   const [reasonRequired, setReasonRequired] = useState(defaults.reason_required);
   const hasReasons = reasonsOf(review.criteria).length > 0;
   const single = decisionRule === "single_verified";
+  const isForm = station.kind === "form";
+  const sources = term(review.workflow.terms, "sources", "Quellen");
   // In der Vorlage festgelegte Eingangsmenge bleibt fest; nur der freie Ablauf lässt die Wahl.
   const scopeFixed = review.workflow.published && !station.free_rounds;
 
@@ -361,7 +379,7 @@ function StageForm({ review, station, defaults, onSubmit, onCancel }: {
       station: station.key,
       decision_rule: decisionRule,
       conflict_rule: conflictRule,
-      verify: single ? { scope: verifyScope, percent: verifyScope === "sample" ? verifyPercent : null } : null,
+      verify: single && !isForm ? { scope: verifyScope, percent: verifyScope === "sample" ? verifyPercent : null } : null,
       reason_required: reasonRequired,
     });
   }
@@ -376,15 +394,15 @@ function StageForm({ review, station, defaults, onSubmit, onCancel }: {
         </Row>
         <Row>
           <label htmlFor="stage-scope">Umfang</label>
-          <select id="stage-scope" value={scope} onChange={(e) => setScope(e.target.value)} disabled={scopeFixed}>
-            <option value="sample">Zufallsstichprobe</option>
-            <option value="all">Alle {records} ohne Dubletten</option>
-            <option value="from_stage">Eingeschlossene einer früheren Stufe</option>
+          <select id="stage-scope" value={scope} onChange={(e) => setScope(e.target.value)} disabled={scopeFixed && !isForm}>
+            <option value="sample">{isForm ? "Stichprobe je Quellenart" : "Zufallsstichprobe"}</option>
+            <option value="all">{isForm ? `Alle eingeschlossenen ${sources}` : `Alle ${records} ohne Dubletten`}</option>
+            {!isForm && <option value="from_stage">Eingeschlossene einer früheren Stufe</option>}
           </select>
         </Row>
         {scope === "sample" && (
           <Row>
-            <label htmlFor="stage-sample">Größe der Stichprobe</label>
+            <label htmlFor="stage-sample">{isForm ? `${sources} je Quellenart` : "Größe der Stichprobe"}</label>
             <input id="stage-sample" className="narrow-input" type="number" min={1} value={sampleSize} onChange={(e) => setSampleSize(Number(e.target.value))} />
           </Row>
         )}
@@ -401,14 +419,18 @@ function StageForm({ review, station, defaults, onSubmit, onCancel }: {
         )}
         <Row>
           <label htmlFor="stage-rule">
-            Auswahlregel
+            {isForm ? "Arbeitsweise" : "Auswahlregel"}
             {!rules.decision_rule.editable && <small>von der Vorlage festgelegt</small>}
           </label>
           <select id="stage-rule" value={decisionRule} onChange={(e) => setDecisionRule(e.target.value)} disabled={!rules.decision_rule.editable}>
-            {Object.entries(RULE_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            {Object.entries(isForm ? FORM_RULE_LABEL : RULE_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
         </Row>
-        {single ? (
+        {single && isForm ? (
+          <Row>
+            <span>Eine Person extrahiert, eine zweite prüft jede {term(review.workflow.terms, "source", "Quelle")}. Die Stufe ist nicht verblindet.</span>
+          </Row>
+        ) : single ? (
           <Row>
             <label htmlFor="stage-verify">
               Zweite Stimme für
@@ -429,13 +451,13 @@ function StageForm({ review, station, defaults, onSubmit, onCancel }: {
         ) : (
           <Row>
             <label htmlFor="stage-min">
-              Stimmen je Eintrag
+              {isForm ? "Personen je Quelle" : "Stimmen je Eintrag"}
               {decisionRule === "liberal" && <small>Ein Ausschluss braucht mindestens zwei</small>}
             </label>
             <input id="stage-min" className="narrow-input" type="number" min={1} value={minReviewers} onChange={(e) => setMinReviewers(Number(e.target.value))} disabled={!rules.min_reviewers.editable} />
           </Row>
         )}
-        <Row>
+        {!isForm && <><Row>
           <label htmlFor="stage-maybe">„Maybe“ zählt als</label>
           <select id="stage-maybe" value={maybeAs} onChange={(e) => setMaybeAs(e.target.value)} disabled={!rules.maybe_as.editable}>
             <option value="">eigene Kategorie</option>
@@ -451,15 +473,15 @@ function StageForm({ review, station, defaults, onSubmit, onCancel }: {
           <select id="stage-conflict" value={conflictRule} onChange={(e) => setConflictRule(e.target.value)} disabled={!rules.conflict_rule.editable}>
             {Object.entries(CONFLICT_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
-        </Row>
+        </Row></>}
         <Row>
           <label htmlFor="stage-blind">
             Verblindet
-            <small>Stimmen anderer bleiben bis zum Entblinden unsichtbar</small>
+            <small>{isForm ? "Werte" : "Stimmen"} anderer bleiben bis zum Entblinden unsichtbar</small>
           </label>
           <input id="stage-blind" type="checkbox" className="switch" checked={!single && blind} onChange={(e) => setBlind(e.target.checked)} disabled={single || !rules.blind.editable} />
         </Row>
-        <Row>
+        {!isForm && <Row>
           <label htmlFor="stage-reason">
             Ausschluss nur mit Hauptgrund
             <small>
@@ -468,7 +490,7 @@ function StageForm({ review, station, defaults, onSubmit, onCancel }: {
             </small>
           </label>
           <input id="stage-reason" type="checkbox" className="switch" checked={reasonRequired} onChange={(e) => setReasonRequired(e.target.checked)} disabled={defaults.reason_required} />
-        </Row>
+        </Row>}
       </Group>
       <p className="hint">Die Regeln sind nach dem Öffnen fest. Für andere Regeln öffnest du eine neue Stufe.</p>
       <div className="sheet-actions">

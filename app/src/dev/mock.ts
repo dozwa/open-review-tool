@@ -4,7 +4,58 @@
 
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 
+import { formStage, mockForms } from "./mockForms";
 import { mockReport } from "./mockReport";
+
+// Protokoll, Abweichungen und Checkliste des Berichts
+const mockProtocol: { registration: Record<string, unknown> | null; deviations: Record<string, string>[] } = {
+  registration: {
+    registered_on: "2026-09-14", registry: "OSF", identifier: "osf.io/k7m2x", note: "",
+    recorded_at: "2026-10-02T09:12:00Z", corrected: false,
+  },
+  deviations: [
+    { kind: "criteria", at: "2026-11-05T10:00:00Z", title: "Kriterien geändert (Version 2)", note: "Nach dem Pilot: Altersgrenze genauer gefasst" },
+    { kind: "gate", at: "2026-11-09T14:30:00Z", title: "„Zitationssuche“ ohne erfülltes Gate freigegeben", note: "Zitationssuche folgt nach dem Volltext-Screening" },
+    { kind: "form", at: "2026-11-17T08:45:00Z", title: "Formular „Charting-Formular“ nach der Bestätigung geändert (Version 2)", note: "Feld „Art der Intervention“ fehlte im Pilot" },
+  ],
+};
+
+const CHECKLIST: [string, string, string, string][] = [
+  ["Titel", "Bericht als Scoping Review kennzeichnen", "manual", "Schreibt ihr selbst."],
+  ["Zusammenfassung", "Strukturierte Zusammenfassung", "manual", "Schreibt ihr selbst."],
+  ["Einleitung", "Begründung des Reviews", "manual", "Schreibt ihr selbst."],
+  ["Einleitung", "Ziele und Fragestellung", "manual", "Schreibt ihr selbst. Die Elemente der Fragestellung stehen in den Kriterien."],
+  ["Methoden", "Protokoll und Registrierung", "ready", "Registrierung und Abweichungen stehen im Bericht unter „Protokoll“."],
+  ["Methoden", "Einschlusskriterien", "ready", "Reiter „Kriterien“, Version 2."],
+  ["Methoden", "Informationsquellen mit Tag der letzten Suche", "ready", "Suchanhang: Quellen und Tag der Suche."],
+  ["Methoden", "Vollständige Suchstrategie mindestens einer Quelle", "ready", "Suchanhang: Suchstring, Grenzen und Treffer je Quelle."],
+  ["Methoden", "Auswahl der Quellen", "ready", "Methodentext, Abschnitte zur Auswahl."],
+  ["Methoden", "Ablauf des Chartings", "ready", "Methodentext, Abschnitt „Charting“."],
+  ["Methoden", "Erhobene Angaben", "ready", "Die Felder des Formulars stehen im Methodentext."],
+  ["Methoden", "Kritische Bewertung der Quellen, falls gemacht", "optional", "In dieser Vorlage nicht vorgesehen. Wer bewertet, beschreibt Vorgehen und Ergebnis im Text."],
+  ["Methoden", "Vorgehen bei der Zusammenfassung der Ergebnisse", "ready", "Die Auswertung je Feld steht im Formular und im Methodentext."],
+  ["Ergebnisse", "Auswahl der Quellen mit Zahlen und Flussdiagramm", "ready", "Flussdiagramm und ausgeschlossene Volltexte mit Grund."],
+  ["Ergebnisse", "Merkmale der Quellen", "open", "Entsteht, sobald Quellen extrahiert und abgeglichen sind."],
+  ["Ergebnisse", "Kritische Bewertung innerhalb der Quellen, falls gemacht", "optional", "In dieser Vorlage nicht vorgesehen. Wer bewertet, beschreibt Vorgehen und Ergebnis im Text."],
+  ["Ergebnisse", "Ergebnisse je Quelle", "open", "Entsteht, sobald Quellen extrahiert und abgeglichen sind."],
+  ["Ergebnisse", "Zusammenfassung der Ergebnisse", "manual", "Schreibt ihr selbst."],
+  ["Diskussion", "Zusammenfassung der Evidenz", "manual", "Schreibt ihr selbst."],
+  ["Diskussion", "Limitationen", "ready", "Methodentext, Abschnitt „Abweichungen und Limitationen“. Das betrifft das Vorgehen; die Grenzen der Evidenz schreibt ihr selbst."],
+  ["Diskussion", "Schlussfolgerungen", "manual", "Schreibt ihr selbst."],
+  ["Finanzierung", "Finanzierung des Reviews und der Quellen", "manual", "Schreibt ihr selbst."],
+];
+
+/** Was der Bericht seit Teil 2 zusätzlich trägt; der freie Ablauf hat keine Checkliste. */
+function reportExtras(jbi: boolean) {
+  return {
+    protocol: jbi ? mockProtocol : { registration: null, deviations: [] },
+    checklist: jbi
+      ? { name: "PRISMA-ScR", items: CHECKLIST.map(([section, topic, status, material], i) => ({ number: i + 1, section, topic, status, material })) }
+      : null,
+    table: jbi ? { n_sources: 3, n_charted: 2, n_fields: 6 } : { n_sources: 0, n_charted: 0, n_fields: 0 },
+  };
+}
+
 
 const me = { actor_id: "a1b2c3d4-0000-4000-8000-000000000001", name: "Dorian Zwanzig", public_key: "x" };
 const criterion = (code: string, kind: string, element: string, text: string, note = "") => ({ code, kind, element, text, note });
@@ -33,7 +84,7 @@ const stage = (id: string, name: string, kind: string, extra: Record<string, unk
   id, review_id: "r1", name, kind, blind: true, min_reviewers: 2, maybe_as: null, scope: "all",
   sample_size: null, seed: null, n_records: 38, opened_at: "2026-11-12T09:00:00Z",
   unblinded: false, closed: false, blind_active: true, station: kind, round: 1,
-  decision_rule: "unanimous", conflict_rule: "discussion", verify: null, reason_required: false, criteria_version: "2", ...extra,
+  decision_rule: "unanimous", conflict_rule: "discussion", verify: null, reason_required: false, criteria_version: "2", form_id: null, form_version: null, ...extra,
 });
 const pilotDone = { n_records: 25, unblinded: true, closed: true, blind_active: false, maybe_as: "include" };
 const stages = [
@@ -114,8 +165,22 @@ const jbiStations = [
     tool: "bundling", available: true, blocking: true,
     checks: [{ check: "source_types_set", label: "Jede eingeschlossene Quelle hat eine Quellenart", passed: false, detail: "3 von 4 ohne Quellenart" }],
   }),
-  station("charting_pilot", "form", "Charting-Pilot", "Je Quellenart zwei bis drei Quellen unabhängig extrahieren und das Formular abstimmen."),
-  station("charting", "form", "Charting", "Alle Quellen mit dem abgestimmten Formular extrahieren und abgleichen."),
+  // In der Vorschau läuft der Pilot schon, damit Tabelle und Eingabe etwas zeigen: /#/reviews/r1/forms/s4
+  station("charting_pilot", "form", "Charting-Pilot", "Je Quellenart zwei Quellen unabhängig extrahieren, das Formular abstimmen und bestätigen.", {
+    state: "running", available: true, blocking: true, blocked_by: [],
+    checks: [{ check: "form_confirmed", label: "Formular von der Leitung bestätigt", passed: false, detail: "" }],
+    rounds: [{ round: 1, stage_id: "s4", name: "Charting-Pilot", closed: false, gate: null }],
+    defaults: { name: "Charting-Pilot (Runde 2)", round: 2, scope: "sample", sample_size: 2, source_stage: null, rules, reason_required: false },
+  }),
+  station("charting", "form", "Charting", "Alle Quellen mit dem abgestimmten Formular extrahieren und abgleichen.", {
+    available: true, blocking: true, blocked_by: [{ key: "charting_pilot", label: "Charting-Pilot" }],
+    checks: [
+      { check: "all_sources_assigned", label: "Alle Quellen einer Runde zugeteilt", passed: false, detail: "3 ohne Runde" },
+      { check: "all_extracted", label: "Alle Quellen extrahiert", passed: null, detail: "" },
+      { check: "no_open_differences", label: "Keine offenen Abweichungen", passed: null, detail: "" },
+    ],
+    defaults: { name: "Charting", round: 1, scope: "all", sample_size: null, source_stage: null, rules, reason_required: false },
+  }),
   station("report", "report", "Auswertung und Bericht", "Flussdiagramm, Tabellen und Methodentext.", { available: true }),
 ];
 const terms = { record: "Eintrag", records: "Einträge", source: "Quelle", sources: "Quellen", extraction: "Charting" };
@@ -315,6 +380,8 @@ export function installMock() {
   let identity: typeof me | null = new URLSearchParams(location.search).has("neu") ? null : me;
   mockIPC((cmd, args) => {
     const a = (args ?? {}) as Record<string, unknown>;
+    const form = mockForms(cmd, a, { members, sourceTypes, terms });
+    if (form !== undefined) return form;
     switch (cmd) {
       case "identity_get": return identity;
       case "templates_list": return templates;
@@ -331,7 +398,7 @@ export function installMock() {
       case "review_detail": return {
         id: a.reviewId, title: a.reviewId === "r2" ? "KI-gestützte Triage in der Notaufnahme" : "Digitale Interventionen bei Migräne",
         role: "owner", me: me.actor_id, members, n_records: 40, n_duplicates: 2, criteria,
-        stages: a.reviewId === "r2" ? [] : stages,
+        stages: a.reviewId === "r2" ? [] : [...stages, formStage],
         workflow: a.reviewId === "r2" ? freeWorkflow : jbiWorkflow,
         imports: [
           { id: "i1", filename: "pubmed_2026-11-02.nbib", format: "nbib", source: "MEDLINE", status: "done", n_records: 35, n_duplicates: 0, error: "", created_at: "", origin: "database", search_id: "q1", search_version: 2 },
@@ -463,9 +530,16 @@ export function installMock() {
         sourceRecords = sourceRecords.map((r) => (chosen.includes(r.id) ? { ...r, type: String(a.sourceType) } : r));
         return chosen.length;
       }
+      case "protocol_register":
+        mockProtocol.registration = {
+          registered_on: a.registeredOn as string, registry: a.registry as string, identifier: a.identifier as string,
+          note: a.note as string, recorded_at: mockProtocol.registration?.recorded_at ?? new Date().toISOString(),
+          corrected: mockProtocol.registration !== null,
+        };
+        return mockProtocol;
       case "report": return a.reviewId === "r2"
-        ? { ...mockReport, flow: { ...mockReport.flow, sources: [], identified: 0, exact_duplicates: 0, resolved_duplicates: 0, unique: 0, levels: [], included: null }, svg: "", methods: "# Methoden: Auswahl der Quellen\n\nDas Review lief ohne feste Vorlage.", search_appendix: "# Suchanhang\n\nEs ist keine Suche festgehalten.\n", n_excluded_rows: 0 }
-        : mockReport;
+        ? { ...reportExtras(false), ...mockReport, flow: { ...mockReport.flow, sources: [], identified: 0, exact_duplicates: 0, resolved_duplicates: 0, unique: 0, levels: [], included: null }, svg: "", methods: "# Methoden: Auswahl der Quellen\n\nDas Review lief ohne feste Vorlage.", search_appendix: "# Suchanhang\n\nEs ist keine Suche festgehalten.\n", n_excluded_rows: 0 }
+        : { ...mockReport, ...reportExtras(true) };
       case "report_export": return null;
       case "fulltext_overview": return a.reviewId === "r2" ? { folder: null, folder_found: false, zotero: null, needed: 0, retrieved: 0, unavailable: 0, rows: [] } : fulltextView();
       case "fulltext_folder_set": fulltexts.folder = (a.path as string | null) ?? null; return null;

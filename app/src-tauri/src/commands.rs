@@ -4,9 +4,11 @@ use std::path::{Path, PathBuf};
 
 use ort_core::criteria::Criteria;
 use ort_core::exchange::{self, Bundle, MergeReport};
+use ort_core::forms::{Form, FormEntryView, FormStageView, FormsView, Frequency};
 use ort_core::fulltext::{
     Assign, FileProblem, FullTextOverview, Location, Suggestion, ZoteroConfirm, ZoteroLink, ZoteroSuggestion,
 };
+use ort_core::protocol::Protocol;
 use ort_core::report::Report;
 use ort_core::search::Search;
 use ort_core::service::{
@@ -472,10 +474,110 @@ pub async fn report(state: State<'_, AppState>, review_id: String) -> Res<Report
     open(&state, &review_id)?.report().map_err(err)
 }
 
-/// Schreibt eine Datei des Berichts: Diagramm, Ausschlüsse, Eingeschlossene, Suchanhang oder Methodentext.
+/// Hält die Registrierung des Protokolls fest; ein weiterer Eintrag berichtigt die Angaben.
+#[tauri::command]
+pub async fn protocol_register(
+    state: State<'_, AppState>,
+    review_id: String,
+    registered_on: String,
+    registry: String,
+    identifier: String,
+    note: String,
+) -> Res<Protocol> {
+    open(&state, &review_id)?.register_protocol(&registered_on, &registry, &identifier, &note).map_err(err)
+}
+
+/// Schreibt eine Datei des Berichts, etwa Diagramm, Tabelle, Methodentext oder Checkliste.
 #[tauri::command]
 pub async fn report_export(state: State<'_, AppState>, review_id: String, kind: String, path: String) -> Res<()> {
     let file = open(&state, &review_id)?.report_file(&kind).map_err(err)?;
+    std::fs::write(path, file.content).map_err(err)
+}
+
+// ---------------------------------------------------------------- Formulare
+
+#[tauri::command]
+pub async fn forms(state: State<'_, AppState>, review_id: String) -> Res<FormsView> {
+    open(&state, &review_id)?.forms().map_err(err)
+}
+
+#[tauri::command]
+pub async fn form_publish(state: State<'_, AppState>, review_id: String, data: Value) -> Res<Form> {
+    open(&state, &review_id)?.publish_form(&data).map_err(err)
+}
+
+#[tauri::command]
+pub async fn form_confirm(state: State<'_, AppState>, review_id: String, form_id: String) -> Res<()> {
+    open(&state, &review_id)?.confirm_form(&uuid(&form_id)?).map_err(err)
+}
+
+#[tauri::command]
+pub async fn form_stage(state: State<'_, AppState>, review_id: String, stage_id: String) -> Res<FormStageView> {
+    open(&state, &review_id)?.form_stage(&uuid(&stage_id)?).map_err(err)
+}
+
+#[tauri::command]
+pub async fn form_entry(
+    state: State<'_, AppState>,
+    review_id: String,
+    stage_id: String,
+    record_id: String,
+) -> Res<FormEntryView> {
+    open(&state, &review_id)?.form_entry(&uuid(&stage_id)?, &record_id).map_err(err)
+}
+
+/// Hält den Wert eines Feldes fest. `false`, wenn er schon so dastand.
+#[tauri::command]
+pub async fn form_value(
+    state: State<'_, AppState>,
+    review_id: String,
+    stage_id: String,
+    record_id: String,
+    field: String,
+    value: Value,
+) -> Res<bool> {
+    open(&state, &review_id)?.record_form_value(&uuid(&stage_id)?, &record_id, &field, &value).map_err(err)
+}
+
+#[tauri::command]
+pub async fn form_complete(
+    state: State<'_, AppState>,
+    review_id: String,
+    stage_id: String,
+    record_id: String,
+    seconds: Option<i64>,
+) -> Res<()> {
+    open(&state, &review_id)?.complete_form_entry(&uuid(&stage_id)?, &record_id, seconds).map_err(err)
+}
+
+#[tauri::command]
+pub async fn form_consensus(
+    state: State<'_, AppState>,
+    review_id: String,
+    stage_id: String,
+    record_id: String,
+    field: String,
+    value: Value,
+    note: String,
+) -> Res<()> {
+    open(&state, &review_id)?.record_form_consensus(&uuid(&stage_id)?, &record_id, &field, &value, &note).map_err(err)
+}
+
+#[tauri::command]
+pub async fn form_frequencies(state: State<'_, AppState>, review_id: String, stage_id: String) -> Res<Vec<Frequency>> {
+    open(&state, &review_id)?.form_frequencies(&uuid(&stage_id)?).map_err(err)
+}
+
+/// Schreibt die Tabelle (`table`) oder die Häufigkeiten (`frequencies`) einer Formular-Stufe als CSV.
+#[tauri::command]
+pub async fn form_export(
+    state: State<'_, AppState>,
+    review_id: String,
+    stage_id: String,
+    kind: String,
+    path: String,
+) -> Res<()> {
+    let file = open(&state, &review_id)?.form_file(&uuid(&stage_id)?, &kind).map_err(err)?;
     std::fs::write(path, file.content).map_err(err)
 }
 

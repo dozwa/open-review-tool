@@ -353,6 +353,30 @@ Prüfung: Gebündelte Einträge zählen als eine Quelle; der zweite Durchlauf le
 
 ### 7 Formulare und Charting (L)
 
+Stand 19.11.2026: umgesetzt. Festlegungen beim Bau:
+
+- Fünftes Ereignis `FormConfirmed` (main, Leitung): Die Bestätigung des Formulars ist das Gate des Pilots und
+  steht ausdrücklich im Log. Nach der Bestätigung braucht jede neue Version eine Begründung; die Version trägt
+  dann das Merkmal „nach der Bestätigung“. Die Liste der Abweichungen selbst folgt mit Meilenstein 8.
+- Eine Formular-Stufe weist den Haupteintrag jeder eingeschlossenen Quelle zu und arbeitet mit der neuesten
+  Formularversion; `form_version` in `StageInstanceOpened` hält nur fest, welche beim Öffnen galt. Jeder Wert
+  nennt seine Version. Ein Feld behält seinen Typ; entfernte Felder verschwinden aus Tabelle und Eingabe.
+- Werte: Text, ganze Zahl, Liste von Texten oder leer. Dezimalwerte sind Text mit geprüftem Muster. Verglichen
+  wird in einheitlicher Form (ohne Rand, Listen sortiert).
+- Doppelt (`unanimous`): Ab der Mindestzahl fertiger Personen wird je Feld verglichen. Einfach mit Prüfung
+  (`single_verified`): Wer zuerst abschließt, extrahiert; eine zweite Person korrigiert über geklärte Werte und
+  schließt als Prüfung ab. Die Stufe ist dann nie verblindet.
+- Stand einer Quelle: offen, wartet auf Prüfung, Abweichung, Pflichtfeld leer, abgeglichen. „Nachzutragen“ ist
+  eine fertige Quelle, der ein Pflichtfeld der geltenden Version fehlt.
+- Gates: `form_confirmed` (Pilot), `all_extracted` und `no_open_differences` (Charting).
+- Pilot: Stichprobe je Quellenart (`sample_size` der Vorlage zählt je Quellenart, Voreinstellung 2), mit Seed
+  nachrechenbar. Die Zeit je Quelle misst die Oberfläche und meldet sie mit dem ersten Abschluss.
+- Die Vorlage bringt ein Startformular mit (`forms`); die Leitung veröffentlicht daraus das erste Formular.
+- Beim Einlesen wird geprüft: Rolle, Stufe offen, bei geklärten Werten entblindet, Wert passt zum Feld der
+  genannten Version, Stimmen nicht in Formular-Stufen und umgekehrt.
+- Nicht gebaut: wiederholbare Gruppen (Meilenstein 10; `group_index` steht schon im Ereignis), Tabelle über
+  alle Runden einer Station, Zitat aus der Markierung im Volltext übernehmen.
+
 - `FormVersionPublished`: Felder mit Schlüssel, Name, Beschreibung, Typ (Text, Ganzzahl, Dezimal, Auswahl,
   Mehrfachauswahl, Zitat), Pflicht, Gruppe, Analyseplan. Zweck `charting` oder `appraisal`.
 - Formular-Stufe mit Verblindung wie beim Screening. Modus doppelt oder einfach mit Prüfung. Werte als
@@ -369,6 +393,28 @@ Prüfung: Zwei Personen extrahieren verblindet, Abweichungen erscheinen erst nac
 Pilot ergänztes Feld erzeugt „nachzutragen“ und einen Eintrag in der Abweichungsliste.
 
 ### 8 Bericht, Teil 2 und Update (M)
+
+Stand 19.11.2026: umgesetzt bis auf das Rückschreiben nach Zotero. Festlegungen beim Bau:
+
+- `ProtocolRegistered` (main, Leitung): Tag, Register oder Ort, Kennung, Anmerkung. Der erste Eintrag ist der
+  Bezugspunkt der Abweichungsliste; ein weiterer berichtigt nur die Angaben.
+- Abweichungen (`protocol.rs`, Projektion): neue Versionen von Kriterien, Suchen und Ablauf (jeweils ab
+  Version 2) nach dem Bezugspunkt; unabhängig davon Formularversionen nach der Bestätigung und übersteuerte
+  Gates. Jede Zeile trägt die Begründung aus dem Ereignis. Die erste Version einer Suche, die erst nach der
+  Registrierung festgehalten wird, zählt nicht.
+- Checkliste: Die Vorlage nennt sie in `report.checklist`; die App kennt PRISMA-ScR mit 22 Punkten in eigenen
+  Worten. Stand je Punkt: liegt vor, fehlt noch, selbst schreiben, freiwillig. Berechnet, nicht gespeichert.
+- Methodentext: je Formular-Station ein Abschnitt (Vorgehen, erhobene Angaben, Zahlen je Runde, geklärte
+  Felder), die Registrierung im ersten Absatz, wiederholte Suchen bei „Suche und Dubletten“, Abweichungen bei
+  den Limitationen.
+- Tabelle der eingeschlossenen Quellen (`tabelle-quellen.csv`): je Quelle eine Zeile mit den gültigen Werten
+  der letzten Formular-Station, die alle Quellen bearbeitet; für eine Quelle gilt ihre späteste Runde. Quellen
+  in einer verblindeten Stufe stehen ohne Werte darin.
+- Update: kein neues Ereignis. Neue Suchversion, Import, weitere Runden. Neu ist die Gate-Prüfung
+  `all_sources_assigned` für Formular-Stationen; sie gilt sofort und hält die Charting-Station offen, solange
+  eine eingeschlossene Quelle in keiner Runde liegt.
+- Offen: Rückschreiben nach Zotero. Die lokale Schnittstelle von Zotero ist nur lesend; das braucht einen
+  eigenen Weg und bleibt ein eigenes Paket.
 
 - `ProtocolRegistered` und Liste der Abweichungen (alles danach Versionierte).
 - Checkliste PRISMA-ScR mit Status je Punkt; Methodentext zum Charting; Tabelle der eingeschlossenen Quellen.

@@ -124,6 +124,9 @@ pub struct StageConfig {
     pub verify: Option<Verify>,
     /// Jeder Ausschluss braucht genau einen Hauptgrund aus den Kriterien der Stufe.
     pub reason_required: bool,
+    /// Formular einer Formular-Stufe; Screening-Stufen haben keines.
+    pub form_id: Option<Uuid>,
+    pub form_version: Option<i64>,
 }
 
 /// Zweite Stimme für Ausschlüsse bei der Regel `single_verified`.
@@ -225,6 +228,8 @@ impl StageState {
             conflict_rule: s("conflict_rule").unwrap_or_else(|| "discussion".into()),
             verify: p.get("verify").and_then(|v| serde_json::from_value(v.clone()).ok()),
             reason_required: p.get("reason_required").and_then(Value::as_bool).unwrap_or(false),
+            form_id: s("form_id").and_then(|id| Uuid::parse_str(&id).ok()),
+            form_version: i("form_version"),
         };
         let mut state = StageState {
             config,

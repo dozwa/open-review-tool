@@ -18,6 +18,7 @@ use uuid::Uuid;
 
 use crate::agreement;
 use crate::event::Event;
+use crate::forms::{check_starter, Starter, PURPOSES};
 use crate::projection::{order_key, MaybeMode, StageState};
 
 pub const STATION_KINDS: [&str; 4] = ["setup", "screening", "form", "report"];
@@ -35,6 +36,7 @@ const SETUP_CHECKS: [&str; 9] = [
     "source_types_set",
 ];
 const SCREENING_CHECKS: [&str; 3] = ["agreement_min", "all_decided", "no_open_conflicts"];
+const FORM_CHECKS: [&str; 4] = ["form_confirmed", "all_extracted", "no_open_differences", "all_sources_assigned"];
 /// Werkzeuge für `setup`-Stationen, die diese App-Version schon hat.
 const BUILT_TOOLS: [&str; 6] = ["protocol", "search", "import", "fulltext", "citation", "bundling"];
 pub const WORKFLOW_TYPES: [&str; 3] = ["WorkflowVersionPublished", "GateEvaluated", "GateOverridden"];
@@ -119,6 +121,9 @@ pub struct Station {
     /// Die Stufe bekommt nur Einträge mit beschafftem Volltext; Nachzügler laufen als weitere Runde.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub requires_fulltext: bool,
+    /// Zweck des Formulars einer `form`-Station; ohne Angabe `charting`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub form: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -143,8 +148,9 @@ pub struct Template {
     pub source_types: Vec<SchemaElement>,
     pub rules: Rules,
     pub stations: Vec<Station>,
+    /// Startformulare; die Leitung veröffentlicht daraus das erste Formular.
     #[serde(default)]
-    pub forms: Vec<Value>,
+    pub forms: Vec<Starter>,
     #[serde(default)]
     pub report: Value,
 }
@@ -211,6 +217,7 @@ impl Template {
             let allowed: &[&str] = match s.kind.as_str() {
                 "setup" => &SETUP_CHECKS,
                 "screening" => &SCREENING_CHECKS,
+                "form" => &FORM_CHECKS,
                 _ => &[],
             };
             for g in &s.gate {
@@ -233,6 +240,9 @@ impl Template {
                 )
                 .map_err(|e| format!("Station „{name}“: {e}"))?;
             }
+            if s.form.as_deref().is_some_and(|f| !PURPOSES.contains(&f)) {
+                return Err(format!("Station „{name}“: unbekannter Zweck des Formulars."));
+            }
             if let Some(input) = &s.input {
                 match input.scope.as_str() {
                     "all" | "sample" => {}
@@ -252,6 +262,9 @@ impl Template {
             if s.kind == "screening" {
                 screening.insert(name);
             }
+        }
+        for starter in &self.forms {
+            check_starter(starter)?;
         }
         Ok(())
     }
@@ -450,6 +463,10 @@ pub struct Facts {
     /// Eingeschlossene Quellen nach dem Bündeln und wie viele davon noch keine Quellenart haben.
     pub n_sources: i64,
     pub sources_without_type: i64,
+    /// Zwecke, für die ein bestätigtes Formular vorliegt.
+    pub forms_confirmed: BTreeSet<String>,
+    /// Je Formular-Station, die danach fragt: eingeschlossene Quellen, die in keiner ihrer Runden liegen.
+    pub sources_without_round: BTreeMap<String, i64>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -644,6 +661,34 @@ impl Workflow {
         CheckView { check: g.check.clone(), label, passed: result.map(|r| r.passed), detail }
     }
 
+    /// Prüfungen einer Formular-Station. Die Bestätigung des Formulars und die Frage, ob jede Quelle
+    /// in einer Runde liegt, gelten sofort; die übrigen stehen im Gate-Ergebnis der zuletzt
+    /// geschlossenen Stufe.
+    fn form_check(&self, station: &Station, g: &GateCheck, result: Option<&CheckResult>, facts: &Facts) -> CheckView {
+        let sources = self.template.term("sources");
+        let (label, passed, detail) = match (g.check.as_str(), result) {
+            ("form_confirmed", _) => {
+                let confirmed = facts.forms_confirmed.contains(station.form.as_deref().unwrap_or("charting"));
+                ("Formular von der Leitung bestätigt".to_string(), Some(confirmed), String::new())
+            }
+            ("all_sources_assigned", _) => {
+                let left = facts.sources_without_round.get(&station.key).copied().unwrap_or(0);
+                (format!("Alle {sources} einer Runde zugeteilt"), Some(left == 0), format!("{left} ohne Runde"))
+            }
+            ("all_extracted", r) => (
+                format!("Alle {sources} extrahiert"),
+                r.map(|r| r.passed),
+                r.map(|r| format!("{} von {}", r.numerator, r.denominator)).unwrap_or_default(),
+            ),
+            (_, r) => (
+                "Keine offenen Abweichungen".to_string(),
+                r.map(|r| r.passed),
+                r.map(|r| format!("{} offen", r.numerator)).unwrap_or_default(),
+            ),
+        };
+        CheckView { check: g.check.clone(), label, passed, detail }
+    }
+
     /// Stationen der Vorlage mit Zustand. `stages` sind alle Stufen des Reviews in der Reihenfolge
     /// ihrer Eröffnung.
     pub fn stations(&self, facts: &Facts, stages: &[StageState]) -> Vec<StationView> {
@@ -669,17 +714,21 @@ impl Workflow {
                 .overrides
                 .iter()
                 .rev()
-                .find(|o| o.station == station.key && (station.kind != "screening" || o.round == last_round))
+                .find(|o| o.station == station.key && (station.kind == "setup" || o.round == last_round))
                 .map(|o| o.reason.clone());
             let checks: Vec<CheckView> = match station.kind.as_str() {
                 "setup" => station.gate.iter().map(|g| self.setup_check(g, facts)).collect(),
-                "screening" => {
+                "screening" | "form" => {
                     let result = last.filter(|r| r.closed).and_then(|r| r.gate.as_ref());
                     station
                         .gate
                         .iter()
                         .map(|g| {
-                            self.screening_check(g, result.and_then(|r| r.checks.iter().find(|c| c.check == g.check)))
+                            let result = result.and_then(|r| r.checks.iter().find(|c| c.check == g.check));
+                            match station.kind.as_str() {
+                                "form" => self.form_check(station, g, result, facts),
+                                _ => self.screening_check(g, result),
+                            }
                         })
                         .collect()
                 }
@@ -689,7 +738,7 @@ impl Workflow {
             let passed = !checks.is_empty() && checks.iter().all(|c| c.passed == Some(true));
             let done = match station.kind.as_str() {
                 "setup" => (blocking && passed) || overridden.is_some(),
-                "screening" => match last {
+                "screening" | "form" => match last {
                     None => overridden.is_some(),
                     Some(r) => !any_open && r.closed && (!blocking || passed || overridden.is_some()),
                 },
@@ -707,12 +756,12 @@ impl Workflow {
                 "open"
             };
             let available = match station.kind.as_str() {
-                "screening" => true,
+                "screening" | "form" => true,
                 "setup" => station.tool.as_deref().is_some_and(|t| BUILT_TOOLS.contains(&t)),
                 "report" => true,
                 _ => false,
             };
-            let defaults = (station.kind == "screening").then(|| {
+            let defaults = matches!(station.kind.as_str(), "screening" | "form").then(|| {
                 let input = station.input.as_ref();
                 let round = last_round + 1;
                 let source_stage = input.and_then(|i| i.station.as_deref()).and_then(|key| {

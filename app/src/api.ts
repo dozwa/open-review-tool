@@ -76,6 +76,9 @@ export interface Stage {
   verify: Verify | null;
   reason_required: boolean;
   criteria_version: string | null;
+  /** Formular einer Formular-Stufe; Screening-Stufen haben keines. */
+  form_id: string | null;
+  form_version: number | null;
 }
 
 /** Zweite Stimme für Ausschlüsse bei der Regel „eine Stimme mit Prüfung“. */
@@ -532,6 +535,7 @@ export interface StageParams {
   conflict_rule: string | null;
   verify: Verify | null;
   reason_required: boolean | null;
+  form_id?: string | null;
 }
 
 export const RULE_LABEL: Record<string, string> = {
@@ -657,9 +661,195 @@ export interface Report {
   methods: string;
   search_appendix: string;
   n_excluded_rows: number;
+  protocol: Protocol;
+  /** Fehlt, wenn die Vorlage keine Checkliste nennt. */
+  checklist: Checklist | null;
+  table: { n_sources: number; n_charted: number; n_fields: number };
 }
 
-export type ReportFileKind = "diagram" | "excluded" | "included" | "sources" | "search" | "methods";
+export interface Registration {
+  /** JJJJ-MM-TT */
+  registered_on: string;
+  registry: string;
+  identifier: string;
+  note: string;
+  /** Erster Eintrag im Review; ab hier zählen neue Versionen als Abweichung. */
+  recorded_at: string;
+  corrected: boolean;
+}
+
+export interface Deviation {
+  kind: "criteria" | "search" | "form" | "workflow" | "gate";
+  at: string;
+  title: string;
+  note: string;
+}
+
+export interface Protocol {
+  registration: Registration | null;
+  deviations: Deviation[];
+}
+
+export interface ChecklistItem {
+  number: number;
+  section: string;
+  topic: string;
+  status: "ready" | "open" | "manual" | "optional";
+  material: string;
+}
+
+export interface Checklist {
+  name: string;
+  items: ChecklistItem[];
+}
+
+// ---------------------------------------------------------------- Formulare
+
+export type FieldType = "text" | "integer" | "decimal" | "choice" | "multi_choice" | "quote";
+export type FormValue = string | number | string[] | null;
+
+export const FIELD_TYPE_LABEL: Record<FieldType, string> = {
+  text: "Text",
+  integer: "Ganze Zahl",
+  decimal: "Dezimalzahl",
+  choice: "Auswahl",
+  multi_choice: "Mehrfachauswahl",
+  quote: "Zitat",
+};
+
+export interface FormField {
+  key: string;
+  label: string;
+  description: string;
+  type: FieldType;
+  required: boolean;
+  group: string;
+  analysis: string;
+  options?: string[];
+}
+
+export interface FormVersion {
+  version: number;
+  name: string;
+  fields: FormField[];
+  change_note: string;
+  published_at: string;
+  confirmed: boolean;
+  after_confirmation: boolean;
+}
+
+export interface Form {
+  id: string;
+  purpose: string;
+  versions: FormVersion[];
+  confirmed: boolean;
+}
+
+export interface FormStarter {
+  purpose: string;
+  name: string;
+  fields: FormField[];
+}
+
+export interface FormsView {
+  forms: Form[];
+  starters: FormStarter[];
+  term: string;
+}
+
+export interface FormRef {
+  id: string;
+  purpose: string;
+  name: string;
+  version: number;
+  fields: FormField[];
+  confirmed: boolean;
+}
+
+export interface FormCell {
+  field: string;
+  status: "agreed" | "consensus" | "differs" | "empty" | "mine";
+  value: FormValue;
+  values: { actor_id: string; name: string; value: FormValue }[];
+}
+
+export type EntryStatus = "open" | "extracted" | "conflict" | "incomplete" | "done";
+export type MineStatus = "open" | "draft" | "completed" | "todo" | "to_verify" | "locked";
+
+export interface FormRow {
+  record_id: string;
+  title: string;
+  authors: string;
+  year: number | null;
+  label: string;
+  source_type: string;
+  n_records: number;
+  mine: MineStatus;
+  status: EntryStatus | null;
+  n_completed: number | null;
+  cells: FormCell[];
+}
+
+export interface FormStageView {
+  stage: Stage;
+  role: string;
+  form: FormRef;
+  rows: FormRow[];
+  mine_done: number;
+  todo: number;
+  counts: Record<EntryStatus, number> | null;
+  times: { source_type: string; n: number; seconds: number }[];
+  members: Member[];
+  source_types: SchemaElement[];
+  terms: Record<string, string>;
+}
+
+export interface FormCompared {
+  status: EntryStatus;
+  cells: FormCell[];
+  n_completed: number;
+  extractors: string[];
+}
+
+export interface FormEntryView {
+  stage: Stage;
+  role: string;
+  form: FormRef;
+  record: RecordItem;
+  companions: RecordItem[];
+  fulltexts: string[];
+  label: string;
+  source_type: string;
+  mode: "extract" | "verify" | "read";
+  values: Record<string, FormValue>;
+  completed: { form_version: number; seconds: number | null; verify: boolean } | null;
+  missing: string[];
+  compared: FormCompared | null;
+  position: number;
+  total: number;
+  previous: string | null;
+  next: string | null;
+  next_open: string | null;
+  source_types: SchemaElement[];
+  terms: Record<string, string>;
+}
+
+export interface Frequency {
+  field: string;
+  label: string;
+  counts: { option: string; n: number }[];
+  n_empty: number;
+  n_open: number;
+}
+
+/** Wert eines Formularfeldes als Text. */
+export function showValue(value: FormValue | undefined): string {
+  if (value === null || value === undefined) return "";
+  return Array.isArray(value) ? value.join("; ") : String(value);
+}
+
+export type ReportFileKind =
+  | "diagram" | "excluded" | "included" | "sources" | "search" | "methods" | "table" | "deviations" | "checklist";
 
 export const api = {
   identity: () => call<Person | null>("identity_get"),
@@ -693,6 +883,8 @@ export const api = {
   setSourceType: (reviewId: string, records: string[], sourceType: string) =>
     call<number>("source_type_set", { reviewId, records, sourceType }),
   report: (reviewId: string) => call<Report>("report", { reviewId }),
+  registerProtocol: (reviewId: string, registeredOn: string, registry: string, identifier: string, note: string) =>
+    call<Protocol>("protocol_register", { reviewId, registeredOn, registry, identifier, note }),
   exportReport: (reviewId: string, kind: ReportFileKind, path: string) =>
     call<void>("report_export", { reviewId, kind, path }),
 
@@ -744,6 +936,22 @@ export const api = {
   summary: (reviewId: string, stageId: string) => call<Summary>("stage_summary", { reviewId, stageId }),
   exportCsv: (reviewId: string, stageId: string, path: string) =>
     call<void>("stage_export_csv", { reviewId, stageId, path }),
+
+  forms: (reviewId: string) => call<FormsView>("forms", { reviewId }),
+  publishForm: (reviewId: string, data: Record<string, unknown>) => call<Form>("form_publish", { reviewId, data }),
+  confirmForm: (reviewId: string, formId: string) => call<void>("form_confirm", { reviewId, formId }),
+  formStage: (reviewId: string, stageId: string) => call<FormStageView>("form_stage", { reviewId, stageId }),
+  formEntry: (reviewId: string, stageId: string, recordId: string) =>
+    call<FormEntryView>("form_entry", { reviewId, stageId, recordId }),
+  formValue: (reviewId: string, stageId: string, recordId: string, field: string, value: FormValue) =>
+    call<boolean>("form_value", { reviewId, stageId, recordId, field, value }),
+  completeEntry: (reviewId: string, stageId: string, recordId: string, seconds: number | null) =>
+    call<void>("form_complete", { reviewId, stageId, recordId, seconds }),
+  formConsensus: (reviewId: string, stageId: string, recordId: string, field: string, value: FormValue, note: string) =>
+    call<void>("form_consensus", { reviewId, stageId, recordId, field, value, note }),
+  formFrequencies: (reviewId: string, stageId: string) => call<Frequency[]>("form_frequencies", { reviewId, stageId }),
+  exportForm: (reviewId: string, stageId: string, kind: "table" | "frequencies", path: string) =>
+    call<void>("form_export", { reviewId, stageId, kind, path }),
 
   exportPackage: (reviewId: string, actorId: string, path: string) =>
     call<void>("package_export", { reviewId, actorId, path }),

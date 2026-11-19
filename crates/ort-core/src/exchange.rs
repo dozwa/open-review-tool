@@ -26,6 +26,7 @@ use crate::catalog::{self, is_blindable, StageRule, Writer};
 use crate::criteria::{check_reasons, Criteria};
 use crate::error::{conflict, forbidden, integrity, invalid, not_found, Error, Result};
 use crate::event::{now_timestamp, parse_public_key, stream_for, Event, Identity, PublicIdentity, MAIN_STREAM};
+use crate::forms::{check_value, normal, Forms};
 use crate::projection::{order_key, string_list, ReviewState, StageState};
 use crate::search::Searches;
 use crate::service::{require, stage_criteria, Review, MANAGE_ROLES, ROLES, WRITE_ROLES};
@@ -352,6 +353,8 @@ pub fn merge(review: &Review, bundle: &Bundle) -> Result<MergeReport> {
             .map(|s| (s.config.id, stage_criteria(&merged_state, s)))
             .collect(),
         searches: Searches::build(&all_owned).known(),
+        form_stages: merged_stages.iter().filter_map(|s| s.config.form_id.map(|form| (s.config.id, form))).collect(),
+        forms: Forms::build(&all_owned),
     };
 
     let mut report = MergeReport::default();
@@ -479,6 +482,9 @@ struct MergeContext<'a> {
     reason_rules: BTreeMap<Uuid, Criteria>,
     /// Bekannte Suchversionen nach dem Einlesen.
     searches: BTreeSet<(Uuid, i64)>,
+    /// Formular-Stufen mit ihrem Formular.
+    form_stages: BTreeMap<Uuid, Uuid>,
+    forms: Forms,
 }
 
 /// Prüft ein einzelnes fremdes Ereignis gegen das Register: Rolle, Kette, Stufe und Payload.
@@ -492,6 +498,8 @@ fn authorize(e: &Event, context: &MergeContext) -> std::result::Result<(), Strin
         own_votes,
         reason_rules,
         searches,
+        form_stages,
+        forms,
     } = context;
     let has_created = *has_created;
     let role = roles.get(&e.actor_id).map(String::as_str).unwrap_or("");
@@ -521,6 +529,15 @@ fn authorize(e: &Event, context: &MergeContext) -> std::result::Result<(), Strin
             return Err("Die Suchversion ist hier nicht bekannt.".into());
         }
     }
+    if t == "FormConfirmed" {
+        let id = e.payload_str("form_id").and_then(|id| Uuid::parse_str(id).ok());
+        let version = e.payload.get("version").and_then(|v| v.as_i64());
+        let known =
+            id.and_then(|id| forms.get(&id)).is_some_and(|f| f.versions.iter().any(|v| Some(v.version) == version));
+        if !known {
+            return Err("Die Formularversion ist hier nicht bekannt.".into());
+        }
+    }
     if matches!(spec.stage, StageRule::Open | StageRule::OpenUnblinded) {
         let stage = e.stage_instance_id.ok_or("Stufe fehlt.")?;
         if !known_stages.contains(&stage) {
@@ -531,6 +548,18 @@ fn authorize(e: &Event, context: &MergeContext) -> std::result::Result<(), Strin
         }
         if spec.stage == StageRule::OpenUnblinded && blind_after.contains(&stage) {
             return Err("Konsens in einer verblindeten Stufe.".into());
+        }
+        // Stimmen gehören in Screening-Stufen, Formularwerte in Formular-Stufen.
+        match (t.starts_with("Form"), form_stages.get(&stage)) {
+            (true, None) => return Err("Die Stufe arbeitet nicht mit einem Formular.".into()),
+            (false, Some(_)) => return Err("Die Stufe arbeitet mit einem Formular, nicht mit Stimmen.".into()),
+            (true, Some(form)) if t != "FormEntryCompleted" => {
+                let version = e.payload.get("form_version").and_then(|v| v.as_i64()).unwrap_or(0);
+                let field = forms.field_in(form, version, e.payload_str("field").unwrap_or_default());
+                let field = field.ok_or("Das Feld gibt es in dieser Version des Formulars nicht.")?;
+                check_value(field, &normal(e.payload.get("value").unwrap_or(&serde_json::Value::Null)))?;
+            }
+            _ => {}
         }
         let record = e.payload_str("record_id").unwrap_or_default().to_string();
         if t == "ConsensusRecorded" && own_votes.contains(&(stage, record, e.actor_id)) {
@@ -590,6 +619,8 @@ mod tests {
                 own_votes: BTreeSet::new(),
                 reason_rules: BTreeMap::new(),
                 searches: BTreeSet::new(),
+                form_stages: BTreeMap::new(),
+                forms: Forms::default(),
             };
         let roles: &'static HashMap<Uuid, String> = Box::leak(Box::new(roles));
         let check =
