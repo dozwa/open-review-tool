@@ -4,6 +4,9 @@ use std::path::{Path, PathBuf};
 
 use ort_core::criteria::Criteria;
 use ort_core::exchange::{self, Bundle, MergeReport};
+use ort_core::fulltext::{
+    Assign, FileProblem, FullTextOverview, Location, Suggestion, ZoteroConfirm, ZoteroLink, ZoteroSuggestion,
+};
 use ort_core::search::Search;
 use ort_core::service::{
     ChainReport, Conflict, DuplicateList, ImportSource, NextRecord, OpenStage, PairDecision, RecordDetail,
@@ -17,7 +20,7 @@ use serde_json::Value;
 use tauri::State;
 use uuid::Uuid;
 
-use crate::AppState;
+use crate::{zotero, AppState};
 
 type Res<T> = Result<T, String>;
 
@@ -174,6 +177,130 @@ pub async fn duplicates_list(state: State<'_, AppState>, review_id: String) -> R
 #[tauri::command]
 pub async fn duplicates_resolve(state: State<'_, AppState>, review_id: String, pairs: Vec<PairDecision>) -> Res<usize> {
     open(&state, &review_id)?.resolve_duplicates(&pairs).map_err(err)
+}
+
+// ---------------------------------------------------------------- Volltexte
+
+#[tauri::command]
+pub async fn fulltext_overview(state: State<'_, AppState>, review_id: String) -> Res<FullTextOverview> {
+    open(&state, &review_id)?.fulltext_overview().map_err(err)
+}
+
+/// Verknüpft den Ordner auf diesem Rechner; ohne Pfad wird die Verknüpfung gelöst.
+#[tauri::command]
+pub async fn fulltext_folder_set(state: State<'_, AppState>, review_id: String, path: Option<String>) -> Res<()> {
+    open(&state, &review_id)?.set_fulltext_folder(path.as_deref().map(Path::new)).map_err(err)
+}
+
+#[tauri::command]
+pub async fn fulltext_suggestions(state: State<'_, AppState>, review_id: String) -> Res<Vec<Suggestion>> {
+    open(&state, &review_id)?.fulltext_suggestions().map_err(err)
+}
+
+#[tauri::command]
+pub async fn fulltext_assign(state: State<'_, AppState>, review_id: String, list: Vec<Assign>) -> Res<usize> {
+    open(&state, &review_id)?.assign_fulltexts(&list).map_err(err)
+}
+
+#[tauri::command]
+pub async fn fulltext_unavailable(
+    state: State<'_, AppState>,
+    review_id: String,
+    record_id: String,
+    reason: String,
+) -> Res<()> {
+    open(&state, &review_id)?.set_fulltext_unavailable(&uuid(&record_id)?, &reason).map_err(err)
+}
+
+#[tauri::command]
+pub async fn fulltext_reset(state: State<'_, AppState>, review_id: String, record_id: String) -> Res<()> {
+    open(&state, &review_id)?.reset_fulltext(&uuid(&record_id)?).map_err(err)
+}
+
+#[tauri::command]
+pub async fn fulltext_verify(state: State<'_, AppState>, review_id: String) -> Res<Vec<FileProblem>> {
+    open(&state, &review_id)?.verify_fulltexts().map_err(err)
+}
+
+/// Pfad eines Volltexts aus Zotero auf diesem Rechner; bei Volltexten aus dem Ordner `None`.
+fn zotero_file(review: &Review, record_id: &Uuid) -> Res<Option<PathBuf>> {
+    match review.fulltext_location(record_id).map_err(err)? {
+        Location::Folder(_) => Ok(None),
+        Location::Zotero(key) => {
+            let link = review.fulltext_overview().map_err(err)?.zotero;
+            let link = link.ok_or("Der Volltext liegt in Zotero, aber es ist keine Bibliothek verknüpft.")?;
+            zotero::file_path(&link, &key).map(Some)
+        }
+    }
+}
+
+/// Bytes des Volltexts für die Vorschau. Der Kern prüft Pfad und Prüfsumme; die Oberfläche bekommt
+/// nur den Inhalt, nie einen Pfad zum Selberlesen.
+#[tauri::command]
+pub async fn fulltext_read(
+    state: State<'_, AppState>,
+    review_id: String,
+    record_id: String,
+) -> Res<tauri::ipc::Response> {
+    let review = open(&state, &review_id)?;
+    let record = uuid(&record_id)?;
+    let file = zotero_file(&review, &record)?;
+    Ok(tauri::ipc::Response::new(review.read_fulltext(&record, file.as_deref()).map_err(err)?))
+}
+
+/// Öffnet den Volltext im Standardprogramm, nach derselben Prüfung wie die Vorschau.
+#[tauri::command]
+pub async fn fulltext_open_external(state: State<'_, AppState>, review_id: String, record_id: String) -> Res<()> {
+    let review = open(&state, &review_id)?;
+    let record = uuid(&record_id)?;
+    let file = zotero_file(&review, &record)?;
+    review.read_fulltext(&record, file.as_deref()).map_err(err)?;
+    let path = match (review.fulltext_location(&record).map_err(err)?, file) {
+        (Location::Folder(path), _) => path,
+        (_, Some(path)) => path,
+        _ => return Err("Die Datei ist nicht zu finden.".into()),
+    };
+    std::process::Command::new("open").arg(path).spawn().map_err(err)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn zotero_libraries() -> Res<Vec<zotero::Library>> {
+    zotero::libraries()
+}
+
+#[tauri::command]
+pub async fn zotero_link(state: State<'_, AppState>, review_id: String, link: ZoteroLink) -> Res<()> {
+    open(&state, &review_id)?.link_zotero(&link).map_err(err)
+}
+
+fn linked_zotero(review: &Review) -> Res<ZoteroLink> {
+    let link = review.fulltext_overview().map_err(err)?.zotero;
+    link.ok_or_else(|| "Es ist keine Zotero-Bibliothek verknüpft.".to_string())
+}
+
+/// Liest die verknüpfte Bibliothek und schlägt Zuordnungen für die offenen Einträge vor.
+#[tauri::command]
+pub async fn zotero_suggestions(state: State<'_, AppState>, review_id: String) -> Res<Vec<ZoteroSuggestion>> {
+    let review = open(&state, &review_id)?;
+    let items = zotero::items(&linked_zotero(&review)?)?;
+    review.zotero_suggestions(&items).map_err(err)
+}
+
+/// Bestätigt Zuordnungen. Den Pfad der PDF fragt die App bei Zotero ab; die Oberfläche nennt nur Schlüssel.
+#[tauri::command]
+pub async fn zotero_confirm(state: State<'_, AppState>, review_id: String, list: Vec<ZoteroConfirm>) -> Res<usize> {
+    let review = open(&state, &review_id)?;
+    let link = linked_zotero(&review)?;
+    let mut confirmed = Vec::new();
+    for mut item in list {
+        item.file = match &item.attachment_key {
+            Some(key) => Some(zotero::file_path(&link, key)?),
+            None => None,
+        };
+        confirmed.push(item);
+    }
+    review.confirm_zotero(&confirmed).map_err(err)
 }
 
 // ---------------------------------------------------------------- Stufen

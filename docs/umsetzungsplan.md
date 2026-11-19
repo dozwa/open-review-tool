@@ -242,6 +242,34 @@ Prüfung: Treffer je Quelle und Dublettenzahl aus dem Log stimmen mit den Import
 
 ### 4 Volltext (L)
 
+Stand 19.11.2026: umgesetzt bis auf das Markieren. Festlegungen beim Bau:
+
+- Die lokale Schnittstelle von Zotero (`http://127.0.0.1:23119/api`, ab Zotero 7, in den Einstellungen
+  einzuschalten) ist geprüft: Sie liefert Bibliotheken, Collections, Einträge mit Anhängen und über
+  `/items/<Schlüssel>/file/view/url` den Pfad der Datei, lesend und ohne Anmeldung. Das reicht. Die Abfrage
+  liegt in der App (`zotero.rs`), der Abgleich im Kern.
+- `FullTextStatusSet` kennt `retrieved` (Herkunft `folder` mit relativem Pfad oder `zotero` mit dem Schlüssel
+  des Anhangs, dazu Prüfsumme und Größe), `unavailable` (mit Grund) und `open` (nimmt beides zurück). Es gilt
+  das letzte Ereignis je Eintrag. Schreiben darf, wer Schreibrecht hat.
+- Der Ort des Ordners steht in der Tabelle `meta` der Review-Datei und nie im Log. Pfade im Log sind relativ,
+  ohne `..`; das prüft das Register auch beim Einlesen.
+- Vorschläge sind eine Projektion wie die Dublettenkandidaten: DOI in den Metadaten der PDF, DOI im Dateinamen,
+  Titel im Dateinamen (ab 85 %), zuletzt Autor und Jahr, wenn beides nur auf einen Eintrag passt. Unsichere
+  Vorschläge sind in der Oberfläche nicht angehakt.
+- `ZoteroItemMapped` hält die Zuordnung zum Zotero-Eintrag fest, auch wenn dort keine PDF hängt; das braucht
+  später das Rückschreiben. Eine eigene Bibliothek gilt nur auf dem Rechner, der sie verknüpft hat; für Teams
+  ist die Gruppenbibliothek gedacht.
+- „Braucht einen Volltext“ heißt: in der letzten Runde der Station eingeschlossen, aus der die Volltext-Station
+  schöpft. Verblindete Stufen zählen nicht. Ohne solche Station (freier Ablauf) zählen die Eingeschlossenen
+  aller Stufen.
+- Die Volltext-Station trägt in der Vorlage `requires_fulltext`. Ihre Stufe bekommt nur beschaffte Einträge und
+  keinen, der schon in einer früheren Runde war. Das Gate `all_fulltext_status` steht an „Volltexte beschaffen“.
+- Vorschau mit pdf.js (`pdfjs-dist`, Legacy-Build für die WebView älterer macOS-Versionen): Seiten werden erst
+  gerendert, wenn sie in die Nähe des sichtbaren Ausschnitts kommen. Die Bytes liefert `fulltext_read` nach
+  Prüfung der Prüfsumme. „Extern öffnen“ ist der Rückfall.
+- Offen: Markieren (`FullTextHighlightAdded`, `FullTextHighlightRemoved`), wie im Plan vorgesehen hinter
+  Meilenstein 5. Die Textebene der Vorschau ist dafür schon da.
+
 - **Ordner:** Die Leitung verknüpft einen Ordner. Die App schlägt Zuordnungen vor (DOI im Dateinamen oder in den
   PDF-Metadaten, sonst Titelähnlichkeit); jede Zuordnung wird bestätigt. Auch einzelne Dateien lassen sich
   zuordnen.

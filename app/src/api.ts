@@ -359,6 +359,87 @@ export interface MyVote {
 export interface RecordDetail {
   record: RecordItem;
   my_vote: MyVote | null;
+  fulltext: FullText | null;
+}
+
+/** Stand eines Volltexts. Die Datei liegt im verknüpften Ordner oder in Zotero, nie in der App. */
+export interface FullText {
+  status: "retrieved" | "unavailable";
+  origin: "folder" | "zotero" | "";
+  path: string;
+  zotero_key: string;
+  sha256: string;
+  size: number;
+  reason: string;
+  set_by: string;
+  set_at: string;
+}
+
+export interface ZoteroLink {
+  library_type: "user" | "group";
+  library_id: number;
+  collection_key: string | null;
+  name: string;
+}
+
+export interface ZoteroLibrary {
+  library_type: "user" | "group";
+  library_id: number;
+  name: string;
+  collections: { key: string; name: string }[];
+}
+
+export interface FullTextRow {
+  record_id: string;
+  title: string;
+  authors: string;
+  year: number | null;
+  doi: string;
+  needed: boolean;
+  fulltext: FullText | null;
+  file: "ok" | "missing" | "";
+  zotero_item: string | null;
+}
+
+export interface FullTextOverview {
+  folder: string | null;
+  folder_found: boolean;
+  zotero: ZoteroLink | null;
+  needed: number;
+  retrieved: number;
+  unavailable: number;
+  rows: FullTextRow[];
+}
+
+/** Vorschlag, eine Datei aus dem Ordner einem Eintrag zuzuordnen. */
+export interface FileSuggestion {
+  record_id: string;
+  title: string;
+  authors: string;
+  year: number | null;
+  path: string;
+  size: number;
+  basis: "doi_metadata" | "doi_filename" | "title" | "author_year";
+  similarity: number;
+}
+
+export interface ZoteroSuggestion {
+  record_id: string;
+  title: string;
+  authors: string;
+  year: number | null;
+  item_key: string;
+  item_title: string;
+  attachment_key: string | null;
+  basis: "doi" | "title";
+  similarity: number;
+}
+
+export interface FileProblem {
+  record_id: string;
+  title: string;
+  path: string;
+  problem: "missing" | "changed";
 }
 
 export interface Conflict {
@@ -510,6 +591,24 @@ export const api = {
   resolveDuplicates: (reviewId: string, pairs: PairDecision[]) =>
     call<number>("duplicates_resolve", { reviewId, pairs }),
   verifyChain: (reviewId: string) => call<ChainReport>("chain_verify", { reviewId }),
+
+  fulltexts: (reviewId: string) => call<FullTextOverview>("fulltext_overview", { reviewId }),
+  setFulltextFolder: (reviewId: string, path: string | null) => call<void>("fulltext_folder_set", { reviewId, path }),
+  fulltextSuggestions: (reviewId: string) => call<FileSuggestion[]>("fulltext_suggestions", { reviewId }),
+  assignFulltexts: (reviewId: string, list: { record_id: string; path: string }[]) =>
+    call<number>("fulltext_assign", { reviewId, list }),
+  fulltextUnavailable: (reviewId: string, recordId: string, reason: string) =>
+    call<void>("fulltext_unavailable", { reviewId, recordId, reason }),
+  resetFulltext: (reviewId: string, recordId: string) => call<void>("fulltext_reset", { reviewId, recordId }),
+  verifyFulltexts: (reviewId: string) => call<FileProblem[]>("fulltext_verify", { reviewId }),
+  /** Inhalt der PDF für die Vorschau; der Kern hat Pfad und Prüfsumme geprüft. */
+  readFulltext: (reviewId: string, recordId: string) => call<ArrayBuffer>("fulltext_read", { reviewId, recordId }),
+  openFulltext: (reviewId: string, recordId: string) => call<void>("fulltext_open_external", { reviewId, recordId }),
+  zoteroLibraries: () => call<ZoteroLibrary[]>("zotero_libraries"),
+  linkZotero: (reviewId: string, link: ZoteroLink) => call<void>("zotero_link", { reviewId, link }),
+  zoteroSuggestions: (reviewId: string) => call<ZoteroSuggestion[]>("zotero_suggestions", { reviewId }),
+  confirmZotero: (reviewId: string, list: { record_id: string; item_key: string; attachment_key: string | null }[]) =>
+    call<number>("zotero_confirm", { reviewId, list }),
 
   openStage: (reviewId: string, params: StageParams) => call<Stage>("stage_open", { reviewId, params }),
   stage: (reviewId: string, stageId: string) => call<StageDetail>("stage_detail", { reviewId, stageId }),

@@ -20,6 +20,7 @@ use crate::criteria::{check_reasons, Criteria};
 use crate::duplicates::{self, Resolutions};
 use crate::error::{conflict, forbidden, invalid, not_found, Result};
 use crate::event::{now_timestamp, parse_public_key, sha256_hex, Event, Identity, PublicIdentity};
+use crate::fulltext::FullText;
 use crate::import;
 use crate::projection::{FinalDecision, MaybeMode, ReviewState, StageState, Verify};
 use crate::search::{Search, SearchVersion, Searches, SEARCH_TYPES};
@@ -334,6 +335,8 @@ pub struct MyVote {
 pub struct RecordDetail {
     pub record: RecordItem,
     pub my_vote: Option<MyVote>,
+    /// Stand des Volltexts, falls einer beschafft oder als nicht beschaffbar vermerkt ist.
+    pub fulltext: Option<FullText>,
 }
 
 pub const LIST_LIMIT: usize = 200;
@@ -594,7 +597,7 @@ impl Review {
     }
 
     /// Einziger Weg der Fachlogik ins Log: prüft den Payload gegen das Register und hängt dann an.
-    fn append(&self, event_type: &str, stage_id: Option<Uuid>, payload: Value) -> Result<Event> {
+    pub(crate) fn append(&self, event_type: &str, stage_id: Option<Uuid>, payload: Value) -> Result<Event> {
         let version = catalog::spec(event_type).map_or(1, |s| s.version);
         catalog::validate(event_type, version, stage_id.as_ref(), &payload).map_err(invalid)?;
         self.store.append(&self.me, event_type, stage_id, payload)
@@ -616,7 +619,9 @@ impl Review {
         state.stage_ids.iter().map(|id| self.stage_state(id)).collect()
     }
 
-    fn facts(&self, state: &ReviewState, workflow: &Workflow) -> Result<Facts> {
+    fn facts(&self, state: &ReviewState, workflow: &Workflow, stages: &[StageState]) -> Result<Facts> {
+        let needed = self.fulltext_scope(workflow, stages)?;
+        let (fulltext_retrieved, fulltext_unavailable) = self.fulltexts()?.counts(&needed);
         let resolutions = self.resolutions()?;
         let (total, exact, resolved) = self.duplicate_counts(&resolutions)?;
         // Der Abgleich liest alle Titel; nur rechnen, wenn die Vorlage danach fragt.
@@ -632,6 +637,9 @@ impl Review {
             n_records: total - exact - resolved,
             n_searches: self.search_state()?.list.len() as i64,
             open_duplicates,
+            fulltext_needed: needed.len() as i64,
+            fulltext_retrieved,
+            fulltext_unavailable,
         })
     }
 
@@ -640,7 +648,8 @@ impl Review {
         let state = self.state()?;
         require(&state, &self.me.actor_id, &ROLES)?;
         let workflow = self.workflow()?;
-        Ok(workflow.stations(&self.facts(&state, &workflow)?, &self.stage_states(&state)?))
+        let stages = self.stage_states(&state)?;
+        Ok(workflow.stations(&self.facts(&state, &workflow, &stages)?, &stages))
     }
 
     pub fn station(&self, key: &str) -> Result<StationView> {
@@ -1287,7 +1296,8 @@ impl Review {
 
     fn workflow_view(&self, state: &ReviewState) -> Result<WorkflowView> {
         let workflow = self.workflow()?;
-        let stations = workflow.stations(&self.facts(state, &workflow)?, &self.stage_states(state)?);
+        let stages = self.stage_states(state)?;
+        let stations = workflow.stations(&self.facts(state, &workflow, &stages)?, &stages);
         Ok(WorkflowView {
             published: workflow.published(),
             version: workflow.version,
@@ -1328,7 +1338,7 @@ impl Review {
         // Station, Sperren und Regeln aus der Vorlage
         let workflow = self.workflow()?;
         let stages = self.stage_states(&state)?;
-        let views = workflow.stations(&self.facts(&state, &workflow)?, &stages);
+        let views = workflow.stations(&self.facts(&state, &workflow, &stages)?, &stages);
         let key = match (&params.station, workflow.published()) {
             (Some(key), _) => key.clone(),
             (None, false) => workflow.template.default_station().map(|s| s.key.clone()).unwrap_or_default(),
@@ -1441,6 +1451,27 @@ impl Review {
                 ids
             }
             _ => return Err(invalid("Unbekannter Umfang der Stufe.")),
+        };
+        // Volltext-Station: nur beschaffte Einträge, und keiner, der schon in einer früheren Runde war.
+        let ids = if station.requires_fulltext {
+            let fulltexts = self.fulltexts()?;
+            let mut earlier: BTreeSet<Uuid> = BTreeSet::new();
+            for round in &view.rounds {
+                earlier.extend(self.store.assignments(Some(&round.stage_id))?.into_iter().map(|a| a.record_id));
+            }
+            let ids: Vec<String> = ids
+                .into_iter()
+                .filter(|id| Uuid::parse_str(id).is_ok_and(|id| fulltexts.is_retrieved(&id) && !earlier.contains(&id)))
+                .collect();
+            if ids.is_empty() {
+                return Err(invalid(match earlier.is_empty() {
+                    true => "Für diese Stufe ist noch kein Volltext beschafft.",
+                    false => "Seit der letzten Runde ist kein weiterer Volltext beschafft worden.",
+                }));
+            }
+            ids
+        } else {
+            ids
         };
         if ids.is_empty() {
             return Err(invalid("Für diese Stufe gibt es keine Records."));
@@ -1803,7 +1834,8 @@ impl Review {
             reasons: v.reasons.clone(),
             note: v.note.clone(),
         });
-        Ok(RecordDetail { record: self.record_item(&record)?, my_vote })
+        let fulltext = Uuid::parse_str(&record).ok().and_then(|id| self.fulltexts().ok()?.status.remove(&id));
+        Ok(RecordDetail { record: self.record_item(&record)?, my_vote, fulltext })
     }
 
     // ------------------------------------------------------------ Auswertung

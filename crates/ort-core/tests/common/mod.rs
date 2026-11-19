@@ -166,3 +166,25 @@ pub fn send_package(owner: &Review, to: &Review) -> MergeReport {
 pub fn send_return(from: &Review, owner: &Review) -> MergeReport {
     merge(owner, &wire(&export_return(from).unwrap())).unwrap()
 }
+
+/// Legt für jeden Eintrag, der einen Volltext braucht und noch keinen hat, eine Datei in einen Ordner
+/// und ordnet sie zu. Der Dateiname ist der Titel; so würde ihn auch der Abgleich finden.
+pub fn retrieve_fulltexts(t: &Team) -> std::path::PathBuf {
+    let folder = t.dir.path().join("volltexte");
+    std::fs::create_dir_all(&folder).unwrap();
+    t.owner.set_fulltext_folder(Some(&folder)).unwrap();
+    let open: Vec<_> =
+        t.owner.fulltext_overview().unwrap().rows.into_iter().filter(|r| r.needed && r.fulltext.is_none()).collect();
+    let list: Vec<ort_core::fulltext::Assign> = open
+        .iter()
+        .map(|row| {
+            let name = format!("{}.pdf", row.title.replace(['/', ':', '?'], " "));
+            std::fs::write(folder.join(&name), format!("%PDF-1.4 {}", row.record_id)).unwrap();
+            ort_core::fulltext::Assign { record_id: row.record_id, path: name }
+        })
+        .collect();
+    if !list.is_empty() {
+        t.owner.assign_fulltexts(&list).unwrap();
+    }
+    folder
+}

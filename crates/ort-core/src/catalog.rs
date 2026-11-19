@@ -60,7 +60,7 @@ pub struct Spec {
     check: fn(&Value) -> Check,
 }
 
-pub static CATALOG: [Spec; 18] = [
+pub static CATALOG: [Spec; 21] = [
     Spec {
         name: "ReviewCreated",
         version: 1,
@@ -205,6 +205,30 @@ pub static CATALOG: [Spec; 18] = [
         stage: StageRule::None,
         check: duplicates_resolved,
     },
+    Spec {
+        name: "FullTextStatusSet",
+        version: 1,
+        chain: Chain::Main,
+        writer: Writer::Write,
+        stage: StageRule::None,
+        check: fulltext_status_set,
+    },
+    Spec {
+        name: "ZoteroLibraryLinked",
+        version: 1,
+        chain: Chain::Main,
+        writer: Writer::Manage,
+        stage: StageRule::None,
+        check: zotero_library_linked,
+    },
+    Spec {
+        name: "ZoteroItemMapped",
+        version: 1,
+        chain: Chain::Main,
+        writer: Writer::Manage,
+        stage: StageRule::None,
+        check: zotero_item_mapped,
+    },
 ];
 
 /// Woher die Treffer eines Imports stammen. Der Bericht zählt Datenbanken und Register getrennt von
@@ -212,6 +236,12 @@ pub static CATALOG: [Spec; 18] = [
 pub const ORIGINS: [&str; 4] = ["database", "register", "citation", "other"];
 /// Höchstzahl der Paare in einem `DuplicatesResolved`.
 pub const MAX_PAIRS: usize = 500;
+/// Zustand eines Volltexts: beschafft, nicht beschaffbar oder (wieder) offen.
+pub const FULLTEXT_STATUS: [&str; 3] = ["retrieved", "unavailable", "open"];
+/// Woher ein beschaffter Volltext kommt.
+pub const FULLTEXT_ORIGINS: [&str; 2] = ["folder", "zotero"];
+/// Höchstzahl der Zuordnungen in einem `ZoteroItemMapped`.
+pub const MAX_MAPPINGS: usize = 500;
 
 pub fn spec(event_type: &str) -> Option<&'static Spec> {
     CATALOG.iter().find(|s| s.name == event_type)
@@ -475,6 +505,69 @@ fn duplicates_resolved(p: &Value) -> Check {
             (_, None) => {}
             (_, Some(_)) => return Err("„keep“ gehört nur zu einer Dublette.".into()),
         }
+    }
+    Ok(())
+}
+
+/// Ob ein Text ein Pfad unterhalb des verknüpften Ordners ist: relativ, mit `/` getrennt, ohne `..`.
+pub fn is_relative_path(value: &str) -> bool {
+    !value.is_empty()
+        && !value.starts_with('/')
+        && !value.contains('\\')
+        && !value.contains('\0')
+        && value.split('/').all(|part| !part.is_empty() && part != "." && part != "..")
+}
+
+/// Schlüssel eines Zotero-Objekts: acht Zeichen aus Großbuchstaben und Ziffern.
+pub fn is_zotero_key(value: &str) -> bool {
+    value.len() == 8 && value.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
+}
+
+fn zotero_key(p: &Value, key: &str) -> Check {
+    if is_zotero_key(text(p, key)?) {
+        return Ok(());
+    }
+    Err(format!("Feld „{key}“ ist kein Zotero-Schlüssel."))
+}
+
+fn fulltext_status_set(p: &Value) -> Check {
+    uuid(p, "record_id")?;
+    one_of(p, "status", &FULLTEXT_STATUS)?;
+    match text(p, "status")? {
+        "retrieved" => {
+            one_of(p, "origin", &FULLTEXT_ORIGINS)?;
+            let sum = text(p, "sha256")?;
+            if sum.len() != 64 || !sum.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+                return Err("Feld „sha256“ ist keine Prüfsumme.".into());
+            }
+            integer(p, "size", 0)?;
+            match text(p, "origin")? {
+                "folder" if is_relative_path(text(p, "path")?) => Ok(()),
+                "folder" => Err("Feld „path“ ist kein Pfad innerhalb des Ordners.".into()),
+                _ => zotero_key(p, "zotero_key"),
+            }
+        }
+        "unavailable" => filled(p, "reason"),
+        _ => Ok(()),
+    }
+}
+
+fn zotero_library_linked(p: &Value) -> Check {
+    one_of(p, "library_type", &["user", "group"])?;
+    integer(p, "library_id", 0)?;
+    optional(p, "collection_key", zotero_key)?;
+    filled(p, "name")
+}
+
+fn zotero_item_mapped(p: &Value) -> Check {
+    let items = p.get("items").and_then(Value::as_array).ok_or("Feld „items“ fehlt oder ist keine Liste.")?;
+    if items.is_empty() || items.len() > MAX_MAPPINGS {
+        return Err(format!("Ein Ereignis ordnet 1 bis {MAX_MAPPINGS} Einträge zu."));
+    }
+    for item in items {
+        uuid(item, "record_id")?;
+        // Ohne Schlüssel ist die Zuordnung aufgehoben.
+        optional(item, "item_key", zotero_key)?;
     }
     Ok(())
 }
@@ -746,6 +839,48 @@ mod tests {
             assert!(validate("DuplicatesResolved", 1, None, &pairs(pair)).is_err());
         }
         assert!(validate("DuplicatesResolved", 1, None, &json!({"pairs": []})).is_err());
+    }
+
+    #[test]
+    fn fulltext_and_zotero_payloads_are_checked() {
+        let id = Uuid::new_v4().to_string();
+        let sum = "a".repeat(64);
+        let ok = |t: &str, p: Value| validate(t, 1, None, &p);
+        let folder = json!({"record_id": id, "status": "retrieved", "origin": "folder", "path": "a/b.pdf", "sha256": sum, "size": 10});
+        assert_eq!(ok("FullTextStatusSet", folder.clone()), Ok(()));
+        for path in ["/etc/passwd", "../b.pdf", "a//b.pdf", "a/../b.pdf", ""] {
+            let mut bad = folder.clone();
+            bad["path"] = json!(path);
+            assert!(ok("FullTextStatusSet", bad).is_err(), "{path}");
+        }
+        let mut bad = folder.clone();
+        bad["sha256"] = json!("abc");
+        assert!(ok("FullTextStatusSet", bad).unwrap_err().contains("Prüfsumme"));
+        let zotero = json!({"record_id": id, "status": "retrieved", "origin": "zotero", "zotero_key": "ABCD2345", "sha256": sum, "size": 1});
+        assert_eq!(ok("FullTextStatusSet", zotero.clone()), Ok(()));
+        let mut bad = zotero.clone();
+        bad["zotero_key"] = json!("abc");
+        assert!(ok("FullTextStatusSet", bad).is_err());
+        assert_eq!(
+            ok("FullTextStatusSet", json!({"record_id": id, "status": "unavailable", "reason": "Fernleihe erfolglos"})),
+            Ok(())
+        );
+        assert!(ok("FullTextStatusSet", json!({"record_id": id, "status": "unavailable", "reason": " "})).is_err());
+        assert_eq!(ok("FullTextStatusSet", json!({"record_id": id, "status": "open"})), Ok(()));
+        assert!(ok("FullTextStatusSet", json!({"record_id": id, "status": "lost"})).is_err());
+
+        let link = json!({"library_type": "group", "library_id": 12, "collection_key": "ABCD2345", "name": "Team"});
+        assert_eq!(ok("ZoteroLibraryLinked", link), Ok(()));
+        assert!(ok("ZoteroLibraryLinked", json!({"library_type": "web", "library_id": 0, "name": "x"})).is_err());
+        assert_eq!(
+            ok(
+                "ZoteroItemMapped",
+                json!({"items": [{"record_id": id, "item_key": "ABCD2345"}, {"record_id": id, "item_key": null}]})
+            ),
+            Ok(())
+        );
+        assert!(ok("ZoteroItemMapped", json!({"items": []})).is_err());
+        assert!(ok("ZoteroItemMapped", json!({"items": [{"record_id": id, "item_key": "kurz"}]})).is_err());
     }
 
     #[test]

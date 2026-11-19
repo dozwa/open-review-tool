@@ -23,11 +23,17 @@ use crate::projection::{order_key, MaybeMode, StageState};
 pub const STATION_KINDS: [&str; 4] = ["setup", "screening", "form", "report"];
 pub const DECISION_RULES: [&str; 3] = ["unanimous", "liberal", "single_verified"];
 pub const CONFLICT_RULES: [&str; 2] = ["discussion", "third_person"];
-const SETUP_CHECKS: [&str; 5] =
-    ["criteria_published", "min_writers", "records_imported", "search_documented", "no_unresolved_duplicates"];
+const SETUP_CHECKS: [&str; 6] = [
+    "criteria_published",
+    "min_writers",
+    "records_imported",
+    "search_documented",
+    "no_unresolved_duplicates",
+    "all_fulltext_status",
+];
 const SCREENING_CHECKS: [&str; 3] = ["agreement_min", "all_decided", "no_open_conflicts"];
 /// Werkzeuge für `setup`-Stationen, die diese App-Version schon hat.
-const BUILT_TOOLS: [&str; 3] = ["protocol", "search", "import"];
+const BUILT_TOOLS: [&str; 4] = ["protocol", "search", "import", "fulltext"];
 pub const WORKFLOW_TYPES: [&str; 3] = ["WorkflowVersionPublished", "GateEvaluated", "GateOverridden"];
 
 const BUILTIN: [&str; 2] = [include_str!("../templates/jbi_scoping.json"), include_str!("../templates/free.json")];
@@ -107,6 +113,9 @@ pub struct Station {
     /// Jeder Ausschluss braucht genau einen Hauptgrund (Volltext).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub reason_required: bool,
+    /// Die Stufe bekommt nur Einträge mit beschafftem Volltext; Nachzügler laufen als weitere Runde.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub requires_fulltext: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -230,6 +239,9 @@ impl Template {
                     }
                     other => return Err(format!("Station „{name}“: unbekannter Umfang „{other}“.")),
                 }
+            }
+            if s.requires_fulltext && s.input.as_ref().is_none_or(|i| i.scope != "from_station") {
+                return Err(format!("Station „{name}“: Volltexte setzen eine Eingangsstation voraus."));
             }
             if s.kind == "screening" {
                 screening.insert(name);
@@ -421,6 +433,10 @@ pub struct Facts {
     pub n_searches: i64,
     /// Mögliche Dubletten, über die noch nicht entschieden ist.
     pub open_duplicates: i64,
+    /// Einträge, die einen Volltext brauchen: die Eingeschlossenen der Station vor dem Volltext.
+    pub fulltext_needed: i64,
+    pub fulltext_retrieved: i64,
+    pub fulltext_unavailable: i64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -553,6 +569,15 @@ impl Workflow {
                     1 => "1 Suche".to_string(),
                     n => format!("{n} Suchen"),
                 },
+            ),
+            "all_fulltext_status" => (
+                "Jeder Volltext beschafft oder als nicht beschaffbar vermerkt".to_string(),
+                facts.fulltext_needed > 0
+                    && facts.fulltext_retrieved + facts.fulltext_unavailable >= facts.fulltext_needed,
+                format!(
+                    "{} von {} beschafft, {} nicht beschaffbar",
+                    facts.fulltext_retrieved, facts.fulltext_needed, facts.fulltext_unavailable
+                ),
             ),
             "no_unresolved_duplicates" => (
                 "Mögliche Dubletten entschieden".to_string(),

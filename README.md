@@ -7,13 +7,15 @@ Zusammenarbeit ohne Server über Austauschdateien.
 
 > Status (19.11.2026): Mac-App mit Rust und Tauri 2. Der vollständige Ablauf eines Scoping Reviews wird nach
 > `docs/umsetzungsplan.md` in Meilensteinen gebaut; fertig sind 0 (Fundament), 1 (Vorlage und Ablauf),
-> 2 (Kriterien und Screening-Ansicht) und 3 (Suche, Import, Dubletten).
+> 2 (Kriterien und Screening-Ansicht), 3 (Suche, Import, Dubletten) und 4 (Volltext, ohne das Markieren).
 > Enthalten: Identität mit Schlüssel im Schlüsselbund, Reviews mit Rollen, Review-Typ als Vorlage mit Stationen,
 > Gates und Runden, Kriterien mit Kürzeln und Erläuterungen, Suchen mit Versionen und Peer-Review-Vermerk, Import
 > von RIS, BibTeX und PubMed (nbib) mit Suchversion und Herkunft, exakte und unscharfe Dubletten, Stufen mit drei
-> Auswahlregeln, verblindetes Screening in drei Spalten mit Filtern, Pflichtgrund im Volltext, Konflikte und
-> Konsens (auch als Dritt-Entscheid), Übereinstimmung, CSV-Export, Pakete und Rückmeldungen.
-> Noch nicht enthalten: Volltexte, Zotero, Charting, Bericht, signierte und notarisierte App.
+> Auswahlregeln, verblindetes Screening in drei Spalten mit Filtern, Volltexte aus einem Ordner oder aus Zotero
+> mit Prüfsumme und Vorschau in der App, Pflichtgrund im Volltext, Konflikte und Konsens (auch als
+> Dritt-Entscheid), Übereinstimmung, CSV-Export, Pakete und Rückmeldungen.
+> Noch nicht enthalten: Markieren im Volltext, Rückschreiben nach Zotero, Charting, Bericht, signierte und
+> notarisierte App.
 
 ## So arbeitet ein Team
 
@@ -67,7 +69,7 @@ Tauri 2 mit der WebView von macOS, React 18.
 
 ## Wie es geprüft ist
 
-- **Kern:** 102 Tests. Darunter die Referenzwerte der früheren SQL-Tests (Cohen's Kappa gegen scikit-learn,
+- **Kern:** 110 Tests, dazu 2 für das Lesen der Zotero-Antworten in der App. Darunter die Referenzwerte der früheren SQL-Tests (Cohen's Kappa gegen scikit-learn,
   Fleiss' Kappa am Wikipedia-Beispiel, Krippendorffs Alpha am publizierten Beispiel mit 0,743, PABAK, Prozent,
   sechs `final_decision`-Szenarien, Maybe-Regel). Die Werte erzeugt `crates/ort-core/tests/fixtures/make_agreement_fixtures.py`.
 - **Austausch:** veränderte Datei, nachträglich neu gehashte Datei ohne Signatur, Außenstehende, Lücken in einer
@@ -82,6 +84,11 @@ Tauri 2 mit der WebView von macOS, React 18.
   mit und ohne DOI wird vorgeschlagen, Titel mit anderer Zahl nicht; eine entschiedene Dublette fehlt in neuen
   Stufen, offene Stufen bleiben; ein Import mit unbekannter Suchversion wird beim Einlesen abgewiesen; Treffer je
   Quelle und Dublettenzahl aus dem Log stimmen auf jedem Rechner mit den Tabellen überein.
+- **Volltexte:** Die Volltext-Stufe enthält nur beschaffte Einträge, ein Nachzügler läuft allein als zweite
+  Runde; die Zahlen stehen an der Station. Eine ersetzte Datei fällt an der Prüfsumme auf, eine fehlende wird
+  gemeldet; nichts außerhalb des verknüpften Ordners lässt sich zuordnen, auch nicht über ein eingelesenes
+  Ereignis mit `../` im Pfad. Jede Person verknüpft den Ordner an ihrem eigenen Ort; im Log steht kein
+  lokaler Pfad. Status darf setzen, wer Schreibrecht hat; Zotero verknüpft nur die Leitung.
 - **Ablauf:** Owner, zwei Reviewer und eine Person mit Leserecht mit getrennten Dateien, nur über Pakete und
   Rückmeldungen: verblindetes Screening, Paket ohne fremde Stimmen, Entblinden, Konflikte, Konsens, Revision,
   CSV, Abschluss mit Snapshot, abgewiesene Nachzügler, Folgestufe, Prüfung aller Ketten.
@@ -124,10 +131,18 @@ Nur für Entwicklung und Tests.
   Log, nur die Entscheidungen. Eine spätere Version mit anderem Abgleich kann deshalb neue Paare zeigen.
 - **Suche:** Ein Import ohne Suchversion bleibt möglich. Die Vorlage „JBI Scoping Review“ verlangt nur, dass
   mindestens eine Suche festgehalten ist, nicht dass jeder Import eine nennt.
+- **Volltexte:** Die Dateien liegen nie in der App und nie im Paket. Wer einen Volltext lesen will, braucht
+  den Ordner (oder die Zotero-Gruppenbibliothek) auf dem eigenen Rechner. Vorschläge für Zuordnungen sind
+  berechnet und stehen nicht im Log. Die DOI in einer PDF findet die App nur, wenn die Metadaten
+  unkomprimiert in der Datei stehen. Volltexte aus Zotero prüft „Dateien prüfen“ nicht mit; ihre Prüfsumme
+  wird beim Öffnen geprüft. Das Markieren im Volltext (zweiter Schritt im Plan) ist noch nicht gebaut.
+- **Volltext-Stufe in Runden:** Später beschaffte Volltexte laufen als weitere Runde der Station. Eine Station,
+  die aus dem Volltext-Screening schöpft, nimmt bisher nur die letzte Runde; das Zusammenführen der Runden
+  gehört zum Bericht (Meilenstein 5).
 - **Rollenprüfung beim Einlesen:** nach dem Stand nach dem Zusammenführen, nicht zum Zeitpunkt jedes Ereignisses.
 - **Gates:** Das Ergebnis wird beim Schließen einer Stufe auf dem Rechner der Leitung berechnet und als
   `GateEvaluated` festgehalten. Schließen ist auch mit nicht erfülltem Gate möglich; gesperrt wird die nächste
-  Station. Stationen, die die App noch nicht bearbeiten kann (Volltexte, Charting, Bericht), stehen in der
+  Station. Stationen, die die App noch nicht bearbeiten kann (Zitationssuche, Charting, Bericht), stehen in der
   Leiste als „folgt“ und sperren nichts.
 - **Eine Stimme mit Prüfung (`single_verified`):** Die Stufe ist nie verblindet, weil die zweite Person die
   Ausschlüsse sehen muss. Wer was schon bewertet hat, weiß eine Person erst nach dem nächsten Paket.

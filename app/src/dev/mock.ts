@@ -94,7 +94,10 @@ const jbiStations = [
     ],
     rounds: [{ round: 1, stage_id: "s2", name: "Titel/Abstract", closed: false, gate: null }],
   }),
-  station("fulltext_retrieval", "setup", "Volltexte beschaffen", "Jeder eingeschlossene Eintrag ist beschafft oder mit Grund nicht beschaffbar.", { tool: "fulltext" }),
+  station("fulltext_retrieval", "setup", "Volltexte beschaffen", "Jeder eingeschlossene Eintrag ist beschafft oder mit Grund nicht beschaffbar.", {
+    tool: "fulltext", available: true, blocking: true,
+    checks: [{ check: "all_fulltext_status", label: "Jeder Volltext beschafft oder als nicht beschaffbar vermerkt", passed: false, detail: "2 von 6 beschafft, 1 nicht beschaffbar" }],
+  }),
   station("fulltext", "screening", "Volltext-Screening", "Eingeschlossene aus Titel/Abstract am Volltext prüfen, danach Klärung.", {
     blocking: true, defaults: { name: "Volltext-Screening", round: 1, scope: "from_stage", sample_size: null, source_stage: "s2", rules, reason_required: true },
   }),
@@ -203,6 +206,59 @@ let duplicatePairs = [
 ];
 let duplicateCounts = { n_resolved: 0, n_distinct: 0 };
 
+// Kleine zweiseitige PDF für die Vorschau, damit Blättern, Zoom und Suche etwas zu zeigen haben.
+function samplePdf(title: string): ArrayBuffer {
+  const page = (lines: string[]) => `BT /F1 12 Tf 60 780 Td 16 TL ${lines.map((l) => `(${l.replace(/[()\\]/g, "")}) Tj T*`).join(" ")} ET`;
+  const streams = [
+    page([title.slice(0, 70), "", "Background: Migraine is a common neurological disorder.", "Methods: Randomised trial of a smartphone app in adults with migraine.", "Results: Monthly migraine days fell in the intervention group."]),
+    page(["Discussion", "", "The app was acceptable and adherence was high.", "Limitations include the short follow-up of twelve weeks.", "Keywords: migraine, smartphone, telemedicine"]),
+  ];
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 5 0 R /Resources << /Font << /F1 7 0 R >> >> >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 6 0 R /Resources << /Font << /F1 7 0 R >> >> >>",
+    ...streams.map((body) => `<< /Length ${body.length} >>\nstream\n${body}\nendstream`),
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  ];
+  let out = "%PDF-1.4\n";
+  const offsets = objects.map((body, i) => {
+    const at = out.length;
+    out += `${i + 1} 0 obj\n${body}\nendobj\n`;
+    return at;
+  });
+  const xref = out.length;
+  out += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.map((o) => `${String(o).padStart(10, "0")} 00000 n \n`).join("")}`;
+  out += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
+  return new TextEncoder().encode(out).buffer as ArrayBuffer;
+}
+
+const fulltextOf = (path: string) => ({
+  status: "retrieved", origin: "folder", path, zotero_key: "", sha256: "ab".repeat(32), size: 1_480_000, reason: "", set_by: me.actor_id, set_at: "2026-11-18T10:00:00Z",
+});
+const ftRow = (i: number, title: string, authors: string, year: number, extra: Record<string, unknown> = {}) => ({
+  record_id: `rec-${i}`, title, authors, year, doi: i % 2 ? `10.5555/mig.2023.10${i}` : "", needed: true, fulltext: null as Record<string, unknown> | null, file: "", zotero_item: null as string | null, ...extra,
+});
+const fulltexts = {
+  folder: "/Users/dorian/Reviews/Migräne/Volltexte" as string | null, folder_found: true,
+  zotero: null as Record<string, unknown> | null,
+  rows: [
+    ftRow(0, "Smartphone-based behavioural therapy for episodic migraine: a randomised trial", "Okafor C.; Rossi M.", 2023, { fulltext: fulltextOf("Okafor - 2023 - Smartphone-based behavioural therapy.pdf"), file: "ok" }),
+    ftRow(1, "Telemedicine follow-up in a tertiary headache centre", "Lindqvist P.; Meyer A.", 2022, { fulltext: fulltextOf("unter/lindqvist2022.pdf"), file: "ok" }),
+    ftRow(2, "A wearable neuromodulation device with app feedback for migraine prevention", "Tanaka H.", 2021, {
+      fulltext: { ...fulltextOf(""), status: "unavailable", origin: "", size: 0, sha256: "", reason: "Fernleihe erfolglos, Autorin antwortet nicht" },
+    }),
+    ftRow(3, "Digital headache diaries and adherence in adolescents", "Novak J.; Keller J.", 2020),
+    ftRow(4, "App-guided relaxation training for chronic migraine: cohort study", "Suzuki K.; Moreau L.", 2024),
+    ftRow(5, "Patient experiences with a migraine self-management app: qualitative study", "Haddad S.", 2022, { zotero_item: "ABCD2345" }),
+  ],
+};
+const fulltextView = () => {
+  const has = (status: string) => fulltexts.rows.filter((r) => r.fulltext?.status === status).length;
+  return { ...fulltexts, needed: fulltexts.rows.length, retrieved: has("retrieved"), unavailable: has("unavailable") };
+};
+const ftRowOf = (id: unknown) => fulltexts.rows.find((r) => r.record_id === id);
+
 const stageOf = (id: unknown) => [...stages, fulltextStage].find((x) => x.id === id) ?? stages[1];
 const nextOpen = () => records.find((r) => !listState[r.id].mine) ?? null;
 const doneCount = () => records.filter((r) => listState[r.id].mine).length;
@@ -302,6 +358,7 @@ export function installMock() {
         return {
           record: records.find((r) => r.id === a.recordId),
           my_vote: st?.mine ? { decision: st.mine, primary_reason: st.primary, reasons: [], note: "" } : null,
+          fulltext: a.stageId === "s3" ? fulltextOf("Okafor - 2023 - Smartphone-based behavioural therapy.pdf") : null,
         };
       }
       case "vote_cast": {
@@ -341,6 +398,39 @@ export function installMock() {
           { name: "Clara Weiß", decision: "maybe", primary_reason: null, reasons: [], note: "Kein Abstract vorhanden, Volltext nötig." },
         ] },
       ];
+      case "fulltext_overview": return a.reviewId === "r2" ? { folder: null, folder_found: false, zotero: null, needed: 0, retrieved: 0, unavailable: 0, rows: [] } : fulltextView();
+      case "fulltext_folder_set": fulltexts.folder = (a.path as string | null) ?? null; return null;
+      case "fulltext_suggestions": return fulltexts.rows.filter((r) => !r.fulltext).slice(0, 2).map((r, i) => ({
+        record_id: r.record_id, title: r.title, authors: r.authors, year: r.year, size: 900_000,
+        path: i === 0 ? "Novak - 2020 - Digital headache diaries and adherence.pdf" : "suzuki2024.pdf",
+        basis: i === 0 ? "title" : "author_year", similarity: i === 0 ? 97 : 0,
+      }));
+      case "fulltext_assign": {
+        const list = a.list as { record_id: string; path: string }[];
+        list.forEach((item) => Object.assign(ftRowOf(item.record_id) ?? {}, { fulltext: fulltextOf(item.path), file: "ok" }));
+        return list.length;
+      }
+      case "fulltext_unavailable": Object.assign(ftRowOf(a.recordId) ?? {}, { fulltext: { ...fulltextOf(""), status: "unavailable", origin: "", reason: String(a.reason) } }); return null;
+      case "fulltext_reset": Object.assign(ftRowOf(a.recordId) ?? {}, { fulltext: null, file: "" }); return null;
+      case "fulltext_verify": return [{ record_id: "rec-1", title: fulltexts.rows[1].title, path: "unter/lindqvist2022.pdf", problem: "changed" }];
+      case "fulltext_read": return samplePdf(ftRowOf(a.recordId)?.title ?? records.find((r) => r.id === a.recordId)?.title ?? "Volltext");
+      case "fulltext_open_external": return null;
+      case "zotero_libraries": return [
+        { library_type: "user", library_id: 0, name: "Meine Bibliothek", collections: [{ key: "COLL0001", name: "Migräne Review" }] },
+        { library_type: "group", library_id: 4711, name: "AG Kopfschmerz", collections: [] },
+      ];
+      case "zotero_link": fulltexts.zotero = a.link as Record<string, unknown>; return null;
+      case "zotero_suggestions": return fulltexts.rows.filter((r) => !r.fulltext).slice(0, 2).map((r, i) => ({
+        record_id: r.record_id, title: r.title, authors: r.authors, year: r.year, item_key: `ITEM000${i}`, item_title: r.title,
+        attachment_key: i === 0 ? "PDF00001" : null, basis: i === 0 ? "doi" : "title", similarity: 100,
+      }));
+      case "zotero_confirm": {
+        const list = a.list as { record_id: string; item_key: string; attachment_key: string | null }[];
+        list.forEach((item) => Object.assign(ftRowOf(item.record_id) ?? {}, item.attachment_key
+          ? { fulltext: { ...fulltextOf(""), origin: "zotero", zotero_key: item.attachment_key }, zotero_item: item.item_key }
+          : { zotero_item: item.item_key }));
+        return list.filter((item) => item.attachment_key).length;
+      }
       case "chain_verify": return { n_events: 214, n_bad: 0, problems: [], ok: true };
       case "plugin:dialog|open": case "plugin:dialog|save": return null;
       case "plugin:dialog|ask": case "plugin:dialog|message": return true;

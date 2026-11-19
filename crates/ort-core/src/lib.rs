@@ -18,6 +18,7 @@ pub mod duplicates;
 pub mod error;
 pub mod event;
 pub mod exchange;
+pub mod fulltext;
 pub mod import;
 pub mod projection;
 pub mod search;

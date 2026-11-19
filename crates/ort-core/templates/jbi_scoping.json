@@ -70,15 +70,17 @@
       "kind": "setup",
       "label": "Volltexte beschaffen",
       "description": "Jeder eingeschlossene Eintrag ist beschafft oder mit Grund nicht beschaffbar.",
-      "tool": "fulltext"
+      "tool": "fulltext",
+      "gate": [{ "check": "all_fulltext_status" }]
     },
     {
       "key": "fulltext",
       "kind": "screening",
       "label": "Volltext-Screening",
-      "description": "Eingeschlossene aus Titel/Abstract am Volltext prüfen, danach Klärung. Jeder Ausschluss braucht genau einen Hauptgrund.",
+      "description": "Eingeschlossene aus Titel/Abstract mit beschafftem Volltext prüfen, danach Klärung. Jeder Ausschluss braucht genau einen Hauptgrund. Später beschaffte Volltexte laufen als weitere Runde.",
       "input": { "scope": "from_station", "station": "title_abstract" },
       "reason_required": true,
+      "requires_fulltext": true,
       "gate": [{ "check": "all_decided" }, { "check": "no_open_conflicts" }]
     },
     {

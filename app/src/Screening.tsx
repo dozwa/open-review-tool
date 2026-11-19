@@ -4,10 +4,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
-import { api, canVote, errorText, MyVote, Progress, reasonsOf, RecordFilter, RecordItem, RecordList, StageDetail, term } from "./api";
+import { api, canVote, errorText, FullText, MyVote, Progress, reasonsOf, RecordFilter, RecordItem, RecordList, StageDetail, term } from "./api";
 import { CriteriaView } from "./Criteria";
+import { PdfView } from "./PdfView";
 import { DECISION_LABEL, RecordView } from "./StagePages";
-import { Banner, Empty, Icon, Kbd, Pill } from "./ui";
+import { Banner, Empty, Icon, Kbd, Pill, Segmented } from "./ui";
 
 const PAGE = 200;
 const DECISION_FILTERS: [string, string][] = [
@@ -61,6 +62,8 @@ function Screening() {
   const [progress, setProgress] = useState<Progress | null>(null);
   const [record, setRecord] = useState<RecordItem | null>(null);
   const [myVote, setMyVote] = useState<MyVote | null>(null);
+  const [fulltext, setFulltext] = useState<FullText | null>(null);
+  const [reading, setReading] = useState<"abstract" | "fulltext" | null>(null);
   const [primary, setPrimary] = useState<string | null>(null);
   const [reasons, setReasons] = useState<string[]>([]);
   const [note, setNote] = useState("");
@@ -88,6 +91,18 @@ function Screening() {
     setReasons(vote?.reasons ?? []);
     setNote(vote?.note ?? "");
   }, []);
+
+  // Ob es zum Eintrag einen Volltext gibt, weiß nur der Kern.
+  const recordId = record?.id;
+  useEffect(() => {
+    let stale = false;
+    setFulltext(null);
+    if (recordId) api.record(reviewId, stageId, recordId).then((found) => !stale && setFulltext(found.fulltext)).catch(() => undefined);
+    return () => {
+      stale = true;
+    };
+  }, [reviewId, stageId, recordId]);
+  const loadFulltext = useCallback(() => api.readFulltext(reviewId, recordId ?? ""), [reviewId, recordId]);
 
   const select = useCallback(async (recordId: string) => {
     try {
@@ -214,6 +229,9 @@ function Screening() {
   const locked = new Set(list?.locked ?? []);
   const voters = detail.members.filter((m) => canVote(m.role));
   const mayVote = canVote(detail.role) && !stage.closed;
+  const hasFulltext = fulltext?.status === "retrieved";
+  // In Stufen mit Pflichtgrund (Volltext) steht die PDF vorn, sonst der Abstract.
+  const showFulltext = hasFulltext && (reading ?? (stage.reason_required ? "fulltext" : "abstract")) === "fulltext";
   const pct = progress ? Math.round((progress.done / Math.max(progress.total, 1)) * 100) : 0;
 
   return (
@@ -294,12 +312,28 @@ function Screening() {
           )}
           {record && (
             <>
-              <div className="reading">
-                <RecordView record={record} criteria={criteria} large showSource={showSource} />
-                <button className="link source-toggle" onClick={() => setShowSource(!showSource)}>
-                  {showSource ? "Autoren und Zeitschrift ausblenden" : "Autoren und Zeitschrift einblenden"}
-                </button>
-              </div>
+              {hasFulltext && (
+                <div className="reading-switch">
+                  <Segmented<"abstract" | "fulltext">
+                    label="Ansicht"
+                    value={showFulltext ? "fulltext" : "abstract"}
+                    onChange={setReading}
+                    options={[{ value: "abstract", label: "Titel und Abstract" }, { value: "fulltext", label: "Volltext" }]}
+                  />
+                  {showFulltext && <span className="reading-title" title={record.title}>{record.title}</span>}
+                </div>
+              )}
+              {fulltext?.status === "unavailable" && <p className="reading-note">Volltext nicht beschaffbar: {fulltext.reason}</p>}
+              {showFulltext ? (
+                <PdfView load={loadFulltext} onExternal={() => api.openFulltext(reviewId, record.id).catch((e) => setError(errorText(e)))} />
+              ) : (
+                <div className="reading">
+                  <RecordView record={record} criteria={criteria} large showSource={showSource} />
+                  <button className="link source-toggle" onClick={() => setShowSource(!showSource)}>
+                    {showSource ? "Autoren und Zeitschrift ausblenden" : "Autoren und Zeitschrift einblenden"}
+                  </button>
+                </div>
+              )}
               {mayVote && (
                 <div className="decision-dock">
                   {myVote && (

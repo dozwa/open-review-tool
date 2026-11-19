@@ -2,14 +2,20 @@
 //! eigenen Dateien, Pakete, Rückmeldungen, Entblinden, Konsens. Die Studien sind erfunden
 //! (DOI-Präfix 10.5555 ist für Tests reserviert).
 //!
-//!     cargo run -p ort-core --example demo_data -- /tmp/ort-demo "Dein Name"
+//!     cargo run -p ort-core --example demo_data -- /tmp/ort-demo "Dein Name" [zotero.ris]
 //!     cd app && ORT_DATA_DIR=/tmp/ort-demo ORT_KEY_STORE=file npm run tauri dev
+//!
+//! Volltexte: Im Datenverzeichnis entsteht der Ordner `volltexte` mit erzeugten PDF-Dateien. Ein Teil
+//! ist zugeordnet, ein Teil wartet als Vorschlag, einer ist als nicht beschaffbar vermerkt. Verknüpft
+//! ist außerdem die eigene Zotero-Bibliothek. Mit einer RIS-Datei als drittem Argument (z. B. ein
+//! Export aus Zotero) kommen deren Einträge als dritte Quelle dazu; „In Zotero suchen“ findet sie dann.
 
 use std::path::{Path, PathBuf};
 
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
 use ort_core::exchange::{create_from_package, export_package, export_return, merge, Bundle};
+use ort_core::fulltext::{Assign, ZoteroLink};
 use ort_core::service::{ImportSource, OpenStage};
 use ort_core::{Identity, Review};
 use rand::{Rng, SeedableRng};
@@ -136,6 +142,60 @@ fn vote_like(
     }
 }
 
+/// Kleine gültige PDF mit zwei Seiten. Die DOI steht in den Metadaten, wie Verlage sie eintragen.
+fn pdf(title: &str, authors: &str, doi: &str) -> Vec<u8> {
+    let plain =
+        |text: &str| -> String { text.chars().filter(|c| c.is_ascii() && !"()\\".contains(*c)).take(84).collect() };
+    let page = |lines: &[String]| {
+        let text: Vec<String> = lines.iter().map(|l| format!("({}) Tj T*", plain(l))).collect();
+        format!("BT /F1 12 Tf 60 780 Td 18 TL {} ET", text.join(" "))
+    };
+    let streams = [
+        page(&[
+            title.to_string(),
+            authors.to_string(),
+            String::new(),
+            "Background: Migraine is a common neurological disorder with a high burden.".into(),
+            "Methods: Participants used the digital intervention for twelve weeks.".into(),
+            "Results: Monthly migraine days fell and adherence was high.".into(),
+        ]),
+        page(&[
+            "Discussion".into(),
+            String::new(),
+            "The intervention was acceptable to participants.".into(),
+            "Limitations include the short follow-up and self-reported outcomes.".into(),
+            "This document is invented demo content of the Open Review Tool.".into(),
+        ]),
+    ];
+    let page_object = |contents: usize| {
+        format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents {contents} 0 R /Resources << /Font << /F1 7 0 R >> >> >>")
+    };
+    let subject = if doi.is_empty() { String::new() } else { format!(" /Subject (doi:{doi})") };
+    let objects = [
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_string(),
+        page_object(5),
+        page_object(6),
+        format!("<< /Length {} >>\nstream\n{}\nendstream", streams[0].len(), streams[0]),
+        format!("<< /Length {} >>\nstream\n{}\nendstream", streams[1].len(), streams[1]),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
+        format!("<< /Title ({}){subject} >>", plain(title)),
+    ];
+    let mut out = String::from("%PDF-1.4\n");
+    let mut offsets = Vec::new();
+    for (i, body) in objects.iter().enumerate() {
+        offsets.push(out.len());
+        out += &format!("{} 0 obj\n{body}\nendobj\n", i + 1);
+    }
+    let xref = out.len();
+    out += &format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1);
+    for offset in offsets {
+        out += &format!("{offset:010} 00000 n \n");
+    }
+    out += &format!("trailer\n<< /Size {} /Root 1 0 R /Info 8 0 R >>\nstartxref\n{xref}\n%%EOF\n", objects.len() + 1);
+    out.into_bytes()
+}
+
 fn save_identity(dir: &Path, me: &Identity) {
     std::fs::create_dir_all(dir.join("reviews")).unwrap();
     std::fs::write(dir.join("identity.json"), serde_json::to_string_pretty(&me.public()).unwrap()).unwrap();
@@ -157,6 +217,7 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let dir = PathBuf::from(args.next().expect("Aufruf: demo_data <Datenverzeichnis> [Name]"));
     let name = args.next().unwrap_or_else(|| "Leitung".into());
+    let zotero_ris = args.next().map(|path| std::fs::read_to_string(&path).expect("RIS-Datei nicht lesbar"));
     if dir.join("identity.json").exists() {
         panic!("{} enthält schon eine Identität; bitte ein leeres Verzeichnis angeben.", dir.display());
     }
@@ -234,6 +295,13 @@ fn main() {
     let other = ImportSource { source: "Handsuche".into(), origin: "other".into(), ..ImportSource::default() };
     owner.import_file_with("handsuche.ris", &hand, &other).unwrap();
 
+    // Einträge aus der eigenen Zotero-Bibliothek, damit „In Zotero suchen“ etwas findet.
+    if let Some(ris) = &zotero_ris {
+        let zotero = ImportSource { source: "Zotero".into(), origin: "other".into(), ..ImportSource::default() };
+        let batch = owner.import_file_with("zotero_export.ris", ris, &zotero).unwrap();
+        assert_eq!(batch.status, "done", "{}", batch.error);
+    }
+
     let members: Vec<Review> = people
         .iter()
         .chain([&viewer])
@@ -304,6 +372,54 @@ fn main() {
     }
     collect(&owner, &members[2..3]);
 
+    // Die Einträge aus Zotero sind per Konsens eingeschlossen, damit sie sicher einen Volltext brauchen.
+    let zotero_titles: Vec<String> =
+        zotero_ris.iter().flat_map(|ris| ort_core::import::parse_ris(ris)).map(|item| item.title).collect();
+    for record in owner.records(None, false).unwrap().iter().filter(|r| zotero_titles.contains(&r.title)) {
+        owner
+            .record_consensus(&ta.id, &record.id.to_string(), "include", "discussion", None, &[], "Aus Zotero")
+            .unwrap();
+    }
+
+    // Volltexte: Ordner mit erzeugten PDFs. Drei von fünf sind zugeordnet, einer wartet als Vorschlag im
+    // Ordner, einer bleibt offen; ein Eintrag ist nicht beschaffbar. Dazu die eigene Zotero-Bibliothek.
+    let folder = dir.join("volltexte");
+    std::fs::create_dir_all(folder.join("nachlieferung")).unwrap();
+    owner.set_fulltext_folder(Some(&folder)).unwrap();
+    let rows = owner.fulltext_overview().unwrap().rows;
+    let mut assigned = Vec::new();
+    for (i, row) in rows.iter().filter(|r| !zotero_titles.contains(&r.title)).enumerate() {
+        let surname = row.authors.split([',', ';']).next().unwrap_or("Unbekannt").trim().to_string();
+        let short: String = row.title.chars().filter(|c| !"/:?*\"<>|".contains(*c)).take(70).collect();
+        let named = format!("{surname} - {} - {}.pdf", row.year.unwrap_or(2020), short.trim());
+        let data = pdf(&row.title, &row.authors, &row.doi);
+        match i % 5 {
+            0..=2 => {
+                std::fs::write(folder.join(&named), data).unwrap();
+                assigned.push(Assign { record_id: row.record_id, path: named });
+            }
+            // Wartet als Vorschlag: einmal über den Titel im Namen, einmal nur über die DOI in der Datei.
+            3 if i % 2 == 1 => std::fs::write(folder.join(&named), data).unwrap(),
+            3 => std::fs::write(folder.join(format!("nachlieferung/scan_{i:04}.pdf")), data).unwrap(),
+            _ if i == 4 => {
+                owner.set_fulltext_unavailable(&row.record_id, "Fernleihe erfolglos, Autorin antwortet nicht").unwrap()
+            }
+            _ => {}
+        }
+    }
+    if !assigned.is_empty() {
+        owner.assign_fulltexts(&assigned).unwrap();
+    }
+    std::fs::write(folder.join("Einkaufszettel.pdf"), pdf("Einkaufszettel", "", "")).unwrap();
+    owner
+        .link_zotero(&ZoteroLink {
+            library_type: "user".into(),
+            library_id: 0,
+            collection_key: None,
+            name: "Meine Bibliothek".into(),
+        })
+        .unwrap();
+
     // ------------------------------------------------ Review 2: frisch und verblindet
     let (second, _) = new_review(&dir, &me, "KI-gestützte Triage in der Notaufnahme");
     second.set_member(&people[0].public(), "reviewer").unwrap();
@@ -354,6 +470,16 @@ fn main() {
     for r in [&owner, &second] {
         assert!(r.verify_chain().unwrap().ok);
     }
+    let texts = owner.fulltext_overview().unwrap();
+    let waiting = owner.fulltext_suggestions().unwrap();
+    println!(
+        "Volltexte: {} nötig, {} beschafft, {} nicht beschaffbar, {} Vorschläge warten im Ordner {}.",
+        texts.needed,
+        texts.retrieved,
+        texts.unavailable,
+        waiting.len(),
+        folder.display()
+    );
     let _ = std::fs::remove_dir_all(&team_dir);
     println!("Beispieldaten in {} angelegt (Identität: {name}).", dir.display());
     println!("Start: cd app && ORT_DATA_DIR={} ORT_KEY_STORE=file npm run tauri dev", dir.display());

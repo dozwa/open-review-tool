@@ -28,13 +28,14 @@ import {
 } from "./api";
 import { CriteriaEditor, CriteriaView } from "./Criteria";
 import { Duplicates } from "./Duplicates";
+import { FullTextTab } from "./FullTexts";
 import { searchName, SearchTab } from "./Search";
 import { ROLE_LABEL, useRefreshSidebar } from "./shared";
 import { Avatar, Banner, Empty, Group, Icon, PageHeader, Pill, Row, Segmented, Stat } from "./ui";
 
 const IMPORT_STATUS: Record<string, string> = { running: "läuft", done: "fertig", failed: "fehlgeschlagen" };
 
-type Tab = "overview" | "exchange" | "members" | "search" | "imports" | "criteria" | "proof";
+type Tab = "overview" | "exchange" | "members" | "search" | "imports" | "fulltext" | "criteria" | "proof";
 
 export function stageState(stage: Stage): string {
   if (stage.closed) return "Geschlossen";
@@ -90,6 +91,7 @@ export function ReviewPage() {
     { value: "members", label: "Mitglieder", icon: "people" },
     { value: "search", label: "Suche", icon: "search" },
     { value: "imports", label: "Import", icon: "upload" },
+    { value: "fulltext", label: "Volltexte", icon: "file" },
     { value: "criteria", label: "Kriterien", icon: "list" },
     { value: "proof", label: "Nachweis", icon: "shield" },
   ];
@@ -118,6 +120,7 @@ export function ReviewPage() {
         {tab === "members" && <MembersTab review={review} run={run} />}
         {tab === "search" && <SearchTab review={review} run={run} />}
         {tab === "imports" && <ImportsTab review={review} run={run} />}
+        {tab === "fulltext" && <FullTextTab review={review} run={run} />}
         {tab === "criteria" && <CriteriaTab review={review} run={run} />}
         {tab === "proof" && <ProofTab review={review} />}
       </div>
@@ -133,6 +136,7 @@ const TOOL_TABS: Record<string, { tab: Tab; label: string }[]> = {
   protocol: [{ tab: "criteria", label: "Kriterien" }, { tab: "members", label: "Mitglieder" }],
   search: [{ tab: "search", label: "Suche" }],
   import: [{ tab: "imports", label: "Import und Dubletten" }],
+  fulltext: [{ tab: "fulltext", label: "Volltexte" }],
 };
 
 /** Stationen der Vorlage als Leiste: Wo steht das Review? */

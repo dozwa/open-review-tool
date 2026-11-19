@@ -5,10 +5,11 @@ mod common;
 
 use std::collections::BTreeMap;
 
-use common::{criteria, person, search, send_package, send_return, wire, Team, SECOND_SOURCE};
+use common::{criteria, person, retrieve_fulltexts, search, send_package, send_return, wire, Team, SECOND_SOURCE};
 use ort_core::error::Error;
 use ort_core::event::sha256_hex;
 use ort_core::exchange::{export_return, merge};
+use ort_core::fulltext::Assign;
 use ort_core::projection::Verify;
 use ort_core::service::{OpenStage, PairDecision, RecordFilter, StageView};
 use ort_core::workflow::{builtin_template, StationView};
@@ -82,7 +83,10 @@ fn review_carries_its_template_in_the_log() {
     // Was die App noch nicht kann, steht in der Leiste, ist aber als nicht verfügbar gekennzeichnet.
     let available: Vec<&str> =
         detail.workflow.stations.iter().filter(|s| s.available).map(|s| s.key.as_str()).collect();
-    assert_eq!(available, ["protocol", "search", "import", "pilot_title_abstract", "title_abstract", "fulltext"]);
+    assert_eq!(
+        available,
+        ["protocol", "search", "import", "pilot_title_abstract", "title_abstract", "fulltext_retrieval", "fulltext"]
+    );
     assert!(Review::create_in_memory_with(person("x"), "X", Some("gibtsnicht")).is_err());
 }
 
@@ -182,7 +186,7 @@ fn failed_gate_can_be_overridden_with_a_reason() {
 
     assert!(matches!(t.owner.override_gate("pilot_title_abstract", "  "), Err(Error::Invalid(_))));
     assert!(matches!(t.r1.override_gate("pilot_title_abstract", "Grund"), Err(Error::Forbidden(_))));
-    assert!(matches!(t.owner.override_gate("fulltext_retrieval", "Grund"), Err(Error::Invalid(_))), "sperrt nichts");
+    assert!(matches!(t.owner.override_gate("citation_search", "Grund"), Err(Error::Invalid(_))), "sperrt nichts");
     t.owner.override_gate("pilot_title_abstract", "Team hat sich mündlich abgestimmt").unwrap();
     let view = station(&t.owner, "pilot_title_abstract");
     assert_eq!(view.state, "done");
@@ -220,6 +224,7 @@ fn title_abstract_gate_needs_all_decided_and_no_conflicts() {
     assert_eq!(states(&t.owner)["title_abstract"], "done");
 
     // Die Volltext-Stufe nimmt die Eingeschlossenen der Station, ohne dass jemand die Stufe wählt.
+    retrieve_fulltexts(&t);
     let fulltext = open(&t, "fulltext", |_| {});
     assert_eq!((fulltext.n_records, fulltext.scope.as_deref()), (3, Some("from_stage")));
 }
@@ -446,13 +451,20 @@ fn team_before_fulltext() -> Team {
     t
 }
 
+/// Dasselbe, und alle vier Volltexte liegen im Ordner.
+fn team_with_fulltexts() -> Team {
+    let t = team_before_fulltext();
+    retrieve_fulltexts(&t);
+    t
+}
+
 fn last_payload(review: &Review, event_type: &str) -> serde_json::Value {
     review.events().unwrap().into_iter().rfind(|e| e.event_type == event_type).unwrap().payload
 }
 
 #[test]
 fn fulltext_exclusion_needs_exactly_one_primary_reason() {
-    let t = team_before_fulltext();
+    let t = team_with_fulltexts();
     // Die Vorlage verlangt den Grund; abschalten lässt er sich nicht.
     let mut params = t.owner.stage_defaults("fulltext").unwrap();
     assert_eq!(params.reason_required, Some(true));
@@ -503,7 +515,7 @@ fn fulltext_exclusion_needs_exactly_one_primary_reason() {
 
 #[test]
 fn exclusion_without_primary_reason_is_rejected_on_merge() {
-    let t = team_before_fulltext();
+    let t = team_with_fulltexts();
     let stage = open(&t, "fulltext", |_| {});
     let record = order_of(&t.r1, &stage.id)[0].clone();
     // Beide Reviewer umgehen die App: ohne Hauptgrund und mit einem Kürzel, das es nicht gibt.
@@ -786,6 +798,141 @@ fn new_stages_leave_out_decided_duplicates_and_open_stages_stay() {
     assert_eq!(t.owner.final_decisions(&first.id).unwrap().len(), 4, "die Stimmen der ersten Stufe bleiben");
 }
 
+#[test]
+fn fulltext_stage_takes_only_retrieved_records_and_latecomers_run_as_a_further_round() {
+    let t = team_before_fulltext();
+    let needed = t.owner.fulltext_overview().unwrap();
+    assert_eq!((needed.needed, needed.retrieved, needed.unavailable, needed.rows.len()), (4, 0, 0, 4));
+    assert_eq!(states(&t.owner)["fulltext"], "locked");
+    assert!(t.owner.fulltext_suggestions().unwrap_err().to_string().contains("kein Ordner"));
+
+    // Zwei Dateien liegen im Ordner; die App schlägt die Zuordnung über den Titel im Namen vor.
+    let folder = t.dir.path().join("volltexte");
+    std::fs::create_dir_all(folder.join("unter")).unwrap();
+    let rows = &needed.rows;
+    std::fs::write(folder.join(format!("Autor - 2020 - {}.pdf", rows[0].title)), "%PDF eins").unwrap();
+    std::fs::write(folder.join(format!("unter/{}.pdf", rows[1].title)), "%PDF zwei").unwrap();
+    std::fs::write(folder.join("Einkaufszettel.pdf"), "%PDF nichts").unwrap();
+    std::fs::write(folder.join("notizen.txt"), "keine PDF").unwrap();
+    t.owner.set_fulltext_folder(Some(&folder)).unwrap();
+    let found = t.owner.fulltext_suggestions().unwrap();
+    let mut matched: Vec<_> = found.iter().map(|s| (s.record_id, s.basis)).collect();
+    matched.sort();
+    let mut expected = vec![(rows[0].record_id, "title"), (rows[1].record_id, "title")];
+    expected.sort();
+    assert_eq!(matched, expected);
+    // Bestätigen ist ein eigener Schritt; r1 darf das, die Person mit Leserecht nicht.
+    assert_eq!(t.owner.fulltext_overview().unwrap().retrieved, 0);
+    let list: Vec<_> = found.iter().map(|s| Assign { record_id: s.record_id, path: s.path.clone() }).collect();
+    assert!(matches!(t.viewer.set_fulltext_unavailable(&rows[2].record_id, "x"), Err(Error::Forbidden(_))));
+    t.owner.assign_fulltexts(&list).unwrap();
+    assert!(
+        t.owner.fulltext_suggestions().unwrap().is_empty(),
+        "zugeordnete Dateien werden nicht erneut vorgeschlagen"
+    );
+    assert!(matches!(t.owner.set_fulltext_unavailable(&rows[2].record_id, " "), Err(Error::Invalid(_))));
+    send_package(&t.owner, &t.r1);
+    t.r1.set_fulltext_unavailable(&rows[2].record_id, "Fernleihe erfolglos, Autorin antwortet nicht").unwrap();
+    send_return(&t.r1, &t.owner);
+
+    // Ein Eintrag ist offen: Das Gate hält, die Zahlen stehen an der Station.
+    let view = station(&t.owner, "fulltext_retrieval");
+    assert_eq!(view.state, "open");
+    assert_eq!(view.checks[0].passed, Some(false));
+    assert_eq!(view.checks[0].detail, "2 von 4 beschafft, 1 nicht beschaffbar");
+    assert!(matches!(t.owner.open_stage(&t.owner.stage_defaults("fulltext").unwrap()), Err(Error::Conflict(_))));
+    t.owner.override_gate("fulltext_retrieval", "Ein Volltext ist per Fernleihe unterwegs").unwrap();
+
+    // Die Stufe enthält nur die beschafften Einträge.
+    let first = open(&t, "fulltext", |_| {});
+    assert_eq!((first.n_records, first.round), (2, 1));
+    let mut assigned = order_of(&t.owner, &first.id);
+    assigned.sort();
+    let mut retrieved = vec![rows[0].record_id.to_string(), rows[1].record_id.to_string()];
+    retrieved.sort();
+    assert_eq!(assigned, retrieved);
+    let detail = t.r1.stage_record(&first.id, &assigned[0]).unwrap();
+    assert_eq!(detail.fulltext.map(|f| f.status), Some("retrieved".to_string()));
+    for reviewer in [&t.r1, &t.r2] {
+        for record in &assigned {
+            vote(reviewer, &first.id, record, "include");
+        }
+        send_return(reviewer, &t.owner);
+    }
+    t.owner.unblind_stage(&first.id).unwrap();
+    t.owner.close_stage(&first.id).unwrap();
+    assert!(t
+        .owner
+        .open_stage(&t.owner.stage_defaults("fulltext").unwrap())
+        .unwrap_err()
+        .to_string()
+        .contains("kein weiterer"));
+
+    // Der Nachzügler kommt und läuft als zweite Runde, allein.
+    std::fs::write(folder.join("nachzuegler.pdf"), "%PDF vier").unwrap();
+    t.owner.assign_fulltexts(&[Assign { record_id: rows[3].record_id, path: "nachzuegler.pdf".into() }]).unwrap();
+    let second = open(&t, "fulltext", |_| {});
+    assert_eq!((second.n_records, second.round), (1, 2));
+    assert_eq!(order_of(&t.owner, &second.id), [rows[3].record_id.to_string()]);
+    let after = t.owner.fulltext_overview().unwrap();
+    assert_eq!((after.needed, after.retrieved, after.unavailable), (4, 3, 1));
+    // Das Paket zur zweiten Runde bringt auch den neuen Stand der Volltexte mit.
+    assert_eq!(station(&t.r2, "fulltext_retrieval").checks[0].passed, Some(true));
+
+    // Zurücknehmen öffnet den Eintrag wieder; bestehende Stufen bleiben, wie sie sind.
+    t.owner.reset_fulltext(&rows[2].record_id).unwrap();
+    assert_eq!(t.owner.fulltext_overview().unwrap().unavailable, 0);
+    assert_eq!(order_of(&t.owner, &second.id).len(), 1);
+}
+
+#[test]
+fn a_swapped_or_missing_file_is_caught_by_its_checksum() {
+    let t = team_before_fulltext();
+    let folder = retrieve_fulltexts(&t);
+    let overview = t.owner.fulltext_overview().unwrap();
+    assert!(overview.rows.iter().all(|r| r.file == "ok"));
+    let row = &overview.rows[0];
+    let path = folder.join(&row.fulltext.as_ref().unwrap().path);
+    let data = t.owner.read_fulltext(&row.record_id, None).unwrap();
+    assert_eq!(data, std::fs::read(&path).unwrap());
+    assert!(t.owner.verify_fulltexts().unwrap().is_empty());
+
+    // Jemand ersetzt die Datei durch eine andere gleichen Namens.
+    std::fs::write(&path, "%PDF ein ganz anderer Artikel").unwrap();
+    assert!(matches!(t.owner.read_fulltext(&row.record_id, None), Err(Error::Integrity(_))));
+    let problems = t.owner.verify_fulltexts().unwrap();
+    assert_eq!(problems.len(), 1);
+    assert_eq!((problems[0].record_id, problems[0].problem), (row.record_id, "changed"));
+    // Neu zuordnen ist eine bewusste Entscheidung und steht als neues Ereignis im Log.
+    t.owner.assign_fulltexts(&[Assign { record_id: row.record_id, path: path.to_string_lossy().to_string() }]).unwrap();
+    assert!(t.owner.read_fulltext(&row.record_id, None).is_ok());
+
+    std::fs::remove_file(&path).unwrap();
+    assert!(matches!(t.owner.read_fulltext(&row.record_id, None), Err(Error::NotFound(_))));
+    assert_eq!(t.owner.verify_fulltexts().unwrap()[0].problem, "missing");
+    assert_eq!(t.owner.fulltext_overview().unwrap().rows[0].file, "missing");
+
+    // Nichts außerhalb des Ordners lässt sich zuordnen oder lesen.
+    let outside = t.dir.path().join("draussen.pdf");
+    std::fs::write(&outside, "%PDF draußen").unwrap();
+    for bad in [outside.to_string_lossy().to_string(), "../draussen.pdf".to_string()] {
+        let result = t.owner.assign_fulltexts(&[Assign { record_id: row.record_id, path: bad }]);
+        assert!(result.unwrap_err().to_string().contains("nicht im verknüpften Ordner"));
+    }
+
+    // Jede Person hat ihren eigenen Ort für den gemeinsamen Ordner; im Log steht nur der relative Pfad.
+    send_package(&t.owner, &t.r1);
+    let other = &overview.rows[1];
+    assert!(t.r1.read_fulltext(&other.record_id, None).unwrap_err().to_string().contains("kein Ordner"));
+    let mirror = t.dir.path().join("spiegel");
+    std::fs::create_dir_all(&mirror).unwrap();
+    let name = &other.fulltext.as_ref().unwrap().path;
+    std::fs::copy(folder.join(name), mirror.join(name)).unwrap();
+    t.r1.set_fulltext_folder(Some(&mirror)).unwrap();
+    assert!(t.r1.read_fulltext(&other.record_id, None).is_ok());
+    assert!(!t.r1.events().unwrap().iter().any(|e| e.payload.to_string().contains("spiegel")));
+}
+
 /// Derselbe Ablauf für jede Vorlage: Stationen der Reihe nach, bis alle abgeschlossen sind, die die
 /// App bearbeiten kann. Im Test steht kein Schlüssel einer Station.
 fn walk(template: &str) {
@@ -799,6 +946,7 @@ fn walk(template: &str) {
                 match now.tool.as_deref() {
                     Some("protocol") => drop(t.owner.publish_criteria(&criteria("")).unwrap()),
                     Some("search") => drop(t.owner.publish_search(&search("MEDLINE", json!({}))).unwrap()),
+                    Some("fulltext") => drop(retrieve_fulltexts(&t)),
                     _ => {}
                 }
                 if now.blocking {

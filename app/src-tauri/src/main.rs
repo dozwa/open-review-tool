@@ -3,6 +3,7 @@
 
 mod commands;
 mod identity;
+mod zotero;
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -50,6 +51,19 @@ fn main() {
             commands::search_review,
             commands::duplicates_list,
             commands::duplicates_resolve,
+            commands::fulltext_overview,
+            commands::fulltext_folder_set,
+            commands::fulltext_suggestions,
+            commands::fulltext_assign,
+            commands::fulltext_unavailable,
+            commands::fulltext_reset,
+            commands::fulltext_verify,
+            commands::fulltext_read,
+            commands::fulltext_open_external,
+            commands::zotero_libraries,
+            commands::zotero_link,
+            commands::zotero_suggestions,
+            commands::zotero_confirm,
             commands::stage_open,
             commands::stage_detail,
             commands::stage_next,

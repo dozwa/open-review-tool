@@ -7,6 +7,7 @@ use ort_core::error::Error;
 use ort_core::exchange::{
     create_from_package, export_package, export_return, identity_file, merge, read_identity_file, Bundle,
 };
+use ort_core::fulltext::ZoteroLink;
 use ort_core::Review;
 use serde_json::json;
 
@@ -231,6 +232,52 @@ fn searches_and_duplicate_decisions_need_the_lead() {
     }
     assert_eq!(t.owner.searches().unwrap().len(), 1);
     assert_eq!(t.owner.records(None, false).unwrap().len(), 4);
+}
+
+#[test]
+fn fulltext_status_needs_write_rights_and_zotero_links_need_the_lead() {
+    let t = Team::new();
+    let record = t.owner.records(None, false).unwrap()[0].id;
+    let sum = "0".repeat(64);
+    let status = json!({"record_id": record.to_string(), "status": "unavailable", "reason": "nicht lieferbar"});
+    let link = json!({"library_type": "group", "library_id": 7, "name": "Team"});
+    let mapped = json!({"items": [{"record_id": record.to_string(), "item_key": "ABCD2345"}]});
+
+    // Richtige Rolle: r1 vermerkt den Status, die Leitung verknüpft Zotero; alle erfahren es mit dem Paket.
+    t.r1.set_fulltext_unavailable(&record, "nicht lieferbar").unwrap();
+    assert_eq!(send_return(&t.r1, &t.owner).accepted, 1);
+    let zotero = ZoteroLink { library_type: "group".into(), library_id: 7, collection_key: None, name: "Team".into() };
+    t.owner.link_zotero(&zotero).unwrap();
+    send_package(&t.owner, &t.r2);
+    let seen = t.r2.fulltext_overview().unwrap();
+    assert_eq!(seen.zotero, Some(zotero.clone()));
+    assert_eq!(seen.rows[0].fulltext.as_ref().map(|f| f.reason.as_str()), Some("nicht lieferbar"));
+
+    // Falsche Rolle über die App.
+    assert!(matches!(t.viewer.set_fulltext_unavailable(&record, "x"), Err(Error::Forbidden(_))));
+    assert!(matches!(t.r1.link_zotero(&zotero), Err(Error::Forbidden(_))));
+    assert!(matches!(t.r1.confirm_zotero(&[]), Err(Error::Forbidden(_))));
+
+    // Falsche Rolle an der App vorbei, und ein Pfad, der aus dem Ordner herausführt.
+    let forged = [
+        (&t.viewer, "FullTextStatusSet", status, "nicht abstimmen"),
+        (&t.r1, "ZoteroLibraryLinked", link, "Owner und Admins"),
+        (&t.r1, "ZoteroItemMapped", mapped, "Owner und Admins"),
+        (
+            &t.r1,
+            "FullTextStatusSet",
+            json!({"record_id": record.to_string(), "status": "retrieved", "origin": "folder",
+                "path": "../../geheim.pdf", "sha256": sum, "size": 1}),
+            "innerhalb des Ordners",
+        ),
+    ];
+    for (member, event_type, payload, reason) in forged {
+        let (_dir, copy) = copy_of(&t, member);
+        copy.store().append(copy.me(), event_type, None, payload).unwrap();
+        let report = merge(&t.owner, &wire(&export_return(&copy).unwrap())).unwrap();
+        assert_eq!(report.accepted, 0, "{event_type}");
+        assert!(report.rejected[0].contains(reason), "{event_type}: {:?}", report.rejected);
+    }
 }
 
 #[test]
