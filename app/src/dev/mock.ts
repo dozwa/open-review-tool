@@ -529,6 +529,9 @@ export function installMock() {
         found.item = { ...found.item, color: String(a.color), note: String(a.note).trim() };
         return found.item;
       }
+      case "feedback_open":
+        console.info("Rückmeldung", a);
+        return wait(null, 300);
       case "highlight_remove": {
         const at = marks.findIndex((m) => m.item.id === a.highlightId);
         if (at >= 0) marks.splice(at, 1);

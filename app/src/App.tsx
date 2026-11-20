@@ -4,6 +4,7 @@ import { HashRouter, Link, NavLink, Route, Routes, useLocation, useMatch, useNav
 import { open, save } from "@tauri-apps/plugin-dialog";
 
 import { api, BUNDLE_FILTER, canVote, errorText, importSummary, Person, ReviewListItem, safeFileName, Stage } from "./api";
+import { FeedbackButton } from "./Feedback";
 import { FormEntryPage, FormStagePage } from "./FormStage";
 import { capital, language, t } from "./i18n";
 import { NewReviewPage } from "./NewReview";
@@ -166,6 +167,7 @@ function Sidebar({ me, reviews, terms, stages, onImport, onNew }: {
         <button className="nav-item" onClick={onImport}>
           <Icon name="download" /> {t("Paket einlesen")}
         </button>
+        <FeedbackButton />
         <NavLink className="me" to="/settings" title={t("Einstellungen")}>
           <Avatar name={me.name} size={26} />
           <span>

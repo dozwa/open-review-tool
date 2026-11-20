@@ -801,6 +801,15 @@ pub async fn open_url(url: String) -> Res<()> {
     Ok(())
 }
 
+/// Öffnet eine Rückmeldung an die Entwicklung als Entwurf im Mailprogramm (`email`) oder als ausgefülltes
+/// Issue-Formular im Browser (`github`). Gesendet wird erst dort.
+#[tauri::command]
+pub async fn feedback_open(channel: String, kind: String, title: String, body: String) -> Res<()> {
+    let url = crate::feedback::link(&channel, &kind, &title, &body, &crate::feedback::system())?;
+    std::process::Command::new("open").arg(&url).spawn().map_err(err)?;
+    Ok(())
+}
+
 // ---------------------------------------------------------------- Markierungen im Volltext
 
 /// Markierungen zum Volltext eines Eintrags, die die Person sehen darf.

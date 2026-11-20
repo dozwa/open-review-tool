@@ -1009,6 +1009,14 @@ button.small { height: 26px; padding: 0 10px; }
 .modal > footer { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px; border-top: 0.5px solid var(--line); }
 .modal > footer kbd { margin-left: 4px; }
 
+/* Rückmeldung an die Entwicklung */
+.feedback { display: flex; flex-direction: column; gap: 10px; }
+.feedback-choice { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.feedback label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 500; }
+.feedback label small { font-weight: 400; color: var(--ink-3); }
+.feedback input { width: 100%; }
+.feedback > .muted { font-size: 12px; }
+
 .ai-wait { display: flex; align-items: center; gap: 10px; font-weight: 500; }
 .spinner { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--line-strong); border-top-color: var(--accent); animation: spin 0.8s linear infinite; flex: none; }
 @keyframes spin { to { transform: rotate(360deg); } }

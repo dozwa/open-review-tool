@@ -39,7 +39,7 @@ geschätzt: **klein** (bis etwa ein Tag), **mittel** (einige Tage), **groß** (e
 
 | Aufwand | Wunsch | Anmerkung |
 | --- | --- | --- |
-| klein | Mail an die Entwicklung mit Fehler oder Wunsch | |
+| mittel | Issue aus der App heraus anlegen, ohne den Browser | „Fehler melden“ öffnet bisher einen Entwurf im Mailprogramm oder das ausgefüllte Formular auf GitHub. Direktes Anlegen bräuchte eine Anmeldung bei GitHub in der App. |
 
 ## Doku und Material
 

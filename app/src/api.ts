@@ -1122,6 +1122,9 @@ export const api = {
   exportReturn: (reviewId: string, path: string) => call<number>("return_export", { reviewId, path }),
   importBundle: (path: string) => call<BundleImported>("bundle_import", { path }),
   openUrl: (url: string) => call<void>("open_url", { url }),
+  /** Öffnet die Rückmeldung als Entwurf im Mailprogramm oder als Issue-Formular im Browser; gesendet wird dort. */
+  openFeedback: (channel: "email" | "github", kind: "bug" | "feature", title: string, body: string) =>
+    call<void>("feedback_open", { channel, kind, title, body }),
 };
 
 export const BUNDLE_FILTER = [{ name: t("Paket oder Rückmeldung"), extensions: ["ortpkg", "ortvotes"] }];

@@ -31,6 +31,7 @@ const ICONS: Record<string, React.ReactNode> = {
   pen: <><path d="m4 20 1-4.5L16.5 4a2.1 2.1 0 0 1 3 3L8 18.5 4 20Z" /><path d="m14.5 6 3 3" /></>,
   spark: <><path d="M11 4.5 12.8 9.2 17.5 11l-4.7 1.8L11 17.5l-1.8-4.7L4.5 11l4.7-1.8L11 4.5Z" /><path d="M18.5 15.5v4M16.5 17.5h4" /></>,
   gear: <><circle cx="12" cy="12" r="3" /><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8" /></>,
+  chat: <><path d="M4 5h16v11H10l-4.5 4v-4H4V5Z" /><path d="M8 9h8" /><path d="M8 12.5h5" /></>,
   csv: <><path d="M14 3H6v18h12V7l-4-4Z" /><path d="M9 13h6" /><path d="M9 17h6" /></>,
 };
 

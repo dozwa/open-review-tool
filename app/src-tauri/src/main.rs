@@ -5,6 +5,7 @@ mod ai;
 #[cfg(feature = "bridge")]
 mod bridge;
 mod commands;
+mod feedback;
 mod identity;
 mod zotero;
 
@@ -100,6 +101,7 @@ fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send
         commands::bundle_import,
         commands::chain_verify,
         commands::open_url,
+        commands::feedback_open,
         commands::highlights,
         commands::highlight_add,
         commands::highlight_update,

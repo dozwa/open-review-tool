@@ -79,7 +79,7 @@ Tauri 2 mit der WebView von macOS, React 18.
 
 ## Wie es geprüft ist
 
-- **Kern:** 164 Tests, dazu 3 in der App (Lesen der Zotero-Antworten, Anfrage und Antwort der KI). Darunter die Referenzwerte der früheren SQL-Tests (Cohen's Kappa gegen scikit-learn,
+- **Kern:** 164 Tests, dazu 6 in der App (Lesen der Zotero-Antworten, Anfrage und Antwort der KI, Link der Rückmeldung). Darunter die Referenzwerte der früheren SQL-Tests (Cohen's Kappa gegen scikit-learn,
   Fleiss' Kappa am Wikipedia-Beispiel, Krippendorffs Alpha am publizierten Beispiel mit 0,743, PABAK, Prozent,
   sechs `final_decision`-Szenarien, Maybe-Regel). Die Werte erzeugt `crates/ort-core/tests/fixtures/make_agreement_fixtures.py`.
 - **Austausch:** veränderte Datei, nachträglich neu gehashte Datei ohne Signatur, Außenstehende, Lücken in einer
@@ -166,6 +166,11 @@ Nur für Entwicklung und Tests.
   Markierungen nur zu sehen. Die Farben haben keine feste Bedeutung. Markieren setzt eine Textebene voraus;
   in gescannten PDFs ohne Texterkennung gibt es nichts auszuwählen. „Zitat kopieren“ legt den markierten Text
   in die Zwischenablage, ein Feld des Formulars füllt er noch nicht von selbst.
+- **Rückmeldung:** „Fehler melden“ in der Seitenleiste öffnet auf jeder Seite einen Dialog für einen Fehler oder
+  einen Wunsch, wahlweise per E-Mail oder über GitHub. Die App sendet nichts selbst: Sie öffnet einen Entwurf im
+  Mailprogramm oder das ausgefüllte Formular für ein neues Issue im Browser (dort ist ein GitHub-Konto nötig);
+  abgeschickt wird erst dort. Angehängt werden die offene Seite ohne Kennungen und die Versionen von App und
+  macOS. Im Fokusmodus ist die Seitenleiste und damit der Knopf ausgeblendet.
 - **Runden:** In einer Vorlage mit festen Runden legt eine Station nichts doppelt vor: Eine weitere Runde
   bekommt nur Einträge, die in keiner früheren waren (später beschaffte Volltexte, Treffer der Zitationssuche).
   Eine Runde über dieselben Einträge zu wiederholen geht damit nicht; der Pilot zieht als Stichprobe jedes Mal
