@@ -382,7 +382,7 @@ fn hits_per_source_and_duplicates_add_up_from_the_log() {
         let appendix = &report.search_appendix;
         for text in [
             "## Embase (Ovid)",
-            "Treffer laut Quelle: 4",
+            "Treffer der gesamten Suche laut Quelle: 4",
             "Importiert: 3 (davon 0 beim Import als Dublette erkannt)",
             "Peer-Review am 20.11.2026: Bibliothekarin der Einrichtung, PRESS: ohne Befund",
             "Geändert zu Version 2: Zeitraum erweitert",
@@ -391,6 +391,67 @@ fn hits_per_source_and_duplicates_add_up_from_the_log() {
             "- Test (Datenbank): 6 importiert, davon 2 beim Import als Dublette erkannt",
         ] {
             assert!(appendix.contains(text), "{text} fehlt in\n{appendix}");
+        }
+    }
+    assert!(t.owner.verify_chain().unwrap().ok);
+}
+
+/// Wer vor dem Import woanders Dubletten entfernt hat, trägt Anwendung und Anzahl ein; die Suche hält
+/// die Treffer je Zeile fest. Beides steht im Bericht, auch bei denen, die nur das Paket kennen.
+#[test]
+fn duplicates_removed_elsewhere_and_hits_per_line_are_documented() {
+    let t = Team::new();
+    let lines = json!([
+        {"label": "#1", "query": "headache OR migraine", "hits": 9000},
+        {"label": "", "query": "adult | adults", "hits": null},
+        {"label": "", "query": "  ", "hits": null},
+        {"label": "#3", "query": "#1 AND #2", "hits": 5},
+    ]);
+    let hitless = json!([{"label": "#1", "query": "", "hits": 3}]);
+    assert!(matches!(t.owner.publish_search(&search("MEDLINE", json!({"lines": hitless}))), Err(Error::Invalid(_))));
+    let medline = t.owner.publish_search(&search("MEDLINE", json!({"hits": 5, "lines": lines}))).unwrap();
+    let kept = &medline.versions[0].lines;
+    assert_eq!(kept.len(), 3, "die leere Zeile fällt weg");
+    assert_eq!((kept[2].label.as_str(), kept[2].hits), ("#3", Some(5)));
+    let from = ImportSource { search_id: Some(medline.id), ..ImportSource::default() };
+    t.owner.import_file_with("medline.ris", SECOND_SOURCE, &from).unwrap();
+
+    // Nur die Leitung vermerkt; ohne Anwendung oder ohne Zahl geht es nicht.
+    assert!(matches!(t.r1.record_external_duplicates(None, "Zotero", 2, ""), Err(Error::Forbidden(_))));
+    assert!(matches!(t.owner.record_external_duplicates(None, " ", 2, ""), Err(Error::Invalid(_))));
+    assert!(matches!(t.owner.record_external_duplicates(None, "Zotero", 0, ""), Err(Error::Invalid(_))));
+    let zotero = t.owner.record_external_duplicates(None, "Zotero", 3, "Zusammenführen in der Bibliothek").unwrap();
+    let endnote = t.owner.record_external_duplicates(None, "EndNote", 4, "").unwrap();
+    // Korrigieren ersetzt, die Anzahl 0 nimmt zurück.
+    assert_eq!(t.owner.record_external_duplicates(Some(&zotero), "Zotero", 2, "").unwrap(), zotero);
+    t.owner.record_external_duplicates(Some(&endnote), "", 0, "").unwrap();
+    let unknown = uuid::Uuid::new_v4();
+    assert!(matches!(t.owner.record_external_duplicates(Some(&unknown), "x", 1, ""), Err(Error::NotFound(_))));
+
+    send_package(&t.owner, &t.r1);
+    for member in [&t.owner, &t.r1] {
+        let list = member.duplicate_candidates().unwrap();
+        assert_eq!(list.external.iter().map(|x| (x.tool.as_str(), x.removed)).collect::<Vec<_>>(), [("Zotero", 2)]);
+        let summary = member.import_summary().unwrap();
+        assert_eq!((summary.n_records, summary.n_external_duplicates, summary.n_unique), (9, 2, 7));
+
+        let report = member.report().unwrap();
+        let flow = &report.flow;
+        assert_eq!(report.problems, Vec::<String>::new());
+        assert_eq!((flow.identified, flow.external_duplicates, flow.exact_duplicates, flow.unique), (11, 2, 2, 7));
+        for text in
+            ["Identifiziert: 11", "MEDLINE: 3", "Vor dem Import entfernt: 2", "Vor der Auswahl entfernt: 4", "Zotero"]
+        {
+            assert!(report.svg.contains(text), "{text} fehlt im Diagramm");
+        }
+        assert!(report.methods.contains("außerhalb der App Dubletten entfernt (Zotero: 2)"), "{}", report.methods);
+        for text in [
+            "Treffer der gesamten Suche laut Quelle: 5",
+            "| #1 | headache OR migraine | 9000 |",
+            "| 2 | adult \\| adults | – |",
+            "| #3 | #1 AND #2 | 5 |",
+        ] {
+            assert!(report.search_appendix.contains(text), "{text} fehlt in\n{}", report.search_appendix);
         }
     }
     assert!(t.owner.verify_chain().unwrap().ok);

@@ -40,6 +40,34 @@ const CHECK_STATUS: Record<string, { label: string; tone: string }> = {
   optional: { label: t("freiwillig"), tone: "gray" },
 };
 
+/** Vergrößerung des PNG gegenüber dem SVG: genug für den Druck in Spaltenbreite. */
+const PNG_SCALE = 4;
+
+/** Zeichnet das SVG des Kerns als PNG: schwarze Schrift auf weißem Grund, als Base64 ohne Vorspann. */
+function svgToPng(svg: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const failed = () => reject(new Error(t("Das Diagramm ließ sich nicht als Bild zeichnen.")));
+    const image = new Image();
+    image.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = image.naturalWidth * PNG_SCALE;
+      canvas.height = image.naturalHeight * PNG_SCALE;
+      const context = canvas.getContext("2d");
+      if (!context || canvas.width === 0) return failed();
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      try {
+        resolve(canvas.toDataURL("image/png").split(",")[1]);
+      } catch {
+        failed();
+      }
+    };
+    image.onerror = failed;
+    image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  });
+}
+
 function RegistrationForm({ protocol, onSave, onCancel }: {
   protocol: Protocol;
   onSave: (date: string, registry: string, identifier: string, note: string) => void;
@@ -246,6 +274,13 @@ export function ReportTab({ review, run }: { review: ReviewDetail; run: Run }) {
     if (path) await run(() => api.exportReport(review.id, kind, path, lang), t("Datei gespeichert."));
   }
 
+  async function savePng() {
+    if (!report) return;
+    const name = tIn(lang, FILES.diagram.name).replace(/\.svg$/, ".png");
+    const path = await save({ defaultPath: await inFolder("export", name, review.id), filters: [{ name: "PNG", extensions: ["png"] }] });
+    if (path) await run(async () => api.exportReportPng(path, await svgToPng(report.svg)), t("Datei gespeichert."));
+  }
+
   if (error) return <Banner kind="error">{error}</Banner>;
   if (!report) return null;
   const flow = report.flow;
@@ -278,8 +313,11 @@ export function ReportTab({ review, run }: { review: ReviewDetail; run: Run }) {
         />
         <Stat
           label={t("Dubletten entfernt")}
-          value={formatNumber(flow.exact_duplicates + flow.resolved_duplicates)}
-          detail={t("{count} {records} bleiben", { count: formatNumber(flow.unique), records: terms.records_term })}
+          value={formatNumber(flow.external_duplicates + flow.exact_duplicates + flow.resolved_duplicates)}
+          detail={[
+            t("{count} {records} bleiben", { count: formatNumber(flow.unique), records: terms.records_term }),
+            flow.external_duplicates > 0 ? t("davon {n} vor dem Import", { n: formatNumber(flow.external_duplicates) }) : null,
+          ].filter(Boolean).join(" · ")}
         />
         <Stat
           label={t("Eingeschlossen")}
@@ -306,6 +344,7 @@ export function ReportTab({ review, run }: { review: ReviewDetail; run: Run }) {
           <span className="inline-actions">
             <LanguageSelect value={lang} label={t("Sprache der Ausgabe")} onChange={setLang} />
             <button className="small" onClick={() => saveFile("diagram")}><Icon name="download" size={13} /> {t("Als SVG speichern")}</button>
+            <button className="small" onClick={savePng}><Icon name="download" size={13} /> {t("Als PNG speichern")}</button>
           </span>
         }
         footer={t("Eine Ebene ist eine Station mit allen Runden; für einen Eintrag gilt die letzte Runde. Stichproben wie der Pilot sortieren nichts aus und stehen deshalb nicht im Diagramm. Einträge in einer verblindeten Stufe zählen als offen.")}

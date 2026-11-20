@@ -64,7 +64,7 @@ pub struct Spec {
     check: fn(&Value) -> Check,
 }
 
-pub static CATALOG: [Spec; 37] = [
+pub static CATALOG: [Spec; 38] = [
     Spec {
         name: "ReviewCreated",
         label: "Review angelegt",
@@ -289,6 +289,15 @@ pub static CATALOG: [Spec; 37] = [
         writer: Writer::Manage,
         stage: StageRule::None,
         check: duplicates_resolved,
+    },
+    Spec {
+        name: "ExternalDuplicatesRecorded",
+        label: "Dubletten außerhalb der App vermerkt",
+        version: 1,
+        chain: Chain::Main,
+        writer: Writer::Manage,
+        stage: StageRule::None,
+        check: external_duplicates_recorded,
     },
     Spec {
         name: "FullTextStatusSet",
@@ -649,7 +658,27 @@ fn search_version_published(p: &Value) -> Check {
         optional(p, key, is_text)?;
     }
     optional(p, "hit_limit", |p, key| integer(p, key, 1))?;
-    optional(p, "hits", |p, key| integer(p, key, 0))
+    optional(p, "hits", |p, key| integer(p, key, 0))?;
+    optional(p, "lines", search_lines)
+}
+
+/// Höchstzahl der Zeilen einer Suche, je mit eigener Trefferzahl.
+pub const MAX_SEARCH_LINES: usize = 200;
+
+/// Die Zeilen einer Suche: Bezeichnung (etwa „#3“), Teilstring und die Trefferzahl dieser Zeile.
+fn search_lines(p: &Value, key: &str) -> Check {
+    let lines = p.get(key).and_then(Value::as_array).ok_or_else(|| tr!("Feld „{}“ ist keine Liste.", key))?;
+    if lines.len() > MAX_SEARCH_LINES {
+        return Err(tr!("Eine Suche hat höchstens {} Zeilen.", MAX_SEARCH_LINES));
+    }
+    for line in lines {
+        if text(line, "label")?.chars().count() > MAX_LABEL {
+            return Err(tr!("Feld „{}“ hat höchstens {} Zeichen.", "label", MAX_LABEL));
+        }
+        filled(line, "query")?;
+        optional(line, "hits", |p, key| integer(p, key, 0))?;
+    }
+    Ok(())
 }
 
 fn search_peer_reviewed(p: &Value) -> Check {
@@ -681,6 +710,27 @@ fn duplicates_resolved(p: &Value) -> Check {
             (_, None) => {}
             (_, Some(_)) => return Err(tr!("„keep“ gehört nur zu einer Dublette.")),
         }
+    }
+    Ok(())
+}
+
+/// Höchstzahl der Dubletten in einem Vermerk über eine Deduplizierung außerhalb der App.
+pub const MAX_EXTERNAL_DUPLICATES: i64 = 10_000_000;
+
+/// Dubletten, die vor dem Import in einer anderen Anwendung entfernt wurden: Anwendung und Anzahl.
+/// Ein späterer Vermerk mit derselben `entry` ersetzt den früheren; die Anzahl 0 nimmt ihn zurück.
+fn external_duplicates_recorded(p: &Value) -> Check {
+    uuid(p, "entry")?;
+    filled(p, "tool")?;
+    if text(p, "tool")?.chars().count() > MAX_LABEL {
+        return Err(tr!("Feld „{}“ hat höchstens {} Zeichen.", "tool", MAX_LABEL));
+    }
+    integer(p, "removed", 0)?;
+    if p.get("removed").and_then(Value::as_i64).is_some_and(|n| n > MAX_EXTERNAL_DUPLICATES) {
+        return Err(tr!("Feld „{}“ ist größer als {}.", "removed", MAX_EXTERNAL_DUPLICATES));
+    }
+    if text(p, "note")?.chars().count() > MAX_EVIDENCE {
+        return Err(tr!("Feld „{}“ ist länger als {} Zeichen.", "note", MAX_EVIDENCE));
     }
     Ok(())
 }
@@ -1414,6 +1464,24 @@ mod tests {
             assert!(validate("DuplicatesResolved", 1, None, &pairs(pair)).is_err());
         }
         assert!(validate("DuplicatesResolved", 1, None, &json!({"pairs": []})).is_err());
+
+        let entry = Uuid::new_v4().to_string();
+        let external =
+            |tool: &str, removed: Value| json!({"entry": entry, "tool": tool, "removed": removed, "note": ""});
+        for ok in [external("Zotero", json!(212)), external("Zotero", json!(0))] {
+            assert_eq!(validate("ExternalDuplicatesRecorded", 1, None, &ok), Ok(()));
+        }
+        let bad = [
+            external("", json!(3)),
+            external("Zotero", json!(-1)),
+            external("Zotero", json!("3")),
+            external("Zotero", json!(MAX_EXTERNAL_DUPLICATES + 1)),
+            json!({"entry": "x", "tool": "Zotero", "removed": 3, "note": ""}),
+            json!({"entry": entry, "tool": "Zotero", "removed": 3}),
+        ];
+        for payload in bad {
+            assert!(validate("ExternalDuplicatesRecorded", 1, None, &payload).is_err(), "{payload}");
+        }
     }
 
     #[test]

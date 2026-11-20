@@ -92,6 +92,13 @@ pub struct Level {
     pub other_included: i64,
 }
 
+/// Vor dem Import entfernte Dubletten je Anwendung.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct ExternalCount {
+    pub tool: String,
+    pub removed: i64,
+}
+
 /// Zahlen des Flussdiagramms.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Flow {
@@ -99,6 +106,11 @@ pub struct Flow {
     pub identified: i64,
     pub exact_duplicates: i64,
     pub resolved_duplicates: i64,
+    /// Vor dem Import in einer anderen Anwendung entfernte Dubletten. Sie stehen in keiner Quelle,
+    /// zählen aber zu `identified`.
+    pub external_duplicates: i64,
+    /// Dasselbe je Anwendung.
+    pub external: Vec<ExternalCount>,
     pub unique: i64,
     /// Von `identified`: Treffer aus Zitationssuche und anderen Wegen, der Zweig „andere Quellen“.
     pub other_identified: i64,
@@ -128,7 +140,16 @@ impl Flow {
                 out.push(tr!("{}: {} ist nicht {}.", what, left, right));
             }
         };
-        expect(tr!("Treffer je Quelle und Summe"), self.sources.iter().map(|s| s.n_records).sum(), self.identified);
+        expect(
+            tr!("Treffer je Quelle und Summe"),
+            self.sources.iter().map(|s| s.n_records).sum::<i64>() + self.external_duplicates,
+            self.identified,
+        );
+        expect(
+            tr!("Vor dem Import entfernte Dubletten je Anwendung"),
+            self.external.iter().map(|x| x.removed).sum(),
+            self.external_duplicates,
+        );
         expect(
             tr!("Treffer aus anderen Quellen"),
             self.sources.iter().filter(|s| is_other(&s.origin)).map(|s| s.n_records).sum(),
@@ -136,7 +157,7 @@ impl Flow {
         );
         expect(
             tr!("Treffer ohne Dubletten"),
-            self.identified - self.exact_duplicates - self.resolved_duplicates,
+            self.identified - self.external_duplicates - self.exact_duplicates - self.resolved_duplicates,
             self.unique,
         );
         for level in &self.levels {
@@ -505,12 +526,22 @@ impl Review {
                 .collect(),
             false => Vec::new(),
         };
+        // Je Anwendung eine Zahl, auch wenn es mehrere Vermerke gibt.
+        let mut external: Vec<ExternalCount> = Vec::new();
+        for x in &summary.external {
+            match external.iter_mut().find(|e| e.tool == x.tool) {
+                Some(found) => found.removed += x.removed,
+                None => external.push(ExternalCount { tool: x.tool.clone(), removed: x.removed }),
+            }
+        }
         let flow = Flow {
             other_identified: summary.sources.iter().filter(|s| is_other(&s.origin)).map(|s| s.n_records).sum(),
             included_sources: levels.last().map(|_| units.len() as i64),
             source_types,
             sources: summary.sources,
-            identified: summary.n_records,
+            identified: summary.n_records + summary.n_external_duplicates,
+            external_duplicates: summary.n_external_duplicates,
+            external,
             exact_duplicates: summary.n_exact_duplicates,
             resolved_duplicates: resolved,
             unique: active.len() as i64,
@@ -778,7 +809,7 @@ impl Review {
                 out.push_str(&tr!("- Übernommen wurden höchstens die ersten {} Treffer.\n", limit));
             }
             if let Some(hits) = v.hits {
-                out.push_str(&tr!("- Treffer laut Quelle: {}\n", hits));
+                out.push_str(&tr!("- Treffer der gesamten Suche laut Quelle: {}\n", hits));
             }
             out.push_str(&tr!(
                 "- Importiert: {} (davon {} beim Import als Dublette erkannt)\n",
@@ -793,6 +824,16 @@ impl Review {
                 ));
             }
             out.push_str(&tr!("\nSuchstring (Version {}):\n\n{}\n", v.version, code_block(&v.query)));
+            if !v.lines.is_empty() {
+                out.push_str(&tr!(
+                    "\nTreffer je Zeile der Suche:\n\n| Zeile | Teilstring | Treffer |\n| --- | --- | --- |\n"
+                ));
+                for (i, line) in v.lines.iter().enumerate() {
+                    let label = if line.label.is_empty() { (i + 1).to_string() } else { table_cell(&line.label) };
+                    let hits = line.hits.map_or_else(|| "–".to_string(), |n| n.to_string());
+                    out.push_str(&format!("| {label} | {} | {hits} |\n", table_cell(&line.query)));
+                }
+            }
             let older: Vec<_> = search.versions.iter().rev().skip(1).collect();
             for earlier in older {
                 let e = &earlier.version;
@@ -872,7 +913,7 @@ impl Review {
             }
         }
         let listed = names.join(", ");
-        let identified = count(flow.identified, &flow.record_term, records);
+        let identified = count(flow.identified - flow.external_duplicates, &flow.record_term, records);
         out.push_str(&match names.len() {
             1 => tr!("Übernommen aus 1 Quelle: {} ({}). ", identified, listed),
             n => tr!("Übernommen aus {} Quellen: {} ({}). ", n, identified, listed),
@@ -882,6 +923,14 @@ impl Review {
                 1 => tr!("1 davon stammt aus der Zitationssuche oder von anderen Wegen außerhalb von Datenbanken und Registern und durchlief dieselben Schritte als weitere Runde. "),
                 n => tr!("Davon stammen {} aus der Zitationssuche oder von anderen Wegen außerhalb von Datenbanken und Registern; sie durchliefen dieselben Schritte als weitere Runde. ", n),
             });
+        }
+        if flow.external_duplicates > 0 {
+            let tools: Vec<String> = flow.external.iter().map(|x| format!("{}: {}", x.tool, x.removed)).collect();
+            out.push_str(&tr!(
+                "Schon vor dem Import wurden außerhalb der App Dubletten entfernt ({}); mit ihnen wurden {} identifiziert. Diese Zahl ist eine Angabe der Leitung und aus den importierten Daten nicht nachzurechnen. ",
+                tools.join(", "),
+                count(flow.identified, &flow.record_term, records)
+            ));
         }
         out.push_str(&tr!(
             "Beim Import als exakte Dubletten erkannt (gleiche DOI, sonst gleicher Titel und gleiches Jahr): {}. Mögliche weitere Dubletten wurden paarweise geprüft; davon entfernt: {}. Verbleibend: {}. Suchstrings, Datum und Grenzen je Quelle stehen im Suchanhang.\n",
@@ -1466,6 +1515,11 @@ fn one_line(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// Text für eine Zelle einer Markdown-Tabelle: eine Zeile, senkrechte Striche maskiert.
+fn table_cell(text: &str) -> String {
+    one_line(text).replace('|', "\\|")
+}
+
 /// Codeblock in Markdown; der Zaun ist länger als jede Folge von Backticks im Text.
 fn code_block(text: &str) -> String {
     let mut longest = 0;
@@ -1649,11 +1703,22 @@ fn rows(flow: &Flow) -> Vec<(TextBox, Side)> {
         for (_, name, n) in by_source.iter().filter(|(o, _, _)| *o == other) {
             text = text.line(format!("{name}: {n}"));
         }
-        text
+        // Was vor dem Import entfernt wurde, steht in keiner Quelle; ohne die Zeile ginge der Kasten nicht auf.
+        text.line_if(
+            !other && flow.external_duplicates > 0,
+            tr!("Vor dem Import entfernt: {}", flow.external_duplicates),
+        )
     };
     let branch = flow.other_identified > 0;
     let total = tr!("Identifiziert: {}", count(flow.identified, &flow.record_term, records));
-    let removed = TextBox::new(tr!("Vor der Auswahl entfernt: {}", flow.exact_duplicates + flow.resolved_duplicates))
+    let mut removed = TextBox::new(tr!(
+        "Vor der Auswahl entfernt: {}",
+        flow.external_duplicates + flow.exact_duplicates + flow.resolved_duplicates
+    ));
+    for x in &flow.external {
+        removed = removed.line(tr!("Dubletten, vorher in {} entfernt: {}", x.tool, x.removed));
+    }
+    let removed = removed
         .line(tr!("Dubletten, beim Import erkannt: {}", flow.exact_duplicates))
         .line(tr!("Dubletten, einzeln entschieden: {}", flow.resolved_duplicates));
     if branch {
@@ -1820,6 +1885,8 @@ mod tests {
             identified: 120,
             exact_duplicates: 15,
             resolved_duplicates: 5,
+            external_duplicates: 0,
+            external: Vec::new(),
             unique: 100,
             levels: vec![level("ta", None, 100, 100, 30, 70), level("vt", Some("ta"), 30, 30, 12, 18)],
             included: Some(12),

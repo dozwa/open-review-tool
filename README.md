@@ -79,7 +79,7 @@ Tauri 2 mit der WebView von macOS, React 18.
 
 ## Wie es geprüft ist
 
-- **Kern:** 170 Tests, dazu 7 in der App (Lesen der Zotero-Antworten, Anfrage und Antwort der KI, Link der Rückmeldung, Kennung einer OSF-Registrierung). Darunter die Referenzwerte der früheren SQL-Tests (Cohen's Kappa gegen scikit-learn,
+- **Kern:** 171 Tests, dazu 7 in der App (Lesen der Zotero-Antworten, Anfrage und Antwort der KI, Link der Rückmeldung, Kennung einer OSF-Registrierung). Darunter die Referenzwerte der früheren SQL-Tests (Cohen's Kappa gegen scikit-learn,
   Fleiss' Kappa am Wikipedia-Beispiel, Krippendorffs Alpha am publizierten Beispiel mit 0,743, PABAK, Prozent,
   sechs `final_decision`-Szenarien, Maybe-Regel). Die Werte erzeugt `crates/ort-core/tests/fixtures/make_agreement_fixtures.py`.
 - **Austausch:** veränderte Datei, nachträglich neu gehashte Datei ohne Signatur, Außenstehende, Lücken in einer
@@ -93,7 +93,8 @@ Tauri 2 mit der WebView von macOS, React 18.
 - **Suche und Dubletten:** Ohne Suche und mit offenen Dublettenpaaren ist der Pilot gesperrt; derselbe Artikel
   mit und ohne DOI wird vorgeschlagen, Titel mit anderer Zahl nicht; eine entschiedene Dublette fehlt in neuen
   Stufen, offene Stufen bleiben; ein Import mit unbekannter Suchversion wird beim Einlesen abgewiesen; Treffer je
-  Quelle und Dublettenzahl aus dem Log stimmen auf jedem Rechner mit den Tabellen überein.
+  Quelle und Dublettenzahl aus dem Log stimmen auf jedem Rechner mit den Tabellen überein; Dubletten, die vor
+  dem Import woanders entfernt wurden, und Treffer je Zeile der Suche stehen im Bericht.
 - **Volltexte:** Die Volltext-Stufe enthält nur beschaffte Einträge, ein Nachzügler läuft allein als zweite
   Runde; die Zahlen stehen an der Station. Eine ersetzte Datei fällt an der Prüfsumme auf, eine fehlende wird
   gemeldet; nichts außerhalb des verknüpften Ordners lässt sich zuordnen, auch nicht über ein eingelesenes
@@ -149,6 +150,10 @@ Nur für Entwicklung und Tests.
 - **Dubletten:** Der Import erkennt exakt gleiche Einträge (DOI oder normalisierter Titel plus Jahr). Ähnliche
   Paare schlägt die App vor; jedes entscheidet die Leitung. Die Vorschläge sind berechnet und stehen nicht im
   Log, nur die Entscheidungen. Eine spätere Version mit anderem Abgleich kann deshalb neue Paare zeigen.
+  Wer schon vor dem Import in einer anderen Anwendung (etwa Zotero) Dubletten entfernt hat, trägt Anwendung
+  und Anzahl im Reiter „Import“ ein. Die App hat diese Einträge nie gesehen: Die Zahl ist eine Angabe der
+  Leitung, zählt im Flussdiagramm zu den identifizierten und den entfernten Einträgen und ist im Methodentext
+  so benannt.
 - **Suche:** Ein Import ohne Suchversion bleibt möglich. Die Vorlage „JBI Scoping Review“ verlangt nur, dass
   mindestens eine Suche festgehalten ist, nicht dass jeder Import eine nennt.
 - **Volltexte:** Die Dateien liegen nie in der App und nie im Paket. Wer einen Volltext lesen will, braucht

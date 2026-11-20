@@ -4,6 +4,10 @@
 //! eine Quelle die DOI liefert und die andere nicht, oder wenn Titel leicht abweichen. Solche Paare
 //! schlägt [`candidates`] vor; die Leitung entscheidet jedes mit `DuplicatesResolved`. Kandidaten
 //! stehen nicht im Log, nur die Entscheidungen.
+//!
+//! Wer schon vor dem Import in einer anderen Anwendung (etwa Zotero) Dubletten entfernt hat, vermerkt
+//! Anwendung und Anzahl mit `ExternalDuplicatesRecorded` ([`externals`]). Diese Einträge hat die App nie
+//! gesehen; sie zählen im Bericht zu den identifizierten und zu den entfernten.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -35,6 +39,42 @@ pub struct Resolutions {
     pub removed: BTreeMap<Uuid, Uuid>,
     /// Paare (kleinere ID zuerst), die ausdrücklich keine Dubletten sind.
     pub distinct: BTreeSet<(Uuid, Uuid)>,
+}
+
+/// Vermerk über Dubletten, die vor dem Import in einer anderen Anwendung entfernt wurden.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct External {
+    pub id: Uuid,
+    pub tool: String,
+    pub removed: i64,
+    pub note: String,
+    /// Zeitpunkt des letzten Vermerks.
+    pub at: String,
+}
+
+/// Die geltenden Vermerke in der Reihenfolge, in der sie zuerst angelegt wurden. Je `entry` gilt der
+/// letzte Vermerk in der Ordnung über Personen hinweg; die Anzahl 0 nimmt ihn zurück.
+pub fn externals(events: &[Event]) -> Vec<External> {
+    let mut sorted: Vec<&Event> = events.iter().filter(|e| e.event_type == "ExternalDuplicatesRecorded").collect();
+    sorted.sort_by(|a, b| order_key(a).cmp(&order_key(b)));
+    let mut out: Vec<External> = Vec::new();
+    for e in sorted {
+        let text = |key: &str| e.payload.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
+        let Ok(id) = Uuid::parse_str(&text("entry")) else { continue };
+        let entry = External {
+            id,
+            tool: text("tool"),
+            removed: e.payload.get("removed").and_then(Value::as_i64).unwrap_or(0),
+            note: text("note"),
+            at: e.occurred_at.clone(),
+        };
+        match out.iter_mut().find(|x| x.id == id) {
+            Some(found) => *found = entry,
+            None => out.push(entry),
+        }
+    }
+    out.retain(|x| x.removed > 0);
+    out
 }
 
 fn pair_key(a: Uuid, b: Uuid) -> (Uuid, Uuid) {

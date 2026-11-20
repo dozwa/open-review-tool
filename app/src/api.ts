@@ -299,6 +299,12 @@ export interface PeerReview {
   recorded_by: string;
 }
 
+export interface SearchLine {
+  label: string;
+  query: string;
+  hits: number | null;
+}
+
 export interface SearchVersion {
   version: number;
   previous_version: number | null;
@@ -310,6 +316,8 @@ export interface SearchVersion {
   limits: string;
   hit_limit: number | null;
   hits: number | null;
+  /** Die Suche Zeile für Zeile, je mit Trefferzahl. */
+  lines: SearchLine[];
   change_note: string;
   published_at: string;
   peer_reviews: PeerReview[];
@@ -339,6 +347,16 @@ export interface DuplicateList {
   n_exact: number;
   n_resolved: number;
   n_distinct: number;
+  /** Vermerke über Dubletten, die vor dem Import in einer anderen Anwendung entfernt wurden. */
+  external: ExternalDuplicates[];
+}
+
+export interface ExternalDuplicates {
+  id: string;
+  tool: string;
+  removed: number;
+  note: string;
+  at: string;
 }
 
 export interface PairDecision {
@@ -812,6 +830,9 @@ export interface Flow {
   identified: number;
   exact_duplicates: number;
   resolved_duplicates: number;
+  /** Vor dem Import in einer anderen Anwendung entfernt; zählt zu `identified`. */
+  external_duplicates: number;
+  external: { tool: string; removed: number }[];
   unique: number;
   /** Von `identified`: Treffer aus Zitationssuche und anderen Wegen. */
   other_identified: number;
@@ -1051,6 +1072,8 @@ export const api = {
   duplicates: (reviewId: string) => call<DuplicateList>("duplicates_list", { reviewId }),
   resolveDuplicates: (reviewId: string, pairs: PairDecision[]) =>
     call<number>("duplicates_resolve", { reviewId, pairs }),
+  setExternalDuplicates: (reviewId: string, entry: string | null, tool: string, removed: number, note: string) =>
+    call<string>("duplicates_external_set", { reviewId, entry, tool, removed, note }),
   verifyChain: (reviewId: string) => call<ChainReport>("chain_verify", { reviewId }),
   sources: (reviewId: string) => call<SourceList>("sources", { reviewId }),
   linkStudy: (reviewId: string, studyId: string | null, label: string, records: string[], primary: string) =>
@@ -1067,6 +1090,7 @@ export const api = {
   revealStorage: (reviewId?: string) => call<void>("storage_reveal", { reviewId: reviewId ?? null }),
   exportReport: (reviewId: string, kind: ReportFileKind, path: string, lang?: string) =>
     call<void>("report_export", { reviewId, kind, path, lang }),
+  exportReportPng: (path: string, data: string) => call<void>("report_export_png", { path, data }),
   guidelines: () => call<Guideline[]>("guidance_list"),
   registrationDraft: (reviewId: string, lang?: string) => call<RegistrationDraft>("registration_draft", { reviewId, lang }),
   answerRegistration: (reviewId: string, key: string, text: string, lang?: string) =>

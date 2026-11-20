@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 
 import { api, canManage, errorText, ORIGIN_LABEL, ReviewDetail, Search, SearchVersion } from "./api";
-import { formatDate, t, tn } from "./i18n";
+import { formatDate, formatNumber, t, tn } from "./i18n";
 import { Banner, Empty, Group, Icon, Pill, Row } from "./ui";
 
 type Run = (action: () => Promise<string | void>, done?: string) => Promise<void>;
@@ -50,6 +50,22 @@ function VersionBody({ version, review }: { version: SearchVersion; review: Revi
         <HitCount version={version} />
       </p>
       <pre className="query">{version.query}</pre>
+      {version.lines.length > 0 && (
+        <table className="search-lines">
+          <thead>
+            <tr><th scope="col">{t("Zeile")}</th><th scope="col">{t("Teilstring")}</th><th scope="col">{t("Treffer")}</th></tr>
+          </thead>
+          <tbody>
+            {version.lines.map((line, i) => (
+              <tr key={i}>
+                <th scope="row">{line.label || i + 1}</th>
+                <td className="query-cell">{line.query}</td>
+                <td>{line.hits != null ? formatNumber(line.hits) : "–"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
       {(version.limits || version.hit_limit != null) && (
         <p className="muted">
           {version.limits && t("Grenzen: {limits}", { limits: version.limits })}
@@ -124,6 +140,12 @@ function SearchForm({ review, base, run, onDone }: { review: ReviewDetail; base:
   const [hits, setHits] = useState("");
   const [hitLimit, setHitLimit] = useState(last?.hit_limit != null ? String(last.hit_limit) : "");
   const [changeNote, setChangeNote] = useState("");
+  // Zeilen der Vorversion bleiben stehen, ihre Trefferzahlen nicht: Sie gelten für den neuen Lauf.
+  const [lines, setLines] = useState<{ label: string; query: string; hits: string }[]>(
+    () => (last?.lines ?? []).map((line) => ({ label: line.label, query: line.query, hits: "" })),
+  );
+  const setLine = (index: number, change: Partial<{ label: string; query: string; hits: string }>) =>
+    setLines(lines.map((line, i) => (i === index ? { ...line, ...change } : line)));
   const number = (text: string) => (text.trim() === "" ? null : Number(text));
 
   async function submit(event: React.FormEvent) {
@@ -132,6 +154,7 @@ function SearchForm({ review, base, run, onDone }: { review: ReviewDetail; base:
       await api.publishSearch(review.id, {
         search_id: base?.id ?? "", source, platform, origin, query, searched_on: searchedOn, limits,
         hits: number(hits), hit_limit: number(hitLimit), change_note: changeNote,
+        lines: lines.map((line) => ({ label: line.label, query: line.query, hits: number(line.hits) })),
       });
       onDone();
     }, base ? t("Neue Version der Suche festgehalten.") : t("Suche festgehalten."));
@@ -161,6 +184,20 @@ function SearchForm({ review, base, run, onDone }: { review: ReviewDetail; base:
           <label htmlFor="s-query">{t("Suchstring")} <small>{t("vollständig, so wie er ausgeführt wurde")}</small></label>
           <textarea id="s-query" className="query-input" rows={6} value={query} onChange={(e) => setQuery(e.target.value)} required />
         </div>
+        <div className="stack-field">
+          <label>{t("Treffer je Zeile")} <small>{t("freiwillig: die Suche Zeile für Zeile mit ihren Trefferzahlen, so wie die Quelle sie im Suchverlauf zeigt")}</small></label>
+          {lines.map((line, i) => (
+            <div className="line-edit" key={i}>
+              <input className="line-label" value={line.label} onChange={(e) => setLine(i, { label: e.target.value })} placeholder={`#${i + 1}`} aria-label={t("Zeile")} maxLength={200} />
+              <input className="query-input" value={line.query} onChange={(e) => setLine(i, { query: e.target.value })} placeholder={t("Begriff, Block oder Verknüpfung")} aria-label={t("Teilstring")} />
+              <input className="narrow-input" type="number" min={0} value={line.hits} onChange={(e) => setLine(i, { hits: e.target.value })} placeholder={t("Treffer")} aria-label={t("Treffer")} />
+              <button type="button" className="small" onClick={() => setLines(lines.filter((_, j) => j !== i))} aria-label={t("Zeile entfernen")}><Icon name="x" size={13} /></button>
+            </div>
+          ))}
+          <div>
+            <button type="button" className="small" disabled={lines.length >= 200} onClick={() => setLines([...lines, { label: "", query: "", hits: "" }])}><Icon name="plus" size={13} /> {t("Zeile")}</button>
+          </div>
+        </div>
         <Row>
           <label htmlFor="s-date">{t("Gesucht am")}</label>
           <input id="s-date" type="date" value={searchedOn} onChange={(e) => setSearchedOn(e.target.value)} required />
@@ -170,7 +207,7 @@ function SearchForm({ review, base, run, onDone }: { review: ReviewDetail; base:
           <input id="s-limits" value={limits} onChange={(e) => setLimits(e.target.value)} placeholder={t("z. B. ab 2015, Englisch und Deutsch")} />
         </Row>
         <Row>
-          <label htmlFor="s-hits">{t("Treffer")} <small>{t("wie die Quelle sie meldet; die App vergleicht mit dem Import")}</small></label>
+          <label htmlFor="s-hits">{t("Treffer gesamt")} <small>{t("Endergebnis der Suche, wie die Quelle es meldet; die App vergleicht mit dem Import")}</small></label>
           <input id="s-hits" className="narrow-input" type="number" min={0} value={hits} onChange={(e) => setHits(e.target.value)} />
         </Row>
         <Row>

@@ -290,6 +290,20 @@ pub async fn duplicates_list(state: State<'_, AppState>, review_id: String) -> R
 }
 
 #[tauri::command]
+pub async fn duplicates_external_set(
+    state: State<'_, AppState>,
+    review_id: String,
+    entry: Option<String>,
+    tool: String,
+    removed: i64,
+    note: String,
+) -> Res<String> {
+    let entry = entry.as_deref().map(uuid).transpose()?;
+    let review = open(&state, &review_id)?;
+    review.record_external_duplicates(entry.as_ref(), &tool, removed, &note).map(|id| id.to_string()).map_err(err)
+}
+
+#[tauri::command]
 pub async fn duplicates_resolve(state: State<'_, AppState>, review_id: String, pairs: Vec<PairDecision>) -> Res<usize> {
     open(&state, &review_id)?.resolve_duplicates(&pairs).map_err(err)
 }
@@ -680,6 +694,19 @@ pub async fn report_export(
     let review = open(&state, &review_id)?;
     let file = in_language(lang.as_deref(), || review.report_file(&kind))?.map_err(err)?;
     std::fs::write(path, file.content).map_err(err)
+}
+
+/// Speichert das Flussdiagramm als PNG. Das Bild zeichnet die Oberfläche aus dem SVG des Kerns; hier
+/// wird nur geprüft, dass es ein PNG ist, und geschrieben.
+#[tauri::command]
+pub async fn report_export_png(path: String, data: String) -> Res<()> {
+    use base64::engine::general_purpose::STANDARD;
+    use base64::Engine;
+    let bytes = STANDARD.decode(data.as_bytes()).map_err(|_| tr!("Das Bild ließ sich nicht lesen."))?;
+    if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Err(tr!("Das Bild ließ sich nicht lesen."));
+    }
+    std::fs::write(path, bytes).map_err(err)
 }
 
 // ---------------------------------------------------------------- Formulare

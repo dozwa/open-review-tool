@@ -262,8 +262,9 @@ AND (app[tiab] OR "mobile health"[tiab] OR telemedicine[tiab] OR digital[tiab])`
 const version = (n: number, extra: Record<string, unknown>) => ({
   version: n, previous_version: n > 1 ? n - 1 : null, source: "MEDLINE", platform: "PubMed", origin: "database", query,
   searched_on: "2026-11-02", limits: "ab 2015, Englisch und Deutsch", hit_limit: null, hits: 35, change_note: "",
-  published_at: "", peer_reviews: [], n_imports: 0, n_records: 0, n_duplicates: 0, ...extra,
+  published_at: "", lines: [], peer_reviews: [], n_imports: 0, n_records: 0, n_duplicates: 0, ...extra,
 });
+let externalDuplicates: { id: string; tool: string; removed: number; note: string; at: string }[] = [];
 let searches = [
   {
     id: "q1",
@@ -271,6 +272,11 @@ let searches = [
       version(1, { hits: 31, query: query.replace(" OR digital[tiab]", "") }),
       version(2, {
         change_note: "Freitext „digital“ ergänzt", n_imports: 1, n_records: 35,
+        lines: [
+          { label: "#1", query: "migraine[mh] OR migrain*[tiab] OR headache*[tiab]", hits: 48210 },
+          { label: "#2", query: "telemedicine[mh] OR mhealth[tiab] OR app[tiab] OR digital[tiab]", hits: 391875 },
+          { label: "#3", query: "#1 AND #2", hits: 35 },
+        ],
         peer_reviews: [{ reviewed_on: "2026-11-03", note: "Bibliothekarin der Einrichtung, PRESS: ohne Befund", reviewer: null, recorded_by: "p0" }],
       }),
     ],
@@ -452,8 +458,14 @@ export function installMock() {
         return null;
       }
       case "duplicates_list": return a.reviewId === "r2"
-        ? { pairs: [], total: 0, n_exact: 0, n_resolved: 0, n_distinct: 0 }
-        : { pairs: duplicatePairs, total: duplicatePairs.length, n_exact: 2, ...duplicateCounts };
+        ? { pairs: [], total: 0, n_exact: 0, n_resolved: 0, n_distinct: 0, external: [] }
+        : { pairs: duplicatePairs, total: duplicatePairs.length, n_exact: 2, ...duplicateCounts, external: externalDuplicates };
+      case "duplicates_external_set": {
+        const id = (a.entry as string | null) ?? `x${externalDuplicates.length + 1}`;
+        const entry = { id, tool: String(a.tool), removed: Number(a.removed), note: String(a.note), at: "" };
+        externalDuplicates = [...externalDuplicates.filter((x) => x.id !== id), ...(entry.removed > 0 ? [entry] : [])];
+        return id;
+      }
       case "duplicates_resolve": {
         const decided = a.pairs as { a: string; b: string; decision: string }[];
         for (const d of decided) {
@@ -617,9 +629,10 @@ export function installMock() {
         };
         return mockProtocol;
       case "report": return a.reviewId === "r2"
-        ? { ...reportExtras(false), ...mockReport, flow: { ...mockReport.flow, sources: [], identified: 0, exact_duplicates: 0, resolved_duplicates: 0, unique: 0, levels: [], included: null }, svg: "", methods: "# Methoden: Auswahl der Quellen\n\nDas Review lief ohne feste Vorlage.", search_appendix: "# Suchanhang\n\nEs ist keine Suche festgehalten.\n", n_excluded_rows: 0 }
+        ? { ...reportExtras(false), ...mockReport, flow: { ...mockReport.flow, sources: [], identified: 0, exact_duplicates: 0, resolved_duplicates: 0, external_duplicates: 0, external: [], unique: 0, levels: [], included: null }, svg: "", methods: "# Methoden: Auswahl der Quellen\n\nDas Review lief ohne feste Vorlage.", search_appendix: "# Suchanhang\n\nEs ist keine Suche festgehalten.\n", n_excluded_rows: 0 }
         : { ...mockReport, ...reportExtras(true) };
       case "report_export": return null;
+      case "report_export_png": return null;
       case "fulltext_overview": return a.reviewId === "r2" ? { folder: null, folder_found: false, zotero: null, needed: 0, retrieved: 0, unavailable: 0, rows: [] } : fulltextView();
       case "fulltext_folder_set": fulltexts.folder = (a.path as string | null) ?? null; return null;
       case "fulltext_suggestions": return fulltexts.rows.filter((r) => !r.fulltext).slice(0, 2).map((r, i) => ({

@@ -504,6 +504,22 @@ Stand 20.11.2026: umgesetzt für Formular-Stufen. Festlegungen beim Bau:
   ans Ende.
 - Offen: Belegstelle im Volltext anspringen, gescannte PDFs.
 
+## Suche, Dubletten und Diagramm: Nachträge (nach Meilenstein 9)
+
+Stand 20.11.2026: umgesetzt. Festlegungen beim Bau:
+
+- **Dubletten aus anderen Anwendungen:** Die Leitung vermerkt im Reiter „Import“ Anwendung, Anzahl und eine
+  Notiz (`ExternalDuplicatesRecorded`, Hauptkette; ein späterer Vermerk mit derselben Kennung ersetzt, die
+  Anzahl 0 nimmt zurück). Die Einträge hat die App nie gesehen. Im Bericht gilt: identifiziert = importiert
+  plus vorher entfernt; das Diagramm nennt die Zahl je Anwendung, der Methodentext sagt, dass sie eine Angabe
+  der Leitung ist. `Flow::check` rechnet mit.
+- **Treffer je Zeile der Suche:** Eine Suchversion kann ihre Zeilen festhalten (Bezeichnung wie „#3“,
+  Teilstring, Trefferzahl; Feld `lines` in `SearchVersionPublished`, höchstens 200). Das Endergebnis der
+  ganzen Suche bleibt das Feld „Treffer gesamt“. Beides steht im Reiter „Suche“ und im Suchanhang. Zeilen
+  nachtragen heißt wie jede Änderung: neue Version mit Notiz.
+- **Diagramm als PNG:** Die Oberfläche zeichnet das SVG des Kerns in vierfacher Größe auf weißen Grund; die
+  App prüft nur, dass es ein PNG ist, und schreibt die Datei.
+
 ## Erweiterung um weitere Review-Typen
 
 ### 9 Vorlagen ohne neue Bausteine (S)

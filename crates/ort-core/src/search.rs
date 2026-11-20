@@ -21,6 +21,15 @@ pub struct PeerReview {
     pub recorded_by: Uuid,
 }
 
+/// Eine Zeile der Suche mit eigener Trefferzahl: ein Begriff, ein Block oder eine Verknüpfung.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct SearchLine {
+    /// Wie die Zeile in der Quelle heißt, z. B. `#3` oder `S3`; darf leer sein.
+    pub label: String,
+    pub query: String,
+    pub hits: Option<i64>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct SearchVersion {
     pub version: i64,
@@ -39,6 +48,8 @@ pub struct SearchVersion {
     pub hit_limit: Option<i64>,
     /// Trefferzahl, wie die Quelle sie gemeldet hat.
     pub hits: Option<i64>,
+    /// Die Suche Zeile für Zeile, je mit Trefferzahl; leer, wenn nur das Gesamtergebnis festgehalten ist.
+    pub lines: Vec<SearchLine>,
     pub change_note: String,
     pub published_at: String,
     pub peer_reviews: Vec<PeerReview>,
@@ -58,6 +69,21 @@ impl Search {
     pub fn version(&self, version: i64) -> Option<&SearchVersion> {
         self.versions.iter().find(|v| v.version == version)
     }
+}
+
+fn lines(payload: &Value) -> Vec<SearchLine> {
+    let text = |line: &Value, key: &str| line.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
+    payload
+        .get("lines")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|line| SearchLine {
+            label: text(line, "label"),
+            query: text(line, "query"),
+            hits: line.get("hits").and_then(Value::as_i64),
+        })
+        .collect()
 }
 
 /// Alle Suchen in der Reihenfolge ihrer ersten Veröffentlichung.
@@ -89,6 +115,7 @@ impl Searches {
                         limits: text(e, "limits"),
                         hit_limit: number(e, "hit_limit"),
                         hits: number(e, "hits"),
+                        lines: lines(&e.payload),
                         change_note: text(e, "change_note"),
                         published_at: e.occurred_at.clone(),
                         peer_reviews: Vec::new(),

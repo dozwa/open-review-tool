@@ -17,7 +17,7 @@ use crate::agreement::{self, Alpha, CohenPair, Estimate, Metric, Percent};
 use crate::canonical::to_canonical;
 use crate::catalog;
 use crate::criteria::{check_reasons, Criteria};
-use crate::duplicates::{self, Resolutions};
+use crate::duplicates::{self, External, Resolutions};
 use crate::error::{conflict, forbidden, invalid, not_found, Result};
 use crate::event::{now_timestamp, parse_public_key, sha256_hex, Event, Identity, PublicIdentity};
 use crate::forms::PILOT_PER_TYPE;
@@ -192,6 +192,9 @@ pub struct ImportSummary {
     pub n_exact_duplicates: i64,
     /// Als Dublette entschiedene Paare (`DuplicatesResolved`).
     pub n_resolved_duplicates: i64,
+    /// Vor dem Import in einer anderen Anwendung entfernte Dubletten; in `n_records` nicht enthalten.
+    pub n_external_duplicates: i64,
+    pub external: Vec<External>,
     pub n_unique: i64,
 }
 
@@ -227,6 +230,8 @@ pub struct DuplicateList {
     pub n_exact: i64,
     pub n_resolved: i64,
     pub n_distinct: usize,
+    /// Vermerke über Dubletten, die vor dem Import in einer anderen Anwendung entfernt wurden.
+    pub external: Vec<External>,
 }
 
 pub const PAIR_LIMIT: usize = 200;
@@ -1123,11 +1128,14 @@ impl Review {
         let n_records: i64 = sources.iter().map(|s| s.n_records).sum();
         let n_exact_duplicates: i64 = sources.iter().map(|s| s.n_duplicates).sum();
         let n_resolved_duplicates = self.resolutions()?.removed.len() as i64;
+        let external = self.external_duplicates()?;
         Ok(ImportSummary {
             sources,
             n_records,
             n_exact_duplicates,
             n_resolved_duplicates,
+            n_external_duplicates: external.iter().map(|x| x.removed).sum(),
+            external,
             n_unique: n_records - n_exact_duplicates - n_resolved_duplicates,
         })
     }
@@ -1197,6 +1205,25 @@ impl Review {
         if number("hit_limit").is_some_and(|n| n < 1) || number("hits").is_some_and(|n| n < 0) {
             return Err(invalid(tr!("Trefferzahl und Trefferlimit dürfen nicht negativ sein.")));
         }
+        // Zeilen ohne jeden Inhalt fallen weg; eine Zeile mit Trefferzahl braucht ihren Teilstring.
+        let mut lines: Vec<Value> = Vec::new();
+        for line in data.get("lines").and_then(Value::as_array).into_iter().flatten() {
+            let part = |key: &str| line.get(key).and_then(Value::as_str).unwrap_or_default().trim().to_string();
+            let hits = line.get("hits").and_then(Value::as_i64);
+            if part("query").is_empty() {
+                if part("label").is_empty() && hits.is_none() {
+                    continue;
+                }
+                return Err(invalid(tr!("Zu einer Zeile der Suche fehlt der Teilstring.")));
+            }
+            if hits.is_some_and(|n| n < 0) {
+                return Err(invalid(tr!("Trefferzahl und Trefferlimit dürfen nicht negativ sein.")));
+            }
+            lines.push(json!({"label": part("label"), "query": part("query"), "hits": hits}));
+        }
+        if lines.len() > catalog::MAX_SEARCH_LINES {
+            return Err(invalid(tr!("Eine Suche hat höchstens {} Zeilen.", catalog::MAX_SEARCH_LINES)));
+        }
         if version > 1 && text("change_note").is_empty() {
             return Err(invalid(tr!("Was hat sich an der Suche geändert? Die Notiz zur Änderung fehlt.")));
         }
@@ -1208,6 +1235,7 @@ impl Review {
                 "source": text("source"), "platform": text("platform"), "origin": text("origin"),
                 "query": text("query"), "searched_on": text("searched_on"), "limits": text("limits"),
                 "hit_limit": number("hit_limit"), "hits": number("hits"), "change_note": text("change_note"),
+                "lines": lines,
             }),
         )?;
         self.search_state()?.get(&id).cloned().ok_or_else(|| not_found(tr!("Diese Suche gibt es nicht.")))
@@ -1298,7 +1326,14 @@ impl Review {
             });
         }
         let (_, n_exact, n_resolved) = self.duplicate_counts(&resolutions)?;
-        Ok(DuplicateList { pairs, total: found.len(), n_exact, n_resolved, n_distinct: resolutions.distinct.len() })
+        Ok(DuplicateList {
+            pairs,
+            total: found.len(),
+            n_exact,
+            n_resolved,
+            n_distinct: resolutions.distinct.len(),
+            external: self.external_duplicates()?,
+        })
     }
 
     /// Entscheidet Paare: Dublette (mit dem Eintrag, der bleibt) oder keine. Eine spätere Entscheidung
@@ -1334,6 +1369,44 @@ impl Review {
             self.append("DuplicatesResolved", None, json!({ "pairs": list }))?;
         }
         Ok(pairs.len())
+    }
+
+    /// Vermerke über Dubletten, die vor dem Import in einer anderen Anwendung entfernt wurden.
+    pub(crate) fn external_duplicates(&self) -> Result<Vec<External>> {
+        Ok(duplicates::externals(&self.store.events_of_types(&["ExternalDuplicatesRecorded"])?))
+    }
+
+    /// Vermerkt, wie viele Dubletten vor dem Import in einer anderen Anwendung entfernt wurden. Ohne
+    /// `entry` entsteht ein neuer Vermerk, mit `entry` wird der bestehende ersetzt; die Anzahl 0 nimmt
+    /// ihn zurück. Die App hat diese Einträge nie gesehen: Die Zahl ist eine Angabe der Leitung.
+    pub fn record_external_duplicates(
+        &self,
+        entry: Option<&Uuid>,
+        tool: &str,
+        removed: i64,
+        note: &str,
+    ) -> Result<Uuid> {
+        require(&self.state()?, &self.me.actor_id, &MANAGE_ROLES)?;
+        let known = self.external_duplicates()?;
+        let (id, tool) = match entry {
+            None if removed == 0 => return Err(invalid(tr!("Trag ein, wie viele Dubletten entfernt wurden."))),
+            None => (Uuid::new_v4(), tool.trim().to_string()),
+            Some(id) => {
+                let found =
+                    known.iter().find(|x| &x.id == id).ok_or_else(|| not_found(tr!("Vermerk nicht gefunden.")))?;
+                // Beim Zurücknehmen bleibt der Name stehen, auch wenn das Feld geleert wurde.
+                (*id, if removed == 0 && tool.trim().is_empty() { found.tool.clone() } else { tool.trim().to_string() })
+            }
+        };
+        if tool.is_empty() {
+            return Err(invalid(tr!("Nenn die Anwendung, in der die Dubletten entfernt wurden.")));
+        }
+        self.append(
+            "ExternalDuplicatesRecorded",
+            None,
+            json!({"entry": id.to_string(), "tool": tool, "removed": removed, "note": note.trim()}),
+        )?;
+        Ok(id)
     }
 
     pub fn records(&self, query: Option<&str>, include_duplicates: bool) -> Result<Vec<RecordItem>> {

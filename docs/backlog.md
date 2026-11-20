@@ -38,23 +38,11 @@ geschätzt: **klein** (bis etwa ein Tag), **mittel** (einige Tage), **groß** (e
 | mittel | Aus einer eingelesenen OSF-Registrierung auch Kriterien, Suchen und Formular vorbefüllen | „Aus OSF einlesen“ füllt bisher die 65 Felder der Registrierung. Kriterien und Suchen stehen dort als freier Text; noch zu klären: von Hand zuordnen oder mit KI-Vorschlag. |
 | mittel | Protokoll aus einer Datei (PDF, Word) einlesen | Viele Protokolle hängen bei OSF nur als Datei an; die App nennt die Dateien, lädt sie aber nicht. |
 
-### Suche
-
-| Aufwand | Wunsch | Anmerkung |
-| --- | --- | --- |
-| mittel | Suchergebnisse dokumentieren mit Trefferanzahl je Such- und Substring | auch das finale Ergebnis der gefundenen Einträge sollte man separat ausweisen können |
-
 ### UI
 
 | Aufwand | Wunsch | Anmerkung |
 | --- | --- | --- |
 | offen | Einfaches Interface und Expertenversion | Das Nutzerinterface ist mitlerweile sehr vollgepackt und wird echt unübersichtlich, daher sollten wir auch eine "einfache" Version einbauen, in der unnötige Informationen nicht dargestellt werden. Hinweise sollten sich grundsätzlich hinter Tooltips befinden (mit Indikatorsymbol) |
-
-### Dokumentation
-
-| Aufwand | Wunsch | Anmerkung |
-| --- | --- | --- |
-| mittel | Deduplizierungen in anderen Anwendungen, bspw. Zotero eintragen können | Aktuell werden nur Dedups aus dem Tool gezählt, aber man kann auch in Zotero Dedups hinzufügen, ggf. als Quelle nennen |
 
 ### Rückmeldung
 

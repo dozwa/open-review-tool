@@ -1,10 +1,11 @@
 // Mögliche Dubletten: Paare, die der exakte Abgleich beim Import nicht erkennt, nebeneinander zur Entscheidung.
+// Darunter die Vermerke über Dubletten, die schon vor dem Import in einer anderen Anwendung entfernt wurden.
 
 import React, { useEffect, useState } from "react";
 
-import { api, canManage, DuplicateList, DuplicatePair, errorText, PairDecision, RecordItem, ReviewDetail } from "./api";
-import { t } from "./i18n";
-import { Banner, Group, Icon, Pill } from "./ui";
+import { api, canManage, DuplicateList, DuplicatePair, errorText, ExternalDuplicates, PairDecision, RecordItem, ReviewDetail } from "./api";
+import { formatNumber, t, tn } from "./i18n";
+import { Banner, Group, Icon, Pill, Row } from "./ui";
 
 type Run = (action: () => Promise<string | void>, done?: string) => Promise<void>;
 
@@ -28,6 +29,80 @@ function Side({ record, source, other, kept }: { record: RecordItem; source: str
   );
 }
 
+/** Dubletten, die vor dem Import woanders entfernt wurden: Anwendung und Anzahl, von der Leitung eingetragen. */
+function External({ review, entries, run }: { review: ReviewDetail; entries: ExternalDuplicates[]; run: Run }) {
+  const manage = canManage(review.role);
+  // null: kein Formular; "new": neuer Vermerk; sonst der Vermerk, der geändert wird
+  const [editing, setEditing] = useState<ExternalDuplicates | "new" | null>(null);
+  const [tool, setTool] = useState("");
+  const [removed, setRemoved] = useState("");
+  const [note, setNote] = useState("");
+
+  function edit(entry: ExternalDuplicates | "new") {
+    setEditing(entry);
+    setTool(entry === "new" ? "" : entry.tool);
+    setRemoved(entry === "new" ? "" : String(entry.removed));
+    setNote(entry === "new" ? "" : entry.note);
+  }
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    const entry = editing === "new" || editing === null ? null : editing.id;
+    await run(async () => {
+      await api.setExternalDuplicates(review.id, entry, tool, Number(removed), note);
+      setEditing(null);
+    }, t("Vermerkt."));
+  }
+  const drop = (entry: ExternalDuplicates) =>
+    run(async () => void (await api.setExternalDuplicates(review.id, entry.id, entry.tool, 0, "")), t("Vermerk entfernt."));
+
+  if (!manage && entries.length === 0) return null;
+  return (
+    <Group
+      title={t("Dubletten aus anderen Anwendungen")}
+      footer={t("Für Dubletten, die schon vor dem Import woanders entfernt wurden, etwa in Zotero. Die App hat diese Einträge nie gesehen: Der Bericht zählt sie zu den identifizierten und zu den entfernten Einträgen und nennt die Anwendung.")}
+      action={manage && editing === null && (
+        <button className="small" onClick={() => edit("new")}><Icon name="plus" size={13} /> {t("Eintragen")}</button>
+      )}
+    >
+      {entries.length === 0 && editing === null && <Row><span className="muted">{t("Nichts eingetragen.")}</span></Row>}
+      {entries.map((entry) => (
+        <Row key={entry.id}>
+          <span className="external-entry">
+            {entry.tool}
+            <small>{[tn("{n} Dublette vor dem Import entfernt", "{n} Dubletten vor dem Import entfernt", entry.removed, { n: formatNumber(entry.removed) }), entry.note].filter(Boolean).join(" · ")}</small>
+          </span>
+          {manage && (
+            <span className="group-actions">
+              <button className="small" onClick={() => edit(entry)}>{t("Ändern")}</button>
+              <button className="small" onClick={() => drop(entry)}>{t("Entfernen")}</button>
+            </span>
+          )}
+        </Row>
+      ))}
+      {editing !== null && (
+        <form className="search-form" onSubmit={submit}>
+          <Row>
+            <label htmlFor="x-tool">{t("Anwendung")} <small>{t("worin die Dubletten entfernt wurden")}</small></label>
+            <input id="x-tool" value={tool} onChange={(e) => setTool(e.target.value)} placeholder={t("z. B. Zotero")} required />
+          </Row>
+          <Row>
+            <label htmlFor="x-removed">{t("Entfernte Dubletten")} <small>{t("Treffer vor dem Entfernen minus Einträge danach")}</small></label>
+            <input id="x-removed" className="narrow-input" type="number" min={1} value={removed} onChange={(e) => setRemoved(e.target.value)} required />
+          </Row>
+          <Row>
+            <label htmlFor="x-note">{t("Notiz")} <small>{t("wie abgeglichen wurde")}</small></label>
+            <input id="x-note" value={note} onChange={(e) => setNote(e.target.value)} maxLength={1000} />
+          </Row>
+          <div className="sheet-actions">
+            <button type="button" onClick={() => setEditing(null)}>{t("Abbrechen")}</button>
+            <button className="primary" type="submit">{t("Vermerken")}</button>
+          </div>
+        </form>
+      )}
+    </Group>
+  );
+}
+
 export function Duplicates({ review, run }: { review: ReviewDetail; run: Run }) {
   const manage = canManage(review.role);
   const [list, setList] = useState<DuplicateList | null>(null);
@@ -38,7 +113,9 @@ export function Duplicates({ review, run }: { review: ReviewDetail; run: Run }) 
   }, [review]);
 
   if (error) return <Banner kind="error">{error}</Banner>;
-  if (!list || (list.total === 0 && list.n_exact + list.n_resolved + list.n_distinct === 0)) return null;
+  if (!list) return null;
+  const external = review.n_records > 0 || list.external.length > 0 ? <External review={review} entries={list.external} run={run} /> : null;
+  if (list.total === 0 && list.n_exact + list.n_resolved + list.n_distinct === 0) return external;
 
   const resolve = (pairs: PairDecision[], done: string) => run(async () => void (await api.resolveDuplicates(review.id, pairs)), done);
   const duplicate = (p: DuplicatePair, keep: string): PairDecision => ({ a: p.a.id, b: p.b.id, decision: "duplicate", keep });
@@ -52,6 +129,7 @@ export function Duplicates({ review, run }: { review: ReviewDetail; run: Run }) 
   ].join(" · ");
 
   return (
+    <>
     <Group
       title={list.total > 0 ? t("Mögliche Dubletten ({n})", { n: list.total }) : t("Dubletten")}
       footer={
@@ -87,5 +165,7 @@ export function Duplicates({ review, run }: { review: ReviewDetail; run: Run }) 
         <p className="muted dup-more">{t("Gezeigt sind die ersten {shown} von {total} Paaren; nach dem Entscheiden rücken weitere nach.", { shown: list.pairs.length, total: list.total })}</p>
       )}
     </Group>
+    {external}
+    </>
   );
 }
