@@ -501,6 +501,28 @@ export interface Highlight extends NewHighlight {
   at: string;
 }
 
+/** Vorschlag der KI zu einem Feld des Formulars, mit Belegstelle aus dem Volltext. */
+export interface ProposedValue {
+  value: FormValue;
+  quote: string;
+  page: number | null;
+}
+
+/** Vorschlag der KI für die Felder eines Formulars, gelesen aus dem Volltext einer Quelle. */
+export interface Extraction {
+  id: string;
+  model: string;
+  fulltext_sha256: string;
+  form_version: number;
+  /** Der Volltext war zu lang; die KI sah nur den Anfang. */
+  truncated: boolean;
+  /** Feld → Vorschlag; Felder ohne Vorschlag fehlen. */
+  fields: Record<string, ProposedValue>;
+  /** Übernommene Felder; `null`, solange nichts vermerkt ist. */
+  accepted: string[] | null;
+  at: string;
+}
+
 export interface AiSuggestion {
   suggestion: Suggestion;
   /** Der Prompt, der dafür gesendet wurde. */
@@ -977,6 +999,8 @@ export interface FormEntryView {
   completed: { form_version: number; seconds: number | null; verify: boolean } | null;
   missing: string[];
   compared: FormCompared | null;
+  /** Ob die Leitung KI-Vorschläge erlaubt, und der letzte eigene Vorschlag zu dieser Quelle. */
+  ai: { allowed: boolean; suggestion: Extraction | null };
   position: number;
   total: number;
   previous: string | null;
@@ -1100,9 +1124,15 @@ export const api = {
   aiSuggest: (reviewId: string, stageId: string, recordId: string) => call<AiSuggestion>("ai_suggest", { reviewId, stageId, recordId }),
   aiResolve: (reviewId: string, stageId: string, recordId: string, suggestion: string, outcome: "accepted" | "declined") =>
     call<void>("ai_resolve", { reviewId, stageId, recordId, suggestion, outcome }),
+  /** Holt einen Vorschlag für die Felder des Formulars; `pages` ist der Text des Volltexts je Seite. */
+  aiExtract: (reviewId: string, stageId: string, recordId: string, fulltextId: string, pages: string[]) =>
+    call<Extraction>("ai_extract", { reviewId, stageId, recordId, fulltextId, pages }),
+  /** Trägt die gewählten Werte ein; eine leere Liste verwirft den Vorschlag. Gibt die Zahl der geänderten Werte zurück. */
+  aiExtractApply: (reviewId: string, stageId: string, recordId: string, suggestion: string, accepted: string[]) =>
+    call<number>("ai_extract_apply", { reviewId, stageId, recordId, suggestion, accepted }),
   aiPolicySet: (reviewId: string, allowed: boolean) => call<void>("ai_policy_set", { reviewId, allowed }),
   aiTest: () => call<string>("ai_test"),
-  aiDefaultPrompt: () => call<string>("ai_default_prompt"),
+  aiDefaultPrompt: (kind: "screening" | "extraction" = "screening") => call<string>("ai_default_prompt", { kind }),
   aiKeyStatus: () => call<boolean>("ai_key_status"),
   aiKeySet: (key: string) => call<void>("ai_key_set", { key }),
   aiKeyClear: () => call<void>("ai_key_clear"),

@@ -248,13 +248,15 @@ function LongText({ label, hint, value, placeholder, rows, mono, onSave, childre
 
 const PLACEHOLDER_HINT = t("Platzhalter: {{review}} (Titel, Art, Stufe), {{questions}} (Fragestellung), {{criteria}} (Kriterien der Stufe), {{record}} (Eintrag), {{format}} (verlangtes Antwortformat). Fehlen {{record}} oder {{format}}, kommen sie ans Ende.");
 
-/** Die Vorlage des Prompts. Leer gilt die Standardvorlage; sie lässt sich als Ausgangspunkt laden. */
-function PromptSetting({ label, value, onSave, onError }: { label: string; value: string; onSave: (text: string) => void; onError: (text: string) => void }) {
+const EXTRACTION_HINT = t("Platzhalter: {{review}} (Titel, Art, Stufe), {{questions}} (Fragestellung), {{source}} (Titel der Quelle), {{fields}} (Felder des Formulars), {{fulltext}} (Text des Volltexts mit Seitenmarken), {{format}} (verlangtes Antwortformat). Fehlen {{fields}}, {{fulltext}} oder {{format}}, kommen sie ans Ende.");
+
+/** Die Vorlage des Prompts fürs Screening oder für die Extraktion. Leer gilt die Standardvorlage; sie lässt sich als Ausgangspunkt laden. */
+function PromptSetting({ label, value, kind = "screening", onSave, onError }: { label: string; value: string; kind?: "screening" | "extraction"; onSave: (text: string) => void; onError: (text: string) => void }) {
   return (
-    <LongText label={label} hint={PLACEHOLDER_HINT} rows={value ? 14 : 3} value={value} placeholder={t("Leer: Es gilt die Standardvorlage.")} onSave={onSave}>
+    <LongText label={label} hint={kind === "extraction" ? EXTRACTION_HINT : PLACEHOLDER_HINT} rows={value ? 14 : 3} value={value} placeholder={t("Leer: Es gilt die Standardvorlage.")} onSave={onSave}>
       {value
         ? <button className="small" onClick={() => onSave("")}>{t("Standardvorlage wiederherstellen")}</button>
-        : <button className="small" onClick={() => api.aiDefaultPrompt().then(onSave).catch((e) => onError(errorText(e)))}>{t("Standardvorlage zum Bearbeiten laden")}</button>}
+        : <button className="small" onClick={() => api.aiDefaultPrompt(kind).then(onSave).catch((e) => onError(errorText(e)))}>{t("Standardvorlage zum Bearbeiten laden")}</button>}
     </LongText>
   );
 }
@@ -307,12 +309,13 @@ function AiRows({ value, onChange, onError }: { value: Ai; onChange: (next: Ai) 
   };
   return (
     <>
-      <Switch label={t("KI-Vorschlag im Screening")} hint={t("Zeigt auf der Screening-Seite den Knopf „KI-Vorschlag“.")} checked={value.enabled} onChange={(enabled) => set({ enabled })} />
+      <Switch label={t("KI-Vorschläge")} hint={t("Zeigt auf der Screening-Seite den Knopf „KI-Vorschlag“ und bei der Eingabe im Formular „KI-Vorschlag aus dem Volltext“.")} checked={value.enabled} onChange={(enabled) => set({ enabled })} />
       <TextSetting label={t("Adresse")} hint={t("Bis vor den Pfad, etwa http://localhost:11434/v1 für Ollama.")} value={value.url} placeholder="http://localhost:11434/v1" mono onSave={(url) => set({ url })} />
       <TextSetting label={t("Modell")} hint={t("Name, wie ihn die API erwartet.")} value={value.model} placeholder="llama3.1" mono onSave={(model) => set({ model })} />
       <ApiKeySetting onError={onError} />
       <Switch label={t("Publikationsangaben mitsenden")} hint={t("Autoren, Jahr, Zeitschrift und DOI. Ausgeschaltet urteilt die KI nur nach Titel, Abstract und Schlagwörtern.")} checked={value.publication} onChange={(publication) => set({ publication })} />
-      <PromptSetting label={t("Prompt")} value={value.prompt} onSave={(prompt) => set({ prompt })} onError={onError} />
+      <PromptSetting label={t("Prompt fürs Screening")} value={value.prompt} onSave={(prompt) => set({ prompt })} onError={onError} />
+      <PromptSetting label={t("Prompt für die Extraktion")} kind="extraction" value={value.extraction_prompt} onSave={(extraction_prompt) => set({ extraction_prompt })} onError={onError} />
       <Setting label={t("Verbindung")} hint={test && test !== "running" ? <span className={test.ok ? "test-ok" : "test-failed"}>{test.text}</span> : t("Schickt eine kurze Probe mit den Werten oben.")}>
         <button className="small" disabled={test === "running" || !value.enabled} onClick={runTest}>{test === "running" ? t("Probe läuft …") : t("Verbindung testen")}</button>
       </Setting>
@@ -441,7 +444,7 @@ export function SettingsPage({ me, onIdentity }: { me: Person; onIdentity: () =>
 
       <Group
         title={t("KI-Unterstützung")}
-        footer={t("Für einen Vorschlag gehen Titel, Abstract und Schlagwörter des Eintrags sowie Titel, Fragestellung und Kriterien des Reviews an die eingetragene Adresse. Bei einem lokalen Modell bleibt alles auf diesem Rechner. Jeder Vorschlag wird im Log vermerkt; die Entscheidung trifft immer ein Mensch.")}
+        footer={t("Für einen Vorschlag im Screening gehen Titel, Abstract und Schlagwörter des Eintrags sowie Titel, Fragestellung und Kriterien des Reviews an die eingetragene Adresse. Für einen Vorschlag zur Extraktion gehen der Text des Volltexts und die Felder des Formulars dorthin. Bei einem lokalen Modell bleibt alles auf diesem Rechner. Jeder Vorschlag wird im Log vermerkt; die Entscheidung trifft immer ein Mensch.")}
       >
         <AiRows value={settings.ai} onChange={(ai) => change({ ai })} onError={setError} />
       </Group>
@@ -564,12 +567,19 @@ export function ProjectSettingsTab({ review, run }: { review: ReviewDetail; run:
           </select>
         </Setting>
         <Switch
-          label={t("Prompt wie im Programm")}
+          label={t("Prompt fürs Screening wie im Programm")}
           hint={t("Ausgeschaltet bekommt dieses Review eine eigene Vorlage.")}
           checked={project.ai_prompt === null}
           onChange={(same) => change({ ai_prompt: same ? null : view.effective.ai_prompt })}
         />
         {project.ai_prompt !== null && <PromptSetting label={t("Prompt für dieses Review")} value={project.ai_prompt} onSave={(ai_prompt) => change({ ai_prompt })} onError={setError} />}
+        <Switch
+          label={t("Prompt für die Extraktion wie im Programm")}
+          hint={t("Ausgeschaltet bekommt dieses Review eine eigene Vorlage.")}
+          checked={project.ai_extraction_prompt === null}
+          onChange={(same) => change({ ai_extraction_prompt: same ? null : view.effective.ai_extraction_prompt })}
+        />
+        {project.ai_extraction_prompt !== null && <PromptSetting label={t("Prompt für die Extraktion in diesem Review")} kind="extraction" value={project.ai_extraction_prompt} onSave={(ai_extraction_prompt) => change({ ai_extraction_prompt })} onError={setError} />}
       </Group>
 
       <Group title={t("Screening-Seite")}>

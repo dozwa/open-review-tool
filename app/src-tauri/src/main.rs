@@ -111,6 +111,8 @@ fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send
         commands::highlight_remove,
         commands::ai_suggest,
         commands::ai_resolve,
+        commands::ai_extract,
+        commands::ai_extract_apply,
         commands::ai_policy_set,
         commands::ai_test,
         commands::ai_default_prompt,

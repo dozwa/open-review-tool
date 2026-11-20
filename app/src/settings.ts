@@ -32,6 +32,8 @@ export interface Ai {
   model: string;
   /** Eigene Vorlage für den Prompt; leer heißt Standardvorlage. */
   prompt: string;
+  /** Eigene Vorlage für den Prompt der Extraktion; leer heißt Standardvorlage. */
+  extraction_prompt: string;
   /** Autoren, Jahr, Zeitschrift und DOI mitsenden. */
   publication: boolean;
   path: string;
@@ -69,6 +71,7 @@ export interface ProjectSettings {
   package_dir: string | null;
   screening: ScreeningLayout | null;
   ai_prompt: string | null;
+  ai_extraction_prompt: string | null;
   ai_publication: boolean | null;
   color: string;
 }
@@ -79,6 +82,7 @@ export interface Effective {
   package_dir: string;
   screening: ScreeningLayout;
   ai_prompt: string;
+  ai_extraction_prompt: string;
   ai_publication: boolean;
 }
 
@@ -103,7 +107,7 @@ export const DEFAULTS: Settings = {
   density: "normal",
   screening: { show_list: true, show_criteria: true, show_source: false, highlight: true },
   shortcuts: { include: "I", maybe: "M", exclude: "E", next: "J", previous: "K", focus: "F", ai: "A" },
-  ai: { enabled: false, url: "", model: "", prompt: "", publication: false, path: "/chat/completions", extra_body: "", answer_path: "/choices/0/message/content", timeout_s: 120 },
+  ai: { enabled: false, url: "", model: "", prompt: "", extraction_prompt: "", publication: false, path: "/chat/completions", extra_body: "", answer_path: "/choices/0/message/content", timeout_s: 120 },
   export_dir: "",
   package_dir: "",
 };

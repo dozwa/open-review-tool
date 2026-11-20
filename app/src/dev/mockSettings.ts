@@ -24,7 +24,7 @@ export function readMockSettings(): { settings: Settings; stored: boolean } {
 
 function view(reviewId: string): ProjectView {
   const program = readMockSettings().settings;
-  const project = projects.get(reviewId) ?? { output_language: null, export_dir: null, package_dir: null, screening: null, ai_prompt: null, ai_publication: null, color: reviewId === "r1" ? "green" : "" };
+  const project = projects.get(reviewId) ?? { output_language: null, export_dir: null, package_dir: null, screening: null, ai_prompt: null, ai_extraction_prompt: null, ai_publication: null, color: reviewId === "r1" ? "green" : "" };
   return {
     project,
     effective: {
@@ -33,6 +33,7 @@ function view(reviewId: string): ProjectView {
       package_dir: project.package_dir ?? program.package_dir,
       screening: project.screening ?? program.screening,
       ai_prompt: project.ai_prompt ?? program.ai.prompt,
+      ai_extraction_prompt: project.ai_extraction_prompt ?? program.ai.extraction_prompt,
       ai_publication: project.ai_publication ?? program.ai.publication,
     },
     file: `/Users/beispiel/Library/Application Support/org.openreviewtool.app/reviews/${reviewId}.ortreview`,

@@ -9,9 +9,11 @@ geschätzt: **klein** (bis etwa ein Tag), **mittel** (einige Tage), **groß** (e
 
 | Aufwand | Wunsch | Anmerkung |
 | --- | --- | --- |
-| groß | KI-Vorschläge zur Extraktion aus Volltexten | Setzt voraus, dass der Text aus dem PDF gelesen wird; ein Vorschlag je Feld des Formulars. |
+| mittel | Belegstelle eines KI-Vorschlags im Volltext anspringen und markieren | Der Vorschlag nennt Zitat und Seite; gesucht wird noch von Hand. |
+| mittel | KI-Vorschläge zur Extraktion für gescannte PDFs und sehr lange Volltexte | Gelesen wird die Textebene des PDFs, höchstens 400.000 Zeichen. Scans bräuchten Texterkennung oder ein Modell, das Seiten als Bild liest. |
 | groß | Decision Model in der App für Screening-Entscheidungen | Noch zu klären: Was soll das Modell leisten (Reihenfolge der Einträge, Vorschlag, Stoppregel)? |
 | offen | Decision Model über eine API, z. B. JEV | Noch zu klären: welche API und welches Format. Hängt am Punkt darüber. |
+| offen | MCP für die App erstellen, so dass man auch von außen mit einem KI Modell auf die Inhalte der App zugreifen und Daten in der App eintragen kann | Die App datenmäßig für den Zugriff von "außen" öffnen und so bspw. Claude ermöglichen Anpassungen an den Daten und Inhalten vorzunehmen, muss deaktivierbar sein - auf individueller Ebene pro User und auf Projektebene durch den Projektleiter, MCP Konfigurierbar machen, berechtigungen vergeben können, bspw. nur lesen |
 
 ### Volltexte
 
@@ -41,6 +43,12 @@ geschätzt: **klein** (bis etwa ein Tag), **mittel** (einige Tage), **groß** (e
 | Aufwand | Wunsch | Anmerkung |
 | --- | --- | --- |
 | mittel | Suchergebnisse dokumentieren mit Trefferanzahl je Such- und Substring | auch das finale Ergebnis der gefundenen Einträge sollte man separat ausweisen können |
+
+### UI
+
+| Aufwand | Wunsch | Anmerkung |
+| --- | --- | --- |
+| offen | Einfaches Interface und Expertenversion | Das Nutzerinterface ist mitlerweile sehr vollgepackt und wird echt unübersichtlich, daher sollten wir auch eine "einfache" Version einbauen, in der unnötige Informationen nicht dargestellt werden. Hinweise sollten sich grundsätzlich hinter Tooltips befinden (mit Indikatorsymbol) |
 
 ### Dokumentation
 

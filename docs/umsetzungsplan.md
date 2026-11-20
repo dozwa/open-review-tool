@@ -474,8 +474,35 @@ Stand 19.11.2026: umgesetzt für das Screening. Festlegungen beim Bau:
   der Bericht nennt ihn.
 - Der Methodentext nennt je Station den Umfang der KI-Nutzung (Einträge, Personen, Modelle, Ausgang) und
   führt sie unter den Limitationen. Verblindete Stufen bleiben außen vor.
-- Offen: Vorschläge zum Volltext und zur Extraktion, Vorschläge für viele Einträge auf einmal, ein vom Team
+- Offen: Vorschläge zum Volltext im Screening, Vorschläge für viele Einträge auf einmal, ein vom Team
   geteilter Prompt.
+
+## KI-Vorschlag zur Extraktion (nach Meilenstein 9)
+
+Stand 20.11.2026: umgesetzt für Formular-Stufen. Festlegungen beim Bau:
+
+- Die KI schlägt Werte für die Felder des Formulars vor, gelesen aus dem Volltext. Ein Vorschlag ist kein
+  Wert: Er zählt in keinem Abgleich, und eingetragen wird nur, was die Person je Feld übernimmt. Ein
+  übernommener Wert ist ein gewöhnliches `FormValueRecorded` und gilt als Angabe der Person.
+- Den Text liest die Oberfläche mit pdf.js Seite für Seite aus dem PDF (Textebene, keine Texterkennung).
+  Der Kern setzt vor jede Seite eine Marke, kürzt bei 400.000 Zeichen und meldet das; ein PDF ohne lesbaren
+  Text wird abgewiesen. An die API gehen Titel und Fragestellung des Reviews, die Felder des Formulars und
+  der Text des Volltexts. Zugang, Modell und Schlüssel sind dieselben wie beim Screening.
+- Die Antwort wird gegen die Felder gelesen: Auswahlwerte müssen in der Auswahl stehen, Zahlen Zahlen sein.
+  Was nicht passt, steht nicht im Vorschlag. Zu jedem Wert nennt die KI Belegstelle und Seite.
+- Im Log stehen zwei Ereignisse in der Kette der Stufe: `AiExtractionReceived` (Modell, Prüfsumme des
+  Prompts, Prüfsumme der Datei, Formularversion, je Feld Wert, Belegstelle, Seite) und
+  `AiExtractionResolved` (welche Felder übernommen wurden; leer heißt verworfen). Während der Verblindung
+  gehen sie an niemanden sonst. Beim Einlesen müssen die vorgeschlagenen Werte zum Formular passen.
+- Die Abschaltung durch die Leitung (`AiPolicySet`) gilt auch hier. Beim Prüfen („einfach mit Prüfung“)
+  gibt es keinen Vorschlag.
+- Der Methodentext nennt je Formular-Station Modell, Zahl der Vorschläge, der vorgeschlagenen und der
+  übernommenen Werte und führt die Nutzung unter den Limitationen.
+- Der Prompt entsteht aus einer Vorlage mit den Platzhaltern `{{review}}`, `{{questions}}`, `{{source}}`,
+  `{{fields}}`, `{{fulltext}}` und `{{format}}`. Eine eigene Vorlage steht in den Einstellungen dieses
+  Rechners und lässt sich je Review überschreiben; fehlen Felder, Volltext oder Antwortformat, kommen sie
+  ans Ende.
+- Offen: Belegstelle im Volltext anspringen, gescannte PDFs.
 
 ## Erweiterung um weitere Review-Typen
 

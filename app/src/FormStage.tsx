@@ -11,6 +11,7 @@ import {
   canVote,
   EntryStatus,
   errorText,
+  Extraction,
   FormCell,
   FormEntryView,
   FormField,
@@ -23,13 +24,14 @@ import {
   showValue,
   term,
 } from "./api";
+import { ExtractionDialog, ExtractionLine, ExtractionState } from "./AiExtraction";
 import { useHighlights } from "./highlights";
-import { PdfView } from "./PdfView";
+import { pdfPages, PdfView } from "./PdfView";
 import { stageState } from "./ReviewPage";
 import { HelpButton } from "./Guidance";
 import { FocusButton, useFocusMode } from "./focus";
-import { t } from "./i18n";
-import { inFolder } from "./settings";
+import { t, tn } from "./i18n";
+import { inFolder, useSettings } from "./settings";
 import { Banner, Empty, Group, Icon, PageHeader, Pill, Row, Segmented, Stat } from "./ui";
 
 const MINE_LABEL: Record<MineStatus, string> = {
@@ -335,7 +337,13 @@ export function FormEntryPage() {
   const [notice, setNotice] = useState("");
   const [reading, setReading] = useState("abstract");
   const [focus, setFocus] = useFocusMode();
+  const settings = useSettings();
+  const [ai, setAi] = useState<ExtractionState | null>(null);
+  const [busy, setBusy] = useState(false);
   const started = useRef(Date.now());
+  // Die Quelle, die gerade offen ist: Eine Antwort der KI zu einer verlassenen Quelle öffnet keinen Dialog.
+  const shown = useRef(recordId);
+  shown.current = recordId;
 
   const load = useCallback(async () => {
     try {
@@ -353,6 +361,7 @@ export function FormEntryPage() {
     setEntry(null);
     setError("");
     setNotice("");
+    setAi(null);
     started.current = Date.now();
     load().then((loaded) => setReading(loaded?.fulltexts[0] ?? "abstract"));
   }, [load]);
@@ -388,6 +397,38 @@ export function FormEntryPage() {
     }
   }
 
+  /** Liest den Text des Volltexts und holt dazu einen Vorschlag der KI für die Felder des Formulars. */
+  async function askAi() {
+    const fulltext = reading !== "abstract" ? reading : entry!.fulltexts[0];
+    if (!fulltext) return;
+    setError("");
+    setAi({ step: "loading", recordId });
+    try {
+      const pages = await pdfPages(await api.readFulltext(reviewId, fulltext));
+      const suggestion = await api.aiExtract(reviewId, stageId, recordId, fulltext, pages);
+      if (shown.current !== recordId) return;
+      setAi((now) => (now ? { step: "done", recordId, suggestion } : now));
+      await load();
+    } catch (e) {
+      if (shown.current === recordId) setAi((now) => (now ? { step: "error", recordId, text: errorText(e) } : now));
+    }
+  }
+
+  async function applyAi(suggestion: Extraction, keys: string[]) {
+    setBusy(true);
+    setError("");
+    try {
+      const changed = await api.aiExtractApply(reviewId, stageId, recordId, suggestion.id, keys);
+      setAi(null);
+      setNotice(keys.length === 0 ? t("KI-Vorschlag verworfen. Eingetragen wurde nichts.") : tn("{n} Wert aus dem KI-Vorschlag eingetragen. Prüfe ihn am Volltext.", "{n} Werte aus dem KI-Vorschlag eingetragen. Prüfe sie am Volltext.", changed));
+      await load();
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function complete() {
     setError("");
     try {
@@ -404,6 +445,7 @@ export function FormEntryPage() {
     }
   }
 
+  const aiOn = settings.ai.enabled && entry.ai.allowed && mode === "extract" && entry.fulltexts.length > 0;
   const tabs = [{ value: "abstract", label: t("Titel und Abstract") }, ...entry.fulltexts.map((id, i) => ({ value: id, label: entry.fulltexts.length > 1 ? t("Volltext {n}", { n: i + 1 }) : t("Volltext") }))];
   let group = "";
 
@@ -426,6 +468,9 @@ export function FormEntryPage() {
       </div>
       {error && <Banner kind="error" onClose={() => setError("")}>{error}</Banner>}
       {notice && <Banner kind="notice" onClose={() => setNotice("")}>{notice}</Banner>}
+      {ai && ai.recordId === recordId && (
+        <ExtractionDialog state={ai} model={settings.ai.model} fields={form.fields} values={values} busy={busy} onApply={applyAi} onClose={() => setAi(null)} onRetry={askAi} />
+      )}
 
       <div className="screening-columns">
         <section className="screening-main">
@@ -457,6 +502,14 @@ export function FormEntryPage() {
           <p className="muted small-text">
             {[entry.label, typeLabel(entry.source_types, entry.source_type)].filter(Boolean).join(" · ")}
           </p>
+          {aiOn && (
+            <div className="form-ai">
+              <button className="small" onClick={askAi} title={t("Die KI liest den Volltext und schlägt Werte für die Felder vor. Eingetragen wird erst, was du übernimmst.")}>
+                <Icon name="spark" size={13} /> {entry.ai.suggestion ? t("Neuen KI-Vorschlag holen") : t("KI-Vorschlag aus dem Volltext")}
+              </button>
+              {entry.ai.suggestion && <ExtractionLine suggestion={entry.ai.suggestion} onShow={() => setAi({ step: "done", recordId, suggestion: entry.ai.suggestion! })} />}
+            </div>
+          )}
           {mode === "verify" && <p className="reading-note">{t("Diese {source} hat jemand anderes extrahiert. Prüfe die Werte am Volltext, lege Korrekturen als gültigen Wert fest und schließe die Prüfung ab.", { source })}</p>}
           {entry.completed && mode === "extract" && missing.length > 0 && <p className="reading-note">{t("Nachzutragen: {fields}", { fields: missing.map((f) => f.label).join(", ") })}</p>}
           {form.fields.map((field) => {

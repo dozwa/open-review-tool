@@ -64,7 +64,7 @@ pub struct Spec {
     check: fn(&Value) -> Check,
 }
 
-pub static CATALOG: [Spec; 35] = [
+pub static CATALOG: [Spec; 37] = [
     Spec {
         name: "ReviewCreated",
         label: "Review angelegt",
@@ -181,6 +181,24 @@ pub static CATALOG: [Spec; 35] = [
         writer: Writer::Write,
         stage: StageRule::Open,
         check: ai_suggestion_resolved,
+    },
+    Spec {
+        name: "AiExtractionReceived",
+        label: "KI-Vorschlag zur Extraktion",
+        version: 1,
+        chain: Chain::Stage,
+        writer: Writer::Write,
+        stage: StageRule::Open,
+        check: ai_extraction_received,
+    },
+    Spec {
+        name: "AiExtractionResolved",
+        label: "KI-Vorschlag zur Extraktion übernommen oder verworfen",
+        version: 1,
+        chain: Chain::Stage,
+        writer: Writer::Write,
+        stage: StageRule::Open,
+        check: ai_extraction_resolved,
     },
     Spec {
         name: "FullTextHighlightAdded",
@@ -956,6 +974,50 @@ fn ai_suggestion_resolved(p: &Value) -> Check {
     one_of(p, "outcome", &["accepted", "declined"])
 }
 
+/// Längste Belegstelle zu einem vorgeschlagenen Wert, in Zeichen.
+pub const MAX_EVIDENCE: usize = 1000;
+
+/// Vorschläge der KI zu den Feldern eines Formulars liegen in der Kette einer Formular-Stufe.
+pub fn is_extraction(event_type: &str) -> bool {
+    event_type.starts_with("AiExtraction")
+}
+
+// Je Feld ein Wert in der Form eines Formularwerts, dazu Belegstelle und Seite. Leere Vorschläge stehen
+// nicht im Ereignis. Ob ein Wert zum Feld passt, prüfen Dienst und Einlesen gegen das Formular der Stufe.
+fn ai_extraction_received(p: &Value) -> Check {
+    uuid(p, "record_id")?;
+    filled(p, "model")?;
+    filled(p, "prompt_sha256")?;
+    filled(p, "fulltext_sha256")?;
+    integer(p, "form_version", 1)?;
+    let fields = p.get("fields").and_then(Value::as_object).filter(|f| f.len() <= forms::MAX_FIELDS);
+    let fields = fields.ok_or_else(|| tr!("Feld „{}“ fehlt oder ist keine Liste von Feldern.", "fields"))?;
+    for (key, proposed) in fields {
+        if !forms::valid_key(key) {
+            return Err(tr!("Feld „field“ ist kein Schlüssel eines Formularfeldes."));
+        }
+        match proposed.get("value") {
+            None | Some(Value::Null) => return Err(tr!("Ein vorgeschlagener Wert ist leer.")),
+            Some(value) => forms::check_shape(value)?,
+        }
+        if proposed.get("quote").is_some_and(|q| q.as_str().is_none_or(|q| q.chars().count() > MAX_EVIDENCE)) {
+            return Err(tr!("Feld „{}“ ist länger als {} Zeichen.", "quote", MAX_EVIDENCE));
+        }
+        optional(proposed, "page", |p, key| integer(p, key, 1))?;
+    }
+    Ok(())
+}
+
+fn ai_extraction_resolved(p: &Value) -> Check {
+    uuid(p, "record_id")?;
+    uuid(p, "suggestion")?;
+    let accepted = p.get("accepted").and_then(Value::as_array).filter(|a| a.len() <= forms::MAX_FIELDS);
+    match accepted.is_some_and(|a| a.iter().all(|k| k.as_str().is_some_and(forms::valid_key))) {
+        true => Ok(()),
+        false => Err(tr!("Feld „{}“ fehlt oder ist keine Liste von Feldern.", "accepted")),
+    }
+}
+
 /// Farben einer Markierung im Volltext.
 pub const HIGHLIGHT_COLORS: [&str; 6] = ["yellow", "green", "blue", "pink", "orange", "purple"];
 /// Längster markierter Text und längster Kommentar, in Zeichen.
@@ -1143,6 +1205,27 @@ mod tests {
         assert!(resolved("declined").is_ok());
         assert!(resolved("ignoriert").unwrap_err().contains("unzulässigen Wert"));
         assert!(is_blindable("AiSuggestionReceived") && is_blindable("AiSuggestionResolved"));
+
+        let extracted = |fields: Value| {
+            let p = json!({"record_id": record, "model": "gpt", "prompt_sha256": "ab", "fulltext_sha256": "cd", "form_version": 1, "fields": fields});
+            validate("AiExtractionReceived", 1, Some(&stage), &p)
+        };
+        assert!(extracted(json!({})).is_ok());
+        assert!(extracted(json!({"design": {"value": "RCT", "quote": "randomised", "page": 2}, "n": {"value": 40}}))
+            .is_ok());
+        assert!(extracted(json!({"design": {"value": null}})).unwrap_err().contains("leer"));
+        assert!(extracted(json!({"design": {"value": 1.5}})).is_err());
+        assert!(extracted(json!({"Design": {"value": "RCT"}})).is_err());
+        assert!(extracted(json!({"design": {"value": "RCT", "page": 0}})).is_err());
+        assert!(extracted(json!({"design": {"value": "RCT", "quote": "x".repeat(MAX_EVIDENCE + 1)}})).is_err());
+        assert!(extracted(json!(["design"])).is_err());
+        let taken = |accepted: Value| {
+            let p = json!({"record_id": record, "suggestion": Uuid::new_v4().to_string(), "accepted": accepted});
+            validate("AiExtractionResolved", 1, Some(&stage), &p)
+        };
+        assert!(taken(json!([])).is_ok() && taken(json!(["design", "n"])).is_ok());
+        assert!(taken(json!(["Design"])).is_err() && taken(json!("design")).is_err());
+        assert!(is_blindable("AiExtractionReceived") && is_extraction("AiExtractionResolved"));
         assert_eq!(validate("AiPolicySet", 1, None, &json!({"allowed": false})), Ok(()));
         assert!(validate("AiPolicySet", 1, None, &json!({"allowed": "nein"})).is_err());
         assert!(!is_blindable("AiPolicySet"));

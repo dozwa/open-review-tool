@@ -79,7 +79,7 @@ Tauri 2 mit der WebView von macOS, React 18.
 
 ## Wie es geprüft ist
 
-- **Kern:** 166 Tests, dazu 7 in der App (Lesen der Zotero-Antworten, Anfrage und Antwort der KI, Link der Rückmeldung, Kennung einer OSF-Registrierung). Darunter die Referenzwerte der früheren SQL-Tests (Cohen's Kappa gegen scikit-learn,
+- **Kern:** 170 Tests, dazu 7 in der App (Lesen der Zotero-Antworten, Anfrage und Antwort der KI, Link der Rückmeldung, Kennung einer OSF-Registrierung). Darunter die Referenzwerte der früheren SQL-Tests (Cohen's Kappa gegen scikit-learn,
   Fleiss' Kappa am Wikipedia-Beispiel, Krippendorffs Alpha am publizierten Beispiel mit 0,743, PABAK, Prozent,
   sechs `final_decision`-Szenarien, Maybe-Regel). Die Werte erzeugt `crates/ort-core/tests/fixtures/make_agreement_fixtures.py`.
 - **Austausch:** veränderte Datei, nachträglich neu gehashte Datei ohne Signatur, Außenstehende, Lücken in einer
@@ -253,8 +253,18 @@ Nur für Entwicklung und Tests.
   KI-Vorschläge für das ganze Review abschalten (Bereich „Einstellungen“); das steht im Log und gilt bei
   allen, sobald sie das nächste Paket eingelesen haben. Der Methodentext nennt je Station, zu wie vielen
   Einträgen Vorschläge eingeholt wurden, von wie vielen Personen, mit welchen Modellen und mit welchem
-  Ausgang, und führt die Nutzung unter den Limitationen. Noch nicht gebaut: Vorschläge zum Volltext und
-  für viele Einträge auf einmal.
+  Ausgang, und führt die Nutzung unter den Limitationen. Noch nicht gebaut: Vorschläge zum Volltext im
+  Screening und für viele Einträge auf einmal.
+- **KI-Vorschlag zur Extraktion:** Bei der Eingabe im Formular holt „KI-Vorschlag aus dem Volltext“ Werte für
+  die Felder des Formulars. Die App liest den Text des PDFs Seite für Seite (Textebene; Scans gehen nicht,
+  sehr lange Texte werden bei 400.000 Zeichen gekürzt) und schickt ihn mit den Feldern des Formulars an
+  dieselbe API wie beim Screening. Der Dialog zeigt je Feld den Wert mit Belegstelle und Seite; Werte, die
+  nicht zum Feld passen, fallen weg. Eingetragen wird nur, was du je Feld übernimmst, und ein eigener Wert
+  wird nur ersetzt, wenn du das Feld ankreuzt. Der Dialog lässt sich schließen und später wieder öffnen, um
+  die Belegstellen erst im Volltext nachzulesen. Vorschlag und übernommene Felder stehen im Log, in der Kette
+  der Stufe; ein übernommener Wert gilt als Angabe der Person und geht wie jede andere in den Abgleich. Der
+  Methodentext nennt Modell, Zahl der Vorschläge und der übernommenen Werte. Die Vorlage des Prompts lässt
+  sich wie beim Screening ändern, im Programm und je Review; Felder, Volltext und Antwortformat gehen immer mit.
 - **Fokusmodus:** Beim Screening und bei der Eingabe im Formular blendet „Fokus“ (anfangs Taste F) Seitenleiste, Liste
   und Nebensächliches aus und schaltet das Fenster in den Vollbildmodus; Esc beendet ihn.
 - **Leitlinien:** Zu jeder Vorlage außer dem freien Ablauf liegt eine Zusammenfassung ihrer Leitlinie in der App

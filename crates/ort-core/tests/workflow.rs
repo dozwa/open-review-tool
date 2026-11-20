@@ -2312,3 +2312,107 @@ fn highlights_also_live_in_form_stages() {
     // Die Markierungen aus dem Volltext-Screening und aus der Extraktion stehen nebeneinander.
     assert_eq!(seen[0].stage_name, pilot.name);
 }
+
+#[test]
+fn ai_extraction_proposes_values_from_the_fulltext_and_the_person_takes_them_over() {
+    let t = team_before_charting();
+    t.owner.publish_form(&charting_form(json!({}))).unwrap();
+    let pilot = open(&t, "charting_pilot", |_| {});
+    let methods = |review: &Review| review.report_file("methods").unwrap().content;
+    let records = sources_of(&t.r1, &pilot.id);
+    let record = &records[0];
+    let file = Uuid::parse_str(record).unwrap();
+    let pages = vec![
+        format!("Methods. We conducted a cohort study in the Czech Republic. {}", "Background text. ".repeat(20)),
+        "Results. A total of 120 adults were enrolled.".to_string(),
+    ];
+
+    let options = ort_core::ai::Options::default();
+    // Eine eigene Vorlage ersetzt den Rahmen; Felder, Volltext und Antwortformat bleiben in jedem Fall.
+    let own = ort_core::ai::Options { template: "Extrahiere streng. {{fulltext}}".into(), publication: false };
+    let custom = t.r1.ai_extraction_request(&pilot.id, record, &file, &pages, &own).unwrap().request.prompt();
+    assert!(custom.starts_with("Extrahiere streng. [Seite 1]") && custom.contains("- country (Land) [Text]"));
+    assert!(custom.contains(r#"{"fields": {"<key>""#) && !custom.contains("## Review"));
+    // Die Anfrage nennt Formular und Volltext mit Seitenmarken; im Log steht nur die Prüfsumme der Datei.
+    let sent = t.r1.ai_extraction_request(&pilot.id, record, &file, &pages, &options).unwrap();
+    let prompt = sent.request.prompt();
+    for part in [
+        "- country (Land) [Text]",
+        "- design (Design) [Auswahl, genau ein Wert] Auswahlwerte: „Kohorte“, „RCT“",
+        "[Seite 2]\nResults. A total of 120 adults were enrolled.",
+        r#"{"fields": {"<key>""#,
+    ] {
+        assert!(prompt.contains(part), "{part} fehlt in:\n{prompt}");
+    }
+    assert_eq!(sent.fulltext_sha256, t.r1.fulltext_of(&file).unwrap().unwrap().sha256);
+    assert!(!sent.truncated);
+    let scan = t.r1.ai_extraction_request(&pilot.id, record, &file, &["  ".to_string()], &options).unwrap_err();
+    assert!(scan.to_string().contains("Scan"), "{scan}");
+    let other = Uuid::parse_str(&records[1]).unwrap();
+    assert!(matches!(t.r1.ai_extraction_request(&pilot.id, record, &other, &pages, &options), Err(Error::NotFound(_))));
+    assert!(matches!(
+        t.viewer.ai_extraction_request(&pilot.id, record, &file, &pages, &options),
+        Err(Error::Forbidden(_))
+    ));
+
+    // Die Antwort wird gegen die Felder gelesen: Was nicht passt, steht nicht im Vorschlag.
+    let answer = r#"{"fields": {
+        "country": {"value": "Tschechien", "quote": "in the Czech Republic", "page": 1},
+        "design": {"value": "kohorte", "quote": "a cohort study", "page": 1},
+        "n": {"value": 120, "quote": "A total of 120 adults", "page": 2},
+        "themes": {"value": ["Prävention"]}
+    }}"#;
+    assert!(matches!(t.r1.record_ai_extraction(&pilot.id, record, "gpt", &sent, "Nichts."), Err(Error::Invalid(_))));
+    let info = t.r1.record_ai_extraction(&pilot.id, record, "gpt", &sent, answer).unwrap();
+    assert_eq!(info.fields.keys().collect::<Vec<_>>(), ["country", "design", "n"]);
+    assert_eq!((info.fields["design"].value.clone(), info.fields["n"].page), (json!("Kohorte"), Some(2)));
+
+    // Ein Vorschlag ist kein Wert: Das Formular ist noch leer, die Quelle offen.
+    let entry = t.r1.form_entry(&pilot.id, record).unwrap();
+    assert!(entry.values.is_empty() && entry.ai.allowed);
+    assert_eq!(entry.ai.suggestion.as_ref().map(|s| (s.id, s.accepted.clone())), Some((info.id, None)));
+    assert_eq!(t.r1.form_stage(&pilot.id).unwrap().rows[0].mine, "open");
+
+    // Übernommen wird je Feld; ein eigener Wert bleibt, wenn sein Feld nicht gewählt ist.
+    t.r1.record_form_value(&pilot.id, record, "n", &json!(118)).unwrap();
+    let unknown = t.r1.apply_ai_extraction(&pilot.id, record, &info.id, &["themes".to_string()]).unwrap_err();
+    assert!(unknown.to_string().contains("keinen Vorschlag"), "{unknown}");
+    assert!(matches!(t.r2.apply_ai_extraction(&pilot.id, record, &info.id, &[]), Err(Error::NotFound(_))));
+    let chosen = ["country".to_string(), "design".to_string()];
+    assert_eq!(t.r1.apply_ai_extraction(&pilot.id, record, &info.id, &chosen).unwrap(), 2);
+    let entry = t.r1.form_entry(&pilot.id, record).unwrap();
+    assert_eq!(entry.values["country"], json!("Tschechien"));
+    assert_eq!((entry.values["design"].clone(), entry.values["n"].clone()), (json!("Kohorte"), json!(118)));
+    assert_eq!(entry.ai.suggestion.unwrap().accepted, Some(chosen.to_vec()));
+    assert!(matches!(t.r1.apply_ai_extraction(&pilot.id, record, &info.id, &chosen), Err(Error::Conflict(_))));
+    t.r1.complete_form_entry(&pilot.id, record, Some(60)).unwrap();
+
+    // Verblindet reist der Vorschlag nur zur Leitung, wird dort angenommen und bleibt unsichtbar.
+    assert_eq!(send_return(&t.r1, &t.owner).rejected, Vec::<String>::new());
+    assert!(t.owner.form_entry(&pilot.id, record).unwrap().ai.suggestion.is_none());
+    assert!(!methods(&t.owner).contains("KI-Unterstützung: Eine KI schlug"));
+    send_package(&t.owner, &t.r2);
+    let noted = |review: &Review| {
+        review.store().events_of_types(&["AiExtractionReceived", "AiExtractionResolved"]).unwrap().len()
+    };
+    assert_eq!((noted(&t.owner), noted(&t.r2)), (2, 0));
+
+    // Entblindet nennt der Methodentext die Nutzung.
+    t.owner.unblind_stage(&pilot.id).unwrap();
+    let text = methods(&t.owner);
+    for part in [
+        "Eine KI schlug aus dem Volltext Werte für die Felder des Formulars vor (Modell: gpt)",
+        "Vorschläge eingeholt: 1, vorgeschlagene Werte: 3, davon übernommen: 2",
+        "Sie können die eingetragenen Werte beeinflusst haben",
+    ] {
+        assert!(text.contains(part), "{part} fehlt in:\n{text}");
+    }
+
+    // Abgeschaltet gibt es keinen neuen Vorschlag; in einer Screening-Stufe ohnehin nicht.
+    t.owner.set_ai_policy(false).unwrap();
+    assert!(matches!(
+        t.owner.ai_extraction_request(&pilot.id, record, &file, &pages, &options),
+        Err(Error::Forbidden(_))
+    ));
+    assert!(!t.owner.form_entry(&pilot.id, record).unwrap().ai.allowed);
+}

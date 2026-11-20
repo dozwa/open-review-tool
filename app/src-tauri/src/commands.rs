@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use ort_core::criteria::Criteria;
 use ort_core::exchange::{self, Bundle, MergeReport};
+use ort_core::extraction::ExtractionInfo;
 use ort_core::forms::{Form, FormEntryView, FormStageView, FormsView, Frequency};
 use ort_core::fulltext::{
     Assign, FileProblem, FullTextOverview, Location, Suggestion, ZoteroConfirm, ZoteroLink, ZoteroSuggestion,
@@ -926,6 +927,53 @@ pub async fn ai_suggest(
     Ok(AiSuggestionView { suggestion, prompt: request.prompt() })
 }
 
+/// Holt einen Vorschlag der KI für die Felder des Formulars zu einer Quelle und vermerkt ihn im Log.
+/// `pages` ist der Text des Volltexts je Seite, wie ihn die Oberfläche aus dem PDF gelesen hat;
+/// `fulltext_id` der Eintrag der Quelle, zu dem die Datei gehört. Eingetragen wird damit noch nichts.
+#[tauri::command]
+pub async fn ai_extract(
+    state: State<'_, AppState>,
+    review_id: String,
+    stage_id: String,
+    record_id: String,
+    fulltext_id: String,
+    pages: Vec<String>,
+) -> Res<ExtractionInfo> {
+    let (access, key) = ai_access(&state)?;
+    let stage = uuid(&stage_id)?;
+    // Die Datei des Reviews bleibt nicht offen, solange die KI rechnet.
+    let sent = {
+        let review = open(&state, &review_id)?;
+        let own = settings::resolve(&Settings::load(&state.data_dir), &review.project_settings().map_err(err)?);
+        let options = ort_core::ai::Options { template: own.ai_extraction_prompt, publication: own.ai_publication };
+        review.ai_extraction_request(&stage, &record_id, &uuid(&fulltext_id)?, &pages, &options).map_err(err)?
+    };
+    let model = access.model.trim().to_string();
+    let messages = sent.request.messages.clone();
+    let answer = tauri::async_runtime::spawn_blocking(move || ai::complete(&access, key.as_deref(), &messages))
+        .await
+        .map_err(err)??;
+    open(&state, &review_id)?
+        .record_ai_extraction(&stage, &record_id, &model, &sent, &answer)
+        .map_err(|e| format!("{e}\n\n{}", ai::excerpt(&answer, 1500)))
+}
+
+/// Trägt die gewählten Werte eines Vorschlags ins Formular ein und vermerkt, welche Felder übernommen
+/// wurden. Eine leere Liste verwirft den Vorschlag. Gibt die Zahl der geänderten Werte zurück.
+#[tauri::command]
+pub async fn ai_extract_apply(
+    state: State<'_, AppState>,
+    review_id: String,
+    stage_id: String,
+    record_id: String,
+    suggestion: String,
+    accepted: Vec<String>,
+) -> Res<usize> {
+    open(&state, &review_id)?
+        .apply_ai_extraction(&uuid(&stage_id)?, &record_id, &uuid(&suggestion)?, &accepted)
+        .map_err(err)
+}
+
 /// Vermerkt, ob ein Vorschlag übernommen (`accepted`) oder abgelehnt (`declined`) wurde.
 #[tauri::command]
 pub async fn ai_resolve(
@@ -960,8 +1008,11 @@ pub async fn ai_test(state: State<'_, AppState>) -> Res<String> {
 
 /// Die Standardvorlage des Prompts in der Sprache der Oberfläche, als Ausgangspunkt für eine eigene.
 #[tauri::command]
-pub async fn ai_default_prompt() -> Res<String> {
-    Ok(ort_core::ai::default_template())
+pub async fn ai_default_prompt(kind: Option<String>) -> Res<String> {
+    Ok(match kind.as_deref() {
+        Some("extraction") => ort_core::extraction::default_template(),
+        _ => ort_core::ai::default_template(),
+    })
 }
 
 /// Ob ein API-Schlüssel hinterlegt ist. Der Schlüssel selbst geht nie an die Oberfläche zurück.

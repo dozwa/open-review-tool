@@ -1182,6 +1182,36 @@ fn ai_text(data: &Data, label: &str, stages: &[&StageState], limitations: &mut V
     )
 }
 
+/// Was der Methodentext über KI-Vorschläge zur Extraktion einer Station sagt, über alle ihre Runden.
+/// Verblindete Stufen bleiben außen vor; ohne Vorschlag steht nichts da.
+fn extraction_ai_text(data: &Data, label: &str, chart: &ChartStation, limitations: &mut Vec<String>) -> String {
+    let used: Vec<_> = chart.stages.iter().filter_map(|(_, summary)| summary.ai.as_ref()).collect();
+    if used.is_empty() {
+        return String::new();
+    }
+    let models: BTreeSet<&str> = used.iter().flat_map(|u| &u.models).map(String::as_str).collect();
+    let sum = |part: fn(&crate::extraction::AiUse) -> i64| used.iter().map(|u| part(u)).sum::<i64>();
+    let late = used.iter().flat_map(|u| &u.at).filter(|at| !data.state.ai_allowed_at(at)).count();
+    limitations.push(tr!(
+        "- In „{}“ lagen zu einem Teil der Extraktionen Vorschläge einer KI aus dem Volltext vor. Sie können die eingetragenen Werte beeinflusst haben.\n",
+        label
+    ));
+    if late > 0 {
+        limitations.push(tr!(
+            "- In „{}“ entstanden KI-Vorschläge, nachdem die Leitung sie abgeschaltet hatte: {}. Das kommt vor, solange die Abschaltung auf einem Rechner noch nicht angekommen ist.\n",
+            label,
+            late
+        ));
+    }
+    tr!(
+        "\nKI-Unterstützung: Eine KI schlug aus dem Volltext Werte für die Felder des Formulars vor (Modell: {}). Vorschläge eingeholt: {}, vorgeschlagene Werte: {}, davon übernommen: {}. Jeden übernommenen Wert wählte eine Person aus; er zählt als ihre Angabe und geht wie jede andere in den Abgleich.\n",
+        models.into_iter().collect::<Vec<_>>().join(", "),
+        sum(|u| u.sources_by_person),
+        sum(|u| u.proposed),
+        sum(|u| u.accepted)
+    )
+}
+
 /// Felder und Zeilen der Tabelle der eingeschlossenen Quellen. Die Werte kommen aus der letzten
 /// Formular-Station, die alle Quellen bearbeitet; für eine Quelle gilt ihre späteste Runde.
 fn table_rows<'a>(data: &'a Data, charting: &[ChartStation]) -> (Vec<Field>, Vec<TableRow<'a>>) {
@@ -1269,6 +1299,7 @@ fn charting_text(data: &Data, chart: &ChartStation, limitations: &mut Vec<String
         }
     }
     out.push('\n');
+    out.push_str(&extraction_ai_text(data, &label, chart, limitations));
     if !is_sample(chart.station) {
         out.push_str(&match summary.fields.len() {
             1 => tr!("\nErhoben wurden 1 Angabe:\n\n"),

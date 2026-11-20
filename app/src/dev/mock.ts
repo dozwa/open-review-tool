@@ -557,7 +557,7 @@ export function installMock() {
       }
       case "ai_policy_set": aiAllowed = Boolean(a.allowed); return null;
       case "ai_test": return wait("OK", 700);
-      case "ai_default_prompt": return "Du unterstützt das Screening für ein Review. Beurteile, ob der folgende Eintrag nach den Kriterien eingeschlossen oder ausgeschlossen werden soll.\n\n## Review\n{{review}}\n\n## Fragestellung\n{{questions}}\n\n## Kriterien\n{{criteria}}\n\n## Eintrag\n{{record}}\n\n## Antwort\n{{format}}";
+      case "ai_default_prompt": return a.kind === "extraction" ? "Du unterstützt die Datenextraktion für ein Review. Lies den Volltext und trage zu jedem Feld des Formulars ein, was der Volltext dazu berichtet.\n\n## Review\n{{review}}\n\n## Fragestellung\n{{questions}}\n\n## Quelle\n{{source}}\n\n## Formular\n{{fields}}\n\n## Volltext\n{{fulltext}}\n\n## Antwort\n{{format}}" : "Du unterstützt das Screening für ein Review. Beurteile, ob der folgende Eintrag nach den Kriterien eingeschlossen oder ausgeschlossen werden soll.\n\n## Review\n{{review}}\n\n## Fragestellung\n{{questions}}\n\n## Kriterien\n{{criteria}}\n\n## Eintrag\n{{record}}\n\n## Antwort\n{{format}}";
       case "ai_key_status": return aiKey;
       case "ai_key_set": aiKey = true; return null;
       case "ai_key_clear": aiKey = false; return null;

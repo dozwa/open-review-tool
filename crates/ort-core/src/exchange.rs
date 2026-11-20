@@ -573,10 +573,20 @@ fn authorize(e: &Event, context: &MergeContext) -> std::result::Result<(), Strin
         }
         // Stimmen gehören in Screening-Stufen, Formularwerte in Formular-Stufen.
         // Markierungen im Volltext gibt es in beiden.
-        match (t.starts_with("Form"), form_stages.get(&stage)) {
+        match (t.starts_with("Form") || catalog::is_extraction(t), form_stages.get(&stage)) {
             _ if catalog::is_highlight(t) => {}
             (true, None) => return Err(tr!("Die Stufe arbeitet nicht mit einem Formular.")),
             (false, Some(_)) => return Err(tr!("Die Stufe arbeitet mit einem Formular, nicht mit Stimmen.")),
+            // Vorgeschlagene Werte der KI müssen wie eingetragene zum Feld der genannten Version passen.
+            (true, Some(form)) if t == "AiExtractionReceived" => {
+                let version = e.payload.get("form_version").and_then(|v| v.as_i64()).unwrap_or(0);
+                for (key, proposed) in e.payload.get("fields").and_then(|f| f.as_object()).into_iter().flatten() {
+                    let field = forms.field_in(form, version, key);
+                    let field = field.ok_or_else(|| tr!("Das Feld gibt es in dieser Version des Formulars nicht."))?;
+                    check_value(field, &normal(proposed.get("value").unwrap_or(&serde_json::Value::Null)))?;
+                }
+            }
+            (true, Some(_)) if catalog::is_extraction(t) => {}
             (true, Some(form)) if t != "FormEntryCompleted" => {
                 let version = e.payload.get("form_version").and_then(|v| v.as_i64()).unwrap_or(0);
                 let field = forms.field_in(form, version, e.payload_str("field").unwrap_or_default());

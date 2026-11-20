@@ -129,6 +129,8 @@ pub struct Ai {
     pub model: String,
     /// Eigene Vorlage für den Prompt; leer heißt Standardvorlage.
     pub prompt: String,
+    /// Eigene Vorlage für den Prompt der Extraktion aus dem Volltext; leer heißt Standardvorlage.
+    pub extraction_prompt: String,
     /// Autoren, Jahr, Zeitschrift und DOI mitsenden.
     pub publication: bool,
     /// Pfad des Endpunkts hinter der Adresse.
@@ -153,6 +155,7 @@ impl Default for Ai {
             url: String::new(),
             model: String::new(),
             prompt: String::new(),
+            extraction_prompt: String::new(),
             publication: false,
             path: AI_PATH.into(),
             extra_body: String::new(),
@@ -273,6 +276,8 @@ pub struct ProjectSettings {
     pub screening: Option<Screening>,
     /// Eigene Vorlage für den KI-Prompt in diesem Review.
     pub ai_prompt: Option<String>,
+    /// Eigene Vorlage für den Prompt der Extraktion in diesem Review.
+    pub ai_extraction_prompt: Option<String>,
     pub ai_publication: Option<bool>,
     /// Kennfarbe in der Liste der Reviews; leer heißt ohne.
     pub color: String,
@@ -286,6 +291,7 @@ pub struct Effective {
     pub package_dir: String,
     pub screening: Screening,
     pub ai_prompt: String,
+    pub ai_extraction_prompt: String,
     pub ai_publication: bool,
 }
 
@@ -297,6 +303,10 @@ pub fn resolve(program: &Settings, project: &ProjectSettings) -> Effective {
         package_dir: project.package_dir.clone().unwrap_or_else(|| program.package_dir.clone()),
         screening: project.screening.clone().unwrap_or_else(|| program.screening.clone()),
         ai_prompt: project.ai_prompt.clone().unwrap_or_else(|| program.ai.prompt.clone()),
+        ai_extraction_prompt: project
+            .ai_extraction_prompt
+            .clone()
+            .unwrap_or_else(|| program.ai.extraction_prompt.clone()),
         ai_publication: project.ai_publication.unwrap_or(program.ai.publication),
     }
 }

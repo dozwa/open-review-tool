@@ -24,6 +24,7 @@ pub mod duplicates;
 pub mod error;
 pub mod event;
 pub mod exchange;
+pub mod extraction;
 pub mod forms;
 pub mod fulltext;
 pub mod guidance;

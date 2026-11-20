@@ -247,6 +247,22 @@ interface Draft {
   y: number;
 }
 
+/** Der Text eines PDFs je Seite, etwa für den KI-Vorschlag zur Extraktion. Zeilenenden bleiben erhalten. */
+export async function pdfPages(data: ArrayBuffer): Promise<string[]> {
+  const task = getDocument({ data: new Uint8Array(data), isEvalSupported: false });
+  try {
+    const doc = await task.promise;
+    const pages: string[] = [];
+    for (let n = 1; n <= doc.numPages; n += 1) {
+      const content = await (await doc.getPage(n)).getTextContent();
+      pages.push(content.items.map((item) => ("str" in item ? item.str + (item.hasEOL ? "\n" : " ") : "")).join(""));
+    }
+    return pages;
+  } finally {
+    await task.destroy();
+  }
+}
+
 export function PdfView({ load, onExternal, marks }: {
   load: () => Promise<ArrayBuffer>;
   onExternal?: () => void;

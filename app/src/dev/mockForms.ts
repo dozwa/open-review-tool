@@ -2,6 +2,7 @@
 // Die Regeln (Abgleich, Pflichtfelder, Verblindung) liegen im Kern; hier steht nur genug, um die Seiten zu zeigen.
 
 import { core } from "./core";
+import { readMockSettings } from "./mockSettings";
 
 type Value = string | number | string[] | null;
 
@@ -45,6 +46,9 @@ const other: Record<string, Record<string, Value>> = {
   e3: { ...mine.e3, design: "Kohortenstudie" },
 };
 const completed = new Set(["e1", "e3"]);
+// Letzter KI-Vorschlag je Quelle. Im Modell „fehler“ (Einstellungen) schlägt die Anfrage fehl.
+const extractions: Record<string, { id: string; model: string; fulltext_sha256: string; form_version: number; truncated: boolean; fields: Record<string, { value: Value; quote: string; page: number | null }>; accepted: string[] | null; at: string }> = {};
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const consensus: Record<string, Record<string, Value>> = {};
 
 const same = (x: Value, y: Value) => JSON.stringify(x ?? null) === JSON.stringify(y ?? null);
@@ -105,7 +109,7 @@ export function mockForms(cmd: string, a: Record<string, unknown>, context: { me
         companions: s.n_records > 1 ? [{ ...record(s), id: "e2", title: "App-based relaxation training for adults with migraine: twelve-month follow-up", year: 2023 }] : [],
         fulltexts: s.record_id === "e5" ? [] : [s.record_id], label: s.label, source_type: s.source_type, mode: "extract",
         values: mine[s.record_id] ?? {}, completed: completed.has(s.record_id) ? { form_version: 2, seconds: 700, verify: false } : null,
-        missing: [], compared: compare(s.record_id), position: index + 1, total: sources.length,
+        missing: [], compared: compare(s.record_id), ai: { allowed: true, suggestion: extractions[s.record_id] ?? null }, position: index + 1, total: sources.length,
         previous: sources[index - 1]?.record_id ?? null, next: sources[index + 1]?.record_id ?? null, next_open: open?.record_id ?? null,
         source_types: context.sourceTypes, terms: context.terms,
       };
@@ -113,6 +117,32 @@ export function mockForms(cmd: string, a: Record<string, unknown>, context: { me
     case "form_value":
       mine[id] = { ...mine[id], [String(a.field)]: a.value as Value };
       return true;
+    case "ai_extract": {
+      const model = readMockSettings().settings.ai.model || "gpt-5-mini";
+      const pages = (a.pages as string[]) ?? [];
+      return wait(1500).then(() => {
+        if (model === "fehler") return Promise.reject("Die KI weist den Zugang ab (401). Prüfe den API-Schlüssel in den Einstellungen.");
+        extractions[id] = {
+          id: `x-${id}-${Date.now()}`, model, fulltext_sha256: "ab12", form_version: 2, truncated: pages.join("").length > 400000, accepted: null, at: new Date().toISOString(),
+          fields: {
+            country: { value: "Deutschland", quote: "Participants were recruited at three headache centres in Germany.", page: 2 },
+            design: { value: "RCT", quote: "We conducted a two-arm randomised controlled trial.", page: 2 },
+            sample_size: { value: 98, quote: "A total of 98 adults were randomised.", page: 3 },
+            intervention: { value: ["App", "Tagebuch"], quote: "The intervention was a smartphone diary app.", page: 2 },
+            quote: { value: "Diary completeness was higher in the app group.", quote: "Diary completeness was higher in the app group.", page: 5 },
+          },
+        };
+        return extractions[id];
+      });
+    }
+    case "ai_extract_apply": {
+      const found = extractions[id];
+      const keys = (a.accepted as string[]) ?? [];
+      if (!found) return Promise.reject("KI-Vorschlag nicht gefunden.");
+      for (const key of keys) mine[id] = { ...mine[id], [key]: found.fields[key].value };
+      extractions[id] = { ...found, accepted: keys };
+      return keys.length;
+    }
     case "form_complete":
       completed.add(id);
       return null;

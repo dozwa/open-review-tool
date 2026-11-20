@@ -29,6 +29,7 @@ use uuid::Uuid;
 
 use crate::error::{conflict, forbidden, invalid, not_found, Result};
 use crate::event::Event;
+use crate::extraction::{AiUse, EntryAi, ExtractionInfo};
 use crate::projection::{order_key, StageState};
 use crate::service::{csv_field, require, stage_view, MemberView, RecordItem, Review, StageView};
 use crate::service::{MANAGE_ROLES, ROLES, WRITE_ROLES};
@@ -341,6 +342,8 @@ pub struct FormState {
     pub completed: BTreeMap<(String, Uuid), Completion>,
     /// (Eintrag, Platz) → geklärter Wert; `null` heißt „geklärt: leer“.
     pub consensus: BTreeMap<(String, String), Value>,
+    /// (Eintrag, Person) → letzter KI-Vorschlag. Zählt in keinem Abgleich.
+    pub extractions: BTreeMap<(String, Uuid), ExtractionInfo>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -408,13 +411,22 @@ impl FormState {
                         state.consensus.insert((record.to_string(), place), value());
                     }
                 }
+                // Innerhalb einer Kette in der Reihenfolge von `seq`: Der spätere Vorschlag ersetzt den früheren.
+                "AiExtractionReceived" => drop(state.extractions.insert(key, ExtractionInfo::from_event(e))),
+                "AiExtractionResolved" => {
+                    let id = e.payload_str("suggestion").and_then(|id| Uuid::parse_str(id).ok());
+                    if let Some(x) = state.extractions.get_mut(&key).filter(|x| Some(x.id) == id) {
+                        let accepted = e.payload.get("accepted").and_then(Value::as_array).into_iter().flatten();
+                        x.accepted = Some(accepted.filter_map(Value::as_str).map(str::to_string).collect());
+                    }
+                }
                 _ => {}
             }
         }
         state
     }
 
-    fn value_of(&self, record: &str, actor: &Uuid, field: &str) -> Value {
+    pub(crate) fn value_of(&self, record: &str, actor: &Uuid, field: &str) -> Value {
         self.values.get(&(record.to_string(), *actor)).and_then(|m| m.get(field)).cloned().unwrap_or(Value::Null)
     }
 
@@ -585,6 +597,8 @@ pub struct FormEntryView {
     pub missing: Vec<String>,
     /// Abgleich; fehlt, solange die Stufe verblindet ist.
     pub compared: Option<Compared>,
+    /// Ob KI-Vorschläge erlaubt sind, und der letzte eigene zu dieser Quelle.
+    pub ai: EntryAi,
     pub position: usize,
     pub total: usize,
     pub previous: Option<Uuid>,
@@ -640,6 +654,8 @@ pub(crate) struct StageSummary {
     /// Geklärte Felder.
     pub n_resolved: i64,
     pub rows: Vec<SummaryRow>,
+    /// KI-Vorschläge zur Extraktion; fehlt ohne Vorschlag und solange die Stufe verblindet ist.
+    pub ai: Option<AiUse>,
 }
 
 /// Wert einer Zelle für Tabellen; eine offene Abweichung zeigt alle abgegebenen Werte.
@@ -654,15 +670,15 @@ fn cell_text(cell: &Cell) -> String {
 }
 
 /// Was eine Formular-Stufe für ihre Ansichten braucht.
-struct Parts {
-    role: String,
-    stage: StageState,
-    form: Form,
-    values: FormState,
+pub(crate) struct Parts {
+    pub(crate) role: String,
+    pub(crate) stage: StageState,
+    pub(crate) form: Form,
+    pub(crate) values: FormState,
 }
 
 impl Parts {
-    fn fields(&self) -> &[Field] {
+    pub(crate) fn fields(&self) -> &[Field] {
         &self.form.current().fields
     }
 
@@ -676,7 +692,7 @@ impl Parts {
     }
 
     /// Ob bei dieser Quelle jemand anderes extrahiert und diese Person nur prüft.
-    fn verifies(&self, record: &str, me: &Uuid) -> bool {
+    pub(crate) fn verifies(&self, record: &str, me: &Uuid) -> bool {
         self.single() && self.values.extractor(record).is_some_and(|x| x != *me)
     }
 
@@ -711,7 +727,7 @@ impl Parts {
 }
 
 /// Bezeichnung, Einträge (Haupteintrag zuerst) und Quellenart der Quelle, zu der ein Eintrag gehört.
-fn unit_of(studies: &Studies, record: &Uuid) -> (String, Vec<Uuid>, String) {
+pub(crate) fn unit_of(studies: &Studies, record: &Uuid) -> (String, Vec<Uuid>, String) {
     let (label, records) = match studies.study_of(record) {
         Some(study) => {
             let mut records = vec![*record];
@@ -870,7 +886,7 @@ impl Review {
         Ok(picked)
     }
 
-    fn form_parts(&self, stage_id: &Uuid, allowed: &[&str]) -> Result<Parts> {
+    pub(crate) fn form_parts(&self, stage_id: &Uuid, allowed: &[&str]) -> Result<Parts> {
         let state = self.state()?;
         let role = require(&state, &self.me.actor_id, allowed)?.to_string();
         let events = self.store.stage_events(stage_id)?;
@@ -882,7 +898,7 @@ impl Review {
         Ok(Parts { role, stage, form, values: FormState::build(&events) })
     }
 
-    fn form_record(&self, stage_id: &Uuid, record_id: &str) -> Result<String> {
+    pub(crate) fn form_record(&self, stage_id: &Uuid, record_id: &str) -> Result<String> {
         let id = Uuid::parse_str(record_id).map_err(|_| invalid(tr!("Ungültige ID des Eintrags.")))?;
         if !self.store.is_assigned(stage_id, &id)? {
             return Err(not_found(tr!("Diese Quelle gehört nicht zu dieser Stufe.")));
@@ -1002,8 +1018,11 @@ impl Review {
             (true, false) => "extract",
         };
         let template = self.workflow()?.template.localized();
+        let ai =
+            EntryAi { allowed: self.state()?.ai_allowed(), suggestion: parts.values.extractions.get(&key).cloned() };
         Ok(FormEntryView {
             mode,
+            ai,
             values: parts.values.values.get(&key).cloned().unwrap_or_default(),
             completed: parts.values.completed.get(&key).map(|c| EntryCompletion {
                 form_version: c.form_version,
@@ -1175,6 +1194,7 @@ impl Review {
             n_people: if blind { None } else { Some(people.len() as i64) },
             n_resolved: parts.values.consensus.len() as i64,
             rows,
+            ai: AiUse::of(&parts.values.extractions).filter(|_| !blind),
         })
     }
 
