@@ -10,6 +10,7 @@ use ort_core::error::Error;
 use ort_core::event::sha256_hex;
 use ort_core::exchange::{export_return, merge};
 use ort_core::fulltext::Assign;
+use ort_core::highlights::NewHighlight;
 use ort_core::projection::Verify;
 use ort_core::registration::RegistrationDraft;
 use ort_core::report::{Level, Retrieval};
@@ -2185,4 +2186,107 @@ fn the_lead_switches_ai_off_and_the_methods_text_names_its_use() {
     t.owner.set_ai_policy(true).unwrap();
     assert!(t.owner.ai_request(&stage, record, &options).is_ok());
     assert!(!methods(&t.owner).contains("KI-Vorschläge hat die Leitung"));
+}
+
+fn highlight(color: &str, note: &str) -> NewHighlight {
+    NewHighlight {
+        page: 2,
+        rects: vec![[1000, 2000, 5000, 150], [1000, 2150, 3000, 150]],
+        text: "Erwachsene mit Migräne".into(),
+        color: color.into(),
+        note: note.into(),
+    }
+}
+
+#[test]
+fn highlights_in_the_fulltext_stay_blind_and_belong_to_their_author() {
+    let t = team_with_fulltexts();
+    let stage = open(&t, "fulltext", |_| {}).id;
+    let record = Uuid::parse_str(&order_of(&t.r1, &stage)[0]).unwrap();
+
+    // Setzen darf, wer Schreibrecht hat, auf einer Seite, in einer der Farben, an einem beschafften Volltext.
+    assert!(matches!(t.viewer.add_highlight(&stage, &record, &highlight("yellow", "")), Err(Error::Forbidden(_))));
+    assert!(matches!(t.r1.add_highlight(&stage, &record, &highlight("black", "")), Err(Error::Invalid(_))));
+    let outside = NewHighlight { rects: vec![[9000, 0, 2000, 100]], ..highlight("yellow", "") };
+    assert!(matches!(t.r1.add_highlight(&stage, &record, &outside), Err(Error::Invalid(_))));
+    assert!(matches!(t.r1.add_highlight(&stage, &Uuid::new_v4(), &highlight("yellow", "")), Err(Error::NotFound(_))));
+    assert!(t.r1.highlights(&record).unwrap().is_empty());
+
+    let mine = t.r1.add_highlight(&stage, &record, &highlight("yellow", "")).unwrap();
+    assert_eq!((mine.mine, mine.editable, mine.stale, mine.info.page), (true, true, false, 2));
+    let payload = last_payload(&t.r1, "FullTextHighlightAdded");
+    assert_eq!(payload["rects"], json!([[1000, 2000, 5000, 150], [1000, 2150, 3000, 150]]));
+    assert_eq!(payload["sha256"], t.r1.fulltext_of(&record).unwrap().unwrap().sha256);
+
+    // Farbe und Kommentar lassen sich ändern; es bleibt eine Markierung mit ihrem ersten Zeitpunkt.
+    let changed = t.r1.update_highlight(&stage, &record, &mine.id, "green", " Population passt ").unwrap();
+    assert_eq!((changed.info.color.as_str(), changed.info.note.as_str()), ("green", "Population passt"));
+    let seen = t.r1.highlights(&record).unwrap();
+    assert_eq!(seen.len(), 1);
+    assert_eq!((seen[0].id, &seen[0].info.at, seen[0].name.as_str()), (mine.id, &mine.info.at, "r1"));
+    assert_eq!(seen[0].info.text, "Erwachsene mit Migräne");
+
+    // Verblindet: Bei der Leitung liegen beide Ketten, zu sehen ist für jede Person nur die eigene.
+    let other =
+        t.r2.add_highlight(&stage, &record, &NewHighlight { page: 1, ..highlight("pink", "Design unklar") }).unwrap();
+    for reviewer in [&t.r1, &t.r2] {
+        assert_eq!(send_return(reviewer, &t.owner).rejected, Vec::<String>::new());
+    }
+    assert!(t.owner.highlights(&record).unwrap().is_empty());
+    send_package(&t.owner, &t.r1);
+    assert_eq!(t.r1.highlights(&record).unwrap().len(), 1);
+    // Fremde Markierungen ändert und entfernt niemand.
+    assert!(matches!(t.r2.remove_highlight(&stage, &record, &mine.id), Err(Error::NotFound(_))));
+    assert!(matches!(t.r2.update_highlight(&stage, &record, &mine.id, "blue", ""), Err(Error::NotFound(_))));
+
+    // Entblindet: alle sehen alle, geordnet nach Seite; bearbeiten lässt sich nur die eigene.
+    t.owner.unblind_stage(&stage).unwrap();
+    send_package(&t.owner, &t.r1);
+    let all = t.r1.highlights(&record).unwrap();
+    assert_eq!(
+        all.iter().map(|h| (h.id, h.mine, h.editable)).collect::<Vec<_>>(),
+        [(other.id, false, false), (mine.id, true, true)]
+    );
+    assert_eq!(all[0].name, "r2");
+    assert_eq!(t.viewer.highlights(&record).unwrap().len(), 0, "die Person mit Leserecht hat noch kein Paket");
+    send_package(&t.owner, &t.viewer);
+    assert!(t.viewer.highlights(&record).unwrap().iter().all(|h| !h.editable));
+
+    // Eine andere Datei zum selben Eintrag: Die Markierungen gelten als veraltet.
+    std::fs::write(t.dir.path().join("volltexte/neu.pdf"), "%PDF-1.4 andere Fassung").unwrap();
+    t.owner.assign_fulltexts(&[Assign { record_id: record, path: "neu.pdf".into() }]).unwrap();
+    assert!(t.owner.highlights(&record).unwrap().iter().all(|h| h.stale));
+    let fresh = t.owner.add_highlight(&stage, &record, &highlight("blue", "")).unwrap();
+    assert_eq!(
+        t.owner.highlights(&record).unwrap().iter().filter(|h| !h.stale).map(|h| h.id).collect::<Vec<_>>(),
+        [fresh.id]
+    );
+
+    // Entfernen nimmt sie aus der Ansicht; in einer geschlossenen Stufe ändert sich nichts mehr.
+    t.r1.remove_highlight(&stage, &record, &mine.id).unwrap();
+    assert!(t.r1.highlights(&record).unwrap().iter().all(|h| h.id != mine.id));
+    assert_eq!(send_return(&t.r1, &t.owner).rejected, Vec::<String>::new());
+    assert!(t.owner.highlights(&record).unwrap().iter().all(|h| h.id != mine.id));
+    vote_all(&t, &stage, &["include"; 4], &["include"; 4]);
+    t.owner.close_stage(&stage).unwrap();
+    assert!(matches!(t.owner.add_highlight(&stage, &record, &highlight("blue", "")), Err(Error::Conflict(_))));
+    assert!(matches!(t.owner.remove_highlight(&stage, &record, &fresh.id), Err(Error::Conflict(_))));
+    assert!(t.owner.highlights(&record).unwrap().iter().all(|h| !h.editable));
+}
+
+#[test]
+fn highlights_also_live_in_form_stages() {
+    let t = team_before_charting();
+    t.owner.publish_form(&charting_form(json!({}))).unwrap();
+    let pilot = open(&t, "charting_pilot", |_| {});
+    let record = Uuid::parse_str(&sources_of(&t.r1, &pilot.id)[0]).unwrap();
+    let mine = t.r1.add_highlight(&pilot.id, &record, &highlight("orange", "Land steht hier")).unwrap();
+    // Beim Einlesen gilt die Regel „keine Stimmen in Formular-Stufen“ für Markierungen nicht.
+    assert_eq!(send_return(&t.r1, &t.owner).rejected, Vec::<String>::new());
+    assert!(t.owner.highlights(&record).unwrap().is_empty(), "die Stufe ist verblindet");
+    t.owner.unblind_stage(&pilot.id).unwrap();
+    let seen = t.owner.highlights(&record).unwrap();
+    assert_eq!(seen.iter().map(|h| (h.id, h.stage_id)).collect::<Vec<_>>(), [(mine.id, pilot.id)]);
+    // Die Markierungen aus dem Volltext-Screening und aus der Extraktion stehen nebeneinander.
+    assert_eq!(seen[0].stage_name, pilot.name);
 }

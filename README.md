@@ -5,9 +5,9 @@ Kernideen: ein unveränderliches, signiertes Event-Log für alle Entscheidungen,
 Verblindung, Klärung und Snapshots, eine Auswertung der Übereinstimmung mit Konfidenzintervallen und
 Zusammenarbeit ohne Server über Austauschdateien.
 
-> Status (19.11.2026): Mac-App mit Rust und Tauri 2. Der vollständige Ablauf eines Scoping Reviews wird nach
+> Status (20.11.2026): Mac-App mit Rust und Tauri 2. Der vollständige Ablauf eines Scoping Reviews wird nach
 > `docs/umsetzungsplan.md` in Meilensteinen gebaut; fertig sind 0 (Fundament), 1 (Vorlage und Ablauf),
-> 2 (Kriterien und Screening-Ansicht), 3 (Suche, Import, Dubletten), 4 (Volltext, ohne das Markieren),
+> 2 (Kriterien und Screening-Ansicht), 3 (Suche, Import, Dubletten), 4 (Volltext mit Markierungen und Kommentaren),
 > 5 (Bericht, Teil 1), 6 (Zitationssuche, Bündeln, Quellenart), 7 (Formulare und Charting), 8 (Bericht,
 > Teil 2 und Update, ohne das Rückschreiben nach Zotero) und 9 (Vorlagen „Rapid Review“ und
 > „State-of-the-Art-Review“).
@@ -15,7 +15,7 @@ Zusammenarbeit ohne Server über Austauschdateien.
 > Gates und Runden, Kriterien mit Kürzeln und Erläuterungen, Suchen mit Versionen und Peer-Review-Vermerk, Import
 > von RIS, BibTeX und PubMed (nbib) mit Suchversion und Herkunft, exakte und unscharfe Dubletten, Stufen mit drei
 > Auswahlregeln, verblindetes Screening in drei Spalten mit Filtern, Volltexte aus einem Ordner oder aus Zotero
-> mit Prüfsumme und Vorschau in der App, Pflichtgrund im Volltext, Konflikte und Konsens (auch als
+> mit Prüfsumme und Vorschau in der App, Markierungen und Kommentare im Volltext, Pflichtgrund im Volltext, Konflikte und Konsens (auch als
 > Dritt-Entscheid), Übereinstimmung, Export je Stufe als CSV und JSON, Pakete und Rückmeldungen, Bericht mit Flussdiagramm (SVG),
 > ausgeschlossenen Volltexten mit Grund, Eingeschlossenen als RIS, Suchanhang und Methodentext zur Auswahl,
 > Zitationssuche als weitere Runde mit eigenem Zweig im Diagramm, Bündeln von Einträgen zu Quellen mit Quellenart,
@@ -24,7 +24,7 @@ Zusammenarbeit ohne Server über Austauschdateien.
 > je Punkt, Methodentext zum Charting, Tabelle der eingeschlossenen Quellen, Update als weitere Runden,
 > Leitlinien zum Nachschlagen mit „?“ auf jedem Bildschirm, geführte Vorbereitung der Registrierung nach dem
 > OSF-Formular, Deutsch und Englisch für Oberfläche, Meldungen, Vorlagen, Leitlinien und Bericht.
-> Noch nicht enthalten: Markieren im Volltext, Rückschreiben nach Zotero, signierte und notarisierte App.
+> Noch nicht enthalten: Rückschreiben nach Zotero, signierte und notarisierte App.
 
 ## So arbeitet ein Team
 
@@ -79,7 +79,7 @@ Tauri 2 mit der WebView von macOS, React 18.
 
 ## Wie es geprüft ist
 
-- **Kern:** 161 Tests, dazu 3 in der App (Lesen der Zotero-Antworten, Anfrage und Antwort der KI). Darunter die Referenzwerte der früheren SQL-Tests (Cohen's Kappa gegen scikit-learn,
+- **Kern:** 164 Tests, dazu 3 in der App (Lesen der Zotero-Antworten, Anfrage und Antwort der KI). Darunter die Referenzwerte der früheren SQL-Tests (Cohen's Kappa gegen scikit-learn,
   Fleiss' Kappa am Wikipedia-Beispiel, Krippendorffs Alpha am publizierten Beispiel mit 0,743, PABAK, Prozent,
   sechs `final_decision`-Szenarien, Maybe-Regel). Die Werte erzeugt `crates/ort-core/tests/fixtures/make_agreement_fixtures.py`.
 - **Austausch:** veränderte Datei, nachträglich neu gehashte Datei ohne Signatur, Außenstehende, Lücken in einer
@@ -155,7 +155,17 @@ Nur für Entwicklung und Tests.
   den Ordner (oder die Zotero-Gruppenbibliothek) auf dem eigenen Rechner. Vorschläge für Zuordnungen sind
   berechnet und stehen nicht im Log. Die DOI in einer PDF findet die App nur, wenn die Metadaten
   unkomprimiert in der Datei stehen. Volltexte aus Zotero prüft „Dateien prüfen“ nicht mit; ihre Prüfsumme
-  wird beim Öffnen geprüft. Das Markieren im Volltext (zweiter Schritt im Plan) ist noch nicht gebaut.
+  wird beim Öffnen geprüft.
+- **Markierungen im Volltext:** Beim Volltext-Screening und beim Extrahieren lässt sich Text auswählen und in
+  einer von sechs Farben markieren, mit Kommentar. Die PDF bleibt unverändert; eine Markierung ist ein Ereignis
+  in der Kette der Stufe (Seite, Lage in Zehntausendsteln der Seite, Text, Farbe, Kommentar, Prüfsumme der
+  Datei). Solange die Stufe verblindet ist, sieht jede Person nur die eigenen, danach alle; ändern und löschen
+  lässt sich nur die eigene, solange die Stufe offen ist. Eine Markierung liegt auf einer Seite: Reicht die
+  Auswahl über den Seitenwechsel, zählt der Teil auf der ersten. Wird dem Eintrag eine andere Datei zugeordnet,
+  bleiben die alten Markierungen in der Liste und werden nicht mehr eingezeichnet. Im Reiter „Volltexte“ sind
+  Markierungen nur zu sehen. Die Farben haben keine feste Bedeutung. Markieren setzt eine Textebene voraus;
+  in gescannten PDFs ohne Texterkennung gibt es nichts auszuwählen. „Zitat kopieren“ legt den markierten Text
+  in die Zwischenablage, ein Feld des Formulars füllt er noch nicht von selbst.
 - **Runden:** In einer Vorlage mit festen Runden legt eine Station nichts doppelt vor: Eine weitere Runde
   bekommt nur Einträge, die in keiner früheren waren (später beschaffte Volltexte, Treffer der Zitationssuche).
   Eine Runde über dieselben Einträge zu wiederholen geht damit nicht; der Pilot zieht als Stichprobe jedes Mal

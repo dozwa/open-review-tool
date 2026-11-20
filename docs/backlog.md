@@ -17,8 +17,9 @@ geschätzt: **klein** (bis etwa ein Tag), **mittel** (einige Tage), **groß** (e
 
 | Aufwand | Wunsch | Anmerkung |
 | --- | --- | --- |
-| mittel | Extraktion aus Volltexten im Tool | Die Eingabe im Formular neben dem Volltext gibt es schon. Noch zu klären: Was fehlt (etwa markierten Text in ein Feld übernehmen)? |
-| groß | Volltexte markieren und kommentieren, mit Farben | Aus Meilenstein 9 offen geblieben. |
+| klein | Markierten Text in ein Feld des Formulars übernehmen | Markierungen mit „Zitat kopieren“ gibt es; das Feld füllt sich noch nicht von selbst. |
+| mittel | Extraktion aus Volltexten im Tool | Die Eingabe im Formular neben dem Volltext gibt es schon. Noch zu klären: Was fehlt außer dem Punkt darüber? |
+| mittel | Flächen markieren (Abbildungen, gescannte Seiten) und Markierungen über den Seitenwechsel | Bisher nur ausgewählter Text auf einer Seite. |
 
 ### Export
 
@@ -32,6 +33,7 @@ geschätzt: **klein** (bis etwa ein Tag), **mittel** (einige Tage), **groß** (e
 | Aufwand | Wunsch | Anmerkung |
 | --- | --- | --- |
 | mittel | Textbausteine für Protokolle | |
+| mittel | Einlesen des OSF Protokolls von der OSF Webseite und befüllen der Felder im Tool | |
 
 ### Rückmeldung
 

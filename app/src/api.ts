@@ -455,6 +455,38 @@ export interface Suggestion {
   at: string;
 }
 
+/** Farben einer Markierung im Volltext, wie der Kern sie kennt. */
+export const HIGHLIGHT_COLORS = ["yellow", "green", "blue", "pink", "orange", "purple"] as const;
+/** Seitenbreite und Seitenhöhe in den Einheiten der Rechtecke. */
+export const HIGHLIGHT_UNITS = 10000;
+
+/** Rechteck `[x, y, Breite, Höhe]` in Zehntausendsteln der Seite, von links oben. */
+export type HighlightRect = [number, number, number, number];
+
+export interface NewHighlight {
+  page: number;
+  rects: HighlightRect[];
+  text: string;
+  color: string;
+  note: string;
+}
+
+/** Eine Markierung im Volltext; sie gehört zur Stufe, in der sie gesetzt wurde. */
+export interface Highlight extends NewHighlight {
+  id: string;
+  stage_id: string;
+  stage_name: string;
+  actor_id: string;
+  name: string;
+  mine: boolean;
+  /** Die eigene Markierung in einer offenen Stufe. */
+  editable: boolean;
+  /** Sie gehört zu einer Datei, die dem Eintrag nicht mehr zugeordnet ist. */
+  stale: boolean;
+  sha256: string;
+  at: string;
+}
+
 export interface AiSuggestion {
   suggestion: Suggestion;
   /** Der Prompt, der dafür gesendet wurde. */
@@ -1016,6 +1048,13 @@ export const api = {
   /** Inhalt der PDF für die Vorschau; der Kern hat Pfad und Prüfsumme geprüft. */
   readFulltext: (reviewId: string, recordId: string) => call<ArrayBuffer>("fulltext_read", { reviewId, recordId }),
   openFulltext: (reviewId: string, recordId: string) => call<void>("fulltext_open_external", { reviewId, recordId }),
+  highlights: (reviewId: string, recordId: string) => call<Highlight[]>("highlights", { reviewId, recordId }),
+  addHighlight: (reviewId: string, stageId: string, recordId: string, highlight: NewHighlight) =>
+    call<Highlight>("highlight_add", { reviewId, stageId, recordId, highlight }),
+  updateHighlight: (reviewId: string, stageId: string, recordId: string, highlightId: string, color: string, note: string) =>
+    call<Highlight>("highlight_update", { reviewId, stageId, recordId, highlightId, color, note }),
+  removeHighlight: (reviewId: string, stageId: string, recordId: string, highlightId: string) =>
+    call<void>("highlight_remove", { reviewId, stageId, recordId, highlightId }),
   zoteroLibraries: () => call<ZoteroLibrary[]>("zotero_libraries"),
   linkZotero: (reviewId: string, link: ZoteroLink) => call<void>("zotero_link", { reviewId, link }),
   zoteroSuggestions: (reviewId: string) => call<ZoteroSuggestion[]>("zotero_suggestions", { reviewId }),

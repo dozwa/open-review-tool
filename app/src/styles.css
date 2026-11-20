@@ -736,6 +736,38 @@ button.small { height: 26px; padding: 0 10px; }
 .pdf-page canvas { display: block; }
 .pdf-page .textLayer .hit { background: rgb(255 214 10 / 0.45); border-radius: 2px; }
 .pdf-view > .banner { margin: 16px; }
+.pdf-body { position: relative; flex: 1; min-height: 0; display: flex; }
+.pdf-body > .pdf-scroll { min-width: 0; }
+.pdf-page > div:first-child { position: static; }
+/* Markierungen: eine Ebene über dem Text, die keine Klicks annimmt. Die PDF-Seite ist immer hell. */
+.mark-yellow { --mark: 255 204 0; }
+.mark-green { --mark: 52 199 89; }
+.mark-blue { --mark: 50 173 230; }
+.mark-pink { --mark: 255 105 180; }
+.mark-orange { --mark: 255 149 0; }
+.mark-purple { --mark: 175 82 222; }
+.pdf-marks { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+.pdf-mark { position: absolute; background: rgb(var(--mark) / 0.42); mix-blend-mode: multiply; border-radius: 2px; }
+.pdf-mark.flash { outline: 2px solid rgb(var(--mark)); outline-offset: 1px; }
+.pdf-mark-note { position: absolute; width: 9px; height: 9px; margin: -5px 0 0 -6px; border-radius: 50% 50% 50% 0; background: rgb(var(--mark)); border: 1px solid rgb(0 0 0 / 0.35); }
+.mark-swatches { display: inline-flex; gap: 5px; align-items: center; }
+.mark-swatch { width: 20px; height: 20px; min-width: 0; padding: 0; border-radius: 50%; border: 1px solid rgb(0 0 0 / 0.25); background: rgb(var(--mark)); cursor: pointer; }
+.mark-swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--content), 0 0 0 4px rgb(var(--mark)); }
+.mark-dot { display: inline-block; flex: none; width: 9px; height: 9px; border-radius: 50%; background: rgb(var(--mark)); border: 1px solid rgb(0 0 0 / 0.25); }
+.mark-draft, .mark-editor { position: fixed; z-index: 60; background: var(--surface); border: 0.5px solid var(--line); border-radius: 9px; box-shadow: 0 6px 24px rgb(0 0 0 / 0.25); }
+.mark-draft { display: flex; align-items: center; gap: 10px; padding: 7px 10px; }
+.mark-editor { width: 300px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; font-size: 12px; }
+.mark-editor textarea { width: 100%; resize: vertical; font: inherit; }
+.mark-who { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--ink-2); font-size: 11px; }
+.mark-quote { margin: 0; padding-left: 8px; border-left: 2px solid var(--line); color: var(--ink-2); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.mark-note { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.mark-actions { display: flex; justify-content: flex-end; gap: 6px; }
+/* Die Liste liegt über dem rechten Rand, damit die Seite ihre Breite behält. */
+.mark-list { position: absolute; z-index: 3; top: 0; right: 0; bottom: 0; width: min(260px, 80%); overflow: auto; padding: 8px; border-left: 0.5px solid var(--line); background: var(--surface); box-shadow: -4px 0 16px rgb(0 0 0 / 0.12); display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.mark-item { display: flex; flex-direction: column; align-items: stretch; gap: 4px; height: auto; padding: 7px 8px; text-align: left; white-space: normal; background: none; border: 0; border-radius: 6px; font: inherit; color: inherit; cursor: pointer; }
+.mark-item:hover:not(:disabled) { background: var(--surface-2); }
+.mark-item:disabled { opacity: 0.6; cursor: default; }
+.mark-stale { margin-left: auto; font-style: italic; }
 .pdf-overlay { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; background: var(--content); padding-top: 34px; }
 .pdf-overlay-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 8px 14px; border-bottom: 0.5px solid var(--line); }
 .pdf-overlay-head strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

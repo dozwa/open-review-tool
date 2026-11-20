@@ -64,7 +64,7 @@ pub struct Spec {
     check: fn(&Value) -> Check,
 }
 
-pub static CATALOG: [Spec; 33] = [
+pub static CATALOG: [Spec; 35] = [
     Spec {
         name: "ReviewCreated",
         label: "Review angelegt",
@@ -181,6 +181,24 @@ pub static CATALOG: [Spec; 33] = [
         writer: Writer::Write,
         stage: StageRule::Open,
         check: ai_suggestion_resolved,
+    },
+    Spec {
+        name: "FullTextHighlightAdded",
+        label: "Markierung im Volltext",
+        version: 1,
+        chain: Chain::Stage,
+        writer: Writer::Write,
+        stage: StageRule::Open,
+        check: highlight_added,
+    },
+    Spec {
+        name: "FullTextHighlightRemoved",
+        label: "Markierung im Volltext entfernt",
+        version: 1,
+        chain: Chain::Stage,
+        writer: Writer::Write,
+        stage: StageRule::Open,
+        check: highlight_removed,
     },
     Spec {
         name: "AiPolicySet",
@@ -938,6 +956,61 @@ fn ai_suggestion_resolved(p: &Value) -> Check {
     one_of(p, "outcome", &["accepted", "declined"])
 }
 
+/// Farben einer Markierung im Volltext.
+pub const HIGHLIGHT_COLORS: [&str; 6] = ["yellow", "green", "blue", "pink", "orange", "purple"];
+/// Längster markierter Text und längster Kommentar, in Zeichen.
+pub const MAX_HIGHLIGHT_TEXT: usize = 4000;
+/// Höchste Zahl der Rechtecke einer Markierung (etwa eines je Zeile).
+pub const MAX_HIGHLIGHT_RECTS: usize = 200;
+/// Seitenbreite und Seitenhöhe in den Einheiten der Rechtecke.
+pub const HIGHLIGHT_UNITS: i64 = 10_000;
+
+/// Markierungen und Formularwerte liegen beide in der Kette einer Stufe; nur Markierungen gibt es in
+/// Screening- und in Formular-Stufen.
+pub fn is_highlight(event_type: &str) -> bool {
+    event_type.starts_with("FullTextHighlight")
+}
+
+// Die Lage steht in ganzen Zahlen: Rechtecke `[x, y, Breite, Höhe]` in Zehntausendsteln der Seite, von
+// links oben. So hängt sie nicht am Zoom, und im Payload steht keine Kommazahl. Ein zweites Ereignis mit
+// derselben `highlight` von derselben Person ersetzt das erste (andere Farbe, anderer Kommentar).
+fn highlight_added(p: &Value) -> Check {
+    uuid(p, "record_id")?;
+    uuid(p, "highlight")?;
+    let sum = text(p, "sha256")?;
+    if sum.len() != 64 || !sum.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(tr!("Feld „{}“ ist keine Prüfsumme.", "sha256"));
+    }
+    integer(p, "page", 1)?;
+    one_of(p, "color", &HIGHLIGHT_COLORS)?;
+    for key in ["text", "note"] {
+        if text(p, key)?.chars().count() > MAX_HIGHLIGHT_TEXT {
+            return Err(tr!("Feld „{}“ ist länger als {} Zeichen.", key, MAX_HIGHLIGHT_TEXT));
+        }
+    }
+    let rects = p.get("rects").and_then(Value::as_array).filter(|r| !r.is_empty() && r.len() <= MAX_HIGHLIGHT_RECTS);
+    let inside = |rect: &Value| {
+        let n: Vec<i64> = rect.as_array().map(|r| r.iter().filter_map(Value::as_i64).collect()).unwrap_or_default();
+        rect.as_array().is_some_and(|r| r.len() == 4)
+            && n.len() == 4
+            && n[0] >= 0
+            && n[1] >= 0
+            && n[2] >= 1
+            && n[3] >= 1
+            && n[0] + n[2] <= HIGHLIGHT_UNITS
+            && n[1] + n[3] <= HIGHLIGHT_UNITS
+    };
+    if !rects.is_some_and(|r| r.iter().all(inside)) {
+        return Err(tr!("Feld „{}“ nennt keine Rechtecke innerhalb der Seite.", "rects"));
+    }
+    Ok(())
+}
+
+fn highlight_removed(p: &Value) -> Check {
+    uuid(p, "record_id")?;
+    uuid(p, "highlight")
+}
+
 fn consensus_recorded(p: &Value) -> Check {
     uuid(p, "record_id")?;
     one_of(p, "decision", &["include", "exclude"])?;
@@ -1073,6 +1146,40 @@ mod tests {
         assert_eq!(validate("AiPolicySet", 1, None, &json!({"allowed": false})), Ok(()));
         assert!(validate("AiPolicySet", 1, None, &json!({"allowed": "nein"})).is_err());
         assert!(!is_blindable("AiPolicySet"));
+    }
+
+    #[test]
+    fn highlights_are_checked() {
+        let stage = Uuid::new_v4();
+        let record = Uuid::new_v4().to_string();
+        let added = |extra: Value| {
+            let mut p = json!({"record_id": record, "highlight": Uuid::new_v4().to_string(), "sha256": "a".repeat(64), "page": 2,
+                "rects": [[1000, 2000, 5000, 150], [1000, 2150, 3000, 150]], "text": "zwei Zeilen", "color": "yellow", "note": ""});
+            p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            validate("FullTextHighlightAdded", 1, Some(&stage), &p)
+        };
+        assert_eq!(added(json!({})), Ok(()));
+        assert_eq!(added(json!({"note": "Population passt", "color": "green"})), Ok(()));
+        assert!(added(json!({"color": "black"})).unwrap_err().contains("unzulässigen Wert"));
+        assert!(added(json!({"page": 0})).is_err());
+        assert!(added(json!({"sha256": "abc"})).unwrap_err().contains("Prüfsumme"));
+        assert!(added(json!({"text": "x".repeat(MAX_HIGHLIGHT_TEXT + 1)})).unwrap_err().contains("länger"));
+        for rects in [
+            json!([]),
+            json!([[0, 0, 10]]),
+            json!([[9000, 0, 2000, 100]]),
+            json!([[0, 0, 0, 100]]),
+            json!([[0.5, 0, 10, 10]]),
+            json!("x"),
+        ] {
+            assert!(added(json!({"rects": rects})).unwrap_err().contains("Rechtecke"), "{rects}");
+        }
+        assert!(added(json!({"rects": vec![json!([0, 0, 10, 10]); MAX_HIGHLIGHT_RECTS + 1]})).is_err());
+        let removed = json!({"record_id": record, "highlight": Uuid::new_v4().to_string()});
+        assert_eq!(validate("FullTextHighlightRemoved", 1, Some(&stage), &removed), Ok(()));
+        assert!(validate("FullTextHighlightRemoved", 1, Some(&stage), &json!({"record_id": record})).is_err());
+        assert!(is_blindable("FullTextHighlightAdded") && is_blindable("FullTextHighlightRemoved"));
+        assert!(is_highlight("FullTextHighlightAdded") && !is_highlight("FullTextStatusSet"));
     }
 
     #[test]

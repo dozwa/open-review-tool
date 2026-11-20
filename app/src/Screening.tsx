@@ -7,6 +7,7 @@ import { Link, useParams } from "react-router-dom";
 import { AiDialog, AiLine, AiState, suggestionLabel } from "./AiSuggestion";
 import { api, canManage, canVote, errorText, FullText, MyVote, Progress, reasonsOf, RecordFilter, RecordItem, RecordList, StageDetail, Suggestion, term } from "./api";
 import { CriteriaView } from "./Criteria";
+import { useHighlights } from "./highlights";
 import { PdfView } from "./PdfView";
 import { DECISION_LABEL, RecordView } from "./StagePages";
 import { HelpButton } from "./Guidance";
@@ -110,6 +111,8 @@ function Screening() {
   const openRecord = useRef(recordId);
   openRecord.current = recordId;
   const loadFulltext = useCallback(() => api.readFulltext(reviewId, recordId ?? ""), [reviewId, recordId]);
+  const mayMark = detail !== null && canVote(detail.role) && !detail.stage.closed;
+  const marks = useHighlights(reviewId, fulltext?.status === "retrieved" ? recordId ?? null : null, mayMark ? stageId : null, setError);
 
   const select = useCallback(async (recordId: string) => {
     try {
@@ -397,7 +400,7 @@ function Screening() {
               )}
               {fulltext?.status === "unavailable" && <p className="reading-note">{t("Volltext nicht beschaffbar: {reason}", { reason: fulltext.reason ?? "" })}</p>}
               {showFulltext ? (
-                <PdfView load={loadFulltext} onExternal={() => api.openFulltext(reviewId, record.id).catch((e) => setError(errorText(e)))} />
+                <PdfView load={loadFulltext} marks={marks} onExternal={() => api.openFulltext(reviewId, record.id).catch((e) => setError(errorText(e)))} />
               ) : (
                 <div className="reading">
                   <RecordView record={record} criteria={criteria} large showSource={showSource} />

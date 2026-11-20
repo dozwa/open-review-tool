@@ -9,6 +9,7 @@ import {
   ZoteroLibrary, ZoteroSuggestion,
 } from "./api";
 import { formatNumber, formatPercent, t, tn, tx } from "./i18n";
+import { useHighlights } from "./highlights";
 import { PdfView } from "./PdfView";
 import { Banner, Empty, Group, Icon, Pill, Segmented, Stat } from "./ui";
 
@@ -38,6 +39,8 @@ function byline(authors: string, year: number | null): string {
 export function FullTextPreview({ reviewId, recordId, title, onClose }: { reviewId: string; recordId: string; title: string; onClose: () => void }) {
   const load = useCallback(() => api.readFulltext(reviewId, recordId), [reviewId, recordId]);
   const [error, setError] = useState("");
+  // Im Reiter gibt es keine Stufe: Markierungen aus den Stufen sind zu sehen, neue entstehen beim Screening und Extrahieren.
+  const marks = useHighlights(reviewId, recordId, null, setError);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => event.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
@@ -50,7 +53,7 @@ export function FullTextPreview({ reviewId, recordId, title, onClose }: { review
         <button className="small" onClick={onClose}><Icon name="x" size={13} /> {t("Schließen")}</button>
       </div>
       {error && <Banner kind="error" onClose={() => setError("")}>{error}</Banner>}
-      <PdfView load={load} onExternal={() => api.openFulltext(reviewId, recordId).catch((e) => setError(errorText(e)))} />
+      <PdfView load={load} marks={marks} onExternal={() => api.openFulltext(reviewId, recordId).catch((e) => setError(errorText(e)))} />
     </div>
   );
 }

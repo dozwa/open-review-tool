@@ -243,7 +243,7 @@ Prüfung: Treffer je Quelle und Dublettenzahl aus dem Log stimmen mit den Import
 
 ### 4 Volltext (L)
 
-Stand 19.11.2026: umgesetzt bis auf das Markieren. Festlegungen beim Bau:
+Stand 20.11.2026: umgesetzt, auch das Markieren. Festlegungen beim Bau:
 
 - Die lokale Schnittstelle von Zotero (`http://127.0.0.1:23119/api`, ab Zotero 7, in den Einstellungen
   einzuschalten) ist geprüft: Sie liefert Bibliotheken, Collections, Einträge mit Anhängen und über
@@ -268,8 +268,13 @@ Stand 19.11.2026: umgesetzt bis auf das Markieren. Festlegungen beim Bau:
 - Vorschau mit pdf.js (`pdfjs-dist`, Legacy-Build für die WebView älterer macOS-Versionen): Seiten werden erst
   gerendert, wenn sie in die Nähe des sichtbaren Ausschnitts kommen. Die Bytes liefert `fulltext_read` nach
   Prüfung der Prüfsumme. „Extern öffnen“ ist der Rückfall.
-- Offen: Markieren (`FullTextHighlightAdded`, `FullTextHighlightRemoved`), wie im Plan vorgesehen hinter
-  Meilenstein 5. Die Textebene der Vorschau ist dafür schon da.
+- Markieren (20.11.2026): `FullTextHighlightAdded` nennt Eintrag, eine ID der Markierung, Prüfsumme der Datei,
+  Seite, Rechtecke `[x, y, Breite, Höhe]` in Zehntausendsteln der Seite (ganze Zahlen, unabhängig vom Zoom),
+  Text, Farbe und Kommentar. Ein zweites Ereignis mit derselben ID von derselben Person ändert Farbe oder
+  Kommentar; `FullTextHighlightRemoved` nimmt die Markierung zurück. Beide liegen in der Kette der Stufe und
+  sind in Screening- und in Formular-Stufen erlaubt. Markierungen zu einer früheren Datei gelten als veraltet.
+  Nicht gebaut: Markierungen über einen Seitenwechsel, Flächen ohne Text (Abbildungen, gescannte Seiten),
+  Antworten auf Kommentare anderer, Übernahme des Zitats in ein Formularfeld.
 
 - **Ordner:** Die Leitung verknüpft einen Ordner. Die App schlägt Zuordnungen vor (DOI im Dateinamen oder in den
   PDF-Metadaten, sonst Titelähnlichkeit); jede Zuordnung wird bestätigt. Auch einzelne Dateien lassen sich

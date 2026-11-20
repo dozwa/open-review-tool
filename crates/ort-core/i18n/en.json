@@ -880,5 +880,13 @@
   "„{}“ ist kein Ausschlusskriterium der Kriterienversion {} dieser Stufe.": "“{}” is not an exclusion criterion in criteria version {} of this stage.",
   "„{}“ ist kein Schlüssel eines Feldes.": "“{}” is not the key of a field.",
   "„{}“ ist schon beim Import als Dublette erkannt.": "“{}” was already identified as a duplicate at import.",
-  "„{}“ ohne erfülltes Gate freigegeben": "“{}” released without the gate being met"
+  "„{}“ ohne erfülltes Gate freigegeben": "“{}” released without the gate being met",
+  "Ereignis: Markierung im Volltext": "full-text highlight",
+  "Ereignis: Markierung im Volltext entfernt": "full-text highlight removed",
+  "Feld „{}“ ist keine Prüfsumme.": "Field “{}” is not a checksum.",
+  "Feld „{}“ nennt keine Rechtecke innerhalb der Seite.": "Field “{}” does not list rectangles inside the page.",
+  "Der Text ist länger als {} Zeichen.": "The text is longer than {} characters.",
+  "Diese Farbe gibt es für Markierungen nicht.": "Highlights do not come in this colour.",
+  "Die Markierung liegt nicht auf der Seite.": "The highlight is not on the page.",
+  "Markierung nicht gefunden.": "Highlight not found."
 }

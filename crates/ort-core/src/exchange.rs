@@ -572,7 +572,9 @@ fn authorize(e: &Event, context: &MergeContext) -> std::result::Result<(), Strin
             return Err(tr!("Konsens in einer verblindeten Stufe."));
         }
         // Stimmen gehören in Screening-Stufen, Formularwerte in Formular-Stufen.
+        // Markierungen im Volltext gibt es in beiden.
         match (t.starts_with("Form"), form_stages.get(&stage)) {
+            _ if catalog::is_highlight(t) => {}
             (true, None) => return Err(tr!("Die Stufe arbeitet nicht mit einem Formular.")),
             (false, Some(_)) => return Err(tr!("Die Stufe arbeitet mit einem Formular, nicht mit Stimmen.")),
             (true, Some(form)) if t != "FormEntryCompleted" => {

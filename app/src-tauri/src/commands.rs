@@ -9,6 +9,7 @@ use ort_core::fulltext::{
     Assign, FileProblem, FullTextOverview, Location, Suggestion, ZoteroConfirm, ZoteroLink, ZoteroSuggestion,
 };
 use ort_core::guidance::{self, Guideline};
+use ort_core::highlights::{Highlight, NewHighlight};
 use ort_core::projection::SuggestionInfo;
 use ort_core::protocol::Protocol;
 use ort_core::registration::RegistrationDraft;
@@ -798,6 +799,54 @@ pub async fn open_url(url: String) -> Res<()> {
     }
     std::process::Command::new("open").arg(&url).spawn().map_err(err)?;
     Ok(())
+}
+
+// ---------------------------------------------------------------- Markierungen im Volltext
+
+/// Markierungen zum Volltext eines Eintrags, die die Person sehen darf.
+#[tauri::command]
+pub async fn highlights(state: State<'_, AppState>, review_id: String, record_id: String) -> Res<Vec<Highlight>> {
+    open(&state, &review_id)?.highlights(&uuid(&record_id)?).map_err(err)
+}
+
+#[tauri::command]
+pub async fn highlight_add(
+    state: State<'_, AppState>,
+    review_id: String,
+    stage_id: String,
+    record_id: String,
+    highlight: NewHighlight,
+) -> Res<Highlight> {
+    open(&state, &review_id)?.add_highlight(&uuid(&stage_id)?, &uuid(&record_id)?, &highlight).map_err(err)
+}
+
+/// Ändert Farbe und Kommentar einer eigenen Markierung.
+#[tauri::command]
+pub async fn highlight_update(
+    state: State<'_, AppState>,
+    review_id: String,
+    stage_id: String,
+    record_id: String,
+    highlight_id: String,
+    color: String,
+    note: String,
+) -> Res<Highlight> {
+    open(&state, &review_id)?
+        .update_highlight(&uuid(&stage_id)?, &uuid(&record_id)?, &uuid(&highlight_id)?, &color, &note)
+        .map_err(err)
+}
+
+#[tauri::command]
+pub async fn highlight_remove(
+    state: State<'_, AppState>,
+    review_id: String,
+    stage_id: String,
+    record_id: String,
+    highlight_id: String,
+) -> Res<()> {
+    open(&state, &review_id)?
+        .remove_highlight(&uuid(&stage_id)?, &uuid(&record_id)?, &uuid(&highlight_id)?)
+        .map_err(err)
 }
 
 // ---------------------------------------------------------------- KI-Vorschlag

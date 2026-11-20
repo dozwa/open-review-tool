@@ -387,6 +387,8 @@ const ftRowOf = (id: unknown) => fulltexts.rows.find((r) => r.record_id === id);
 const stageOf = (id: unknown) => [...stages, fulltextStage].find((x) => x.id === id) ?? stages[1];
 // KI-Vorschläge der Vorschau: je Eintrag der letzte. Das Modell „fehler“ zeigt, wie eine Absage aussieht.
 const suggestions = new Map<string, Record<string, unknown>>();
+// Markierungen im Volltext, je Eintrag; nur für diese Sitzung.
+const marks: { record: string; item: Record<string, unknown> }[] = [];
 let aiKey = false;
 let aiAllowed = true;
 const AI_ANSWERS: [string, string | null, string][] = [
@@ -510,6 +512,26 @@ export function installMock() {
         if (!st.mine) st.n += 1;
         st.mine = String(a.decision);
         st.primary = (a.primaryReason as string | null) ?? null;
+        return null;
+      }
+      case "highlights": return marks.filter((m) => m.record === a.recordId).map((m) => m.item);
+      case "highlight_add": {
+        const item = {
+          ...(a.highlight as object), id: `mark-${marks.length + 1}`, stage_id: String(a.stageId), stage_name: "Volltext", actor_id: "me",
+          name: "Ich", mine: true, editable: true, stale: false, sha256: "", at: new Date().toISOString(),
+        };
+        marks.push({ record: String(a.recordId), item });
+        return item;
+      }
+      case "highlight_update": {
+        const found = marks.find((m) => m.item.id === a.highlightId);
+        if (!found) return Promise.reject("Markierung nicht gefunden.");
+        found.item = { ...found.item, color: String(a.color), note: String(a.note).trim() };
+        return found.item;
+      }
+      case "highlight_remove": {
+        const at = marks.findIndex((m) => m.item.id === a.highlightId);
+        if (at >= 0) marks.splice(at, 1);
         return null;
       }
       case "ai_suggest": {

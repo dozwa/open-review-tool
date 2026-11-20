@@ -219,6 +219,23 @@ pub struct StageState {
     pub flags: BTreeMap<String, usize>,
     /// (record_id, actor_id) → letzter KI-Vorschlag. Zählt nirgends als Stimme.
     pub suggestions: BTreeMap<(String, Uuid), SuggestionInfo>,
+    /// (record_id, actor_id, Markierung) → Markierung im Volltext, wie sie zuletzt gesetzt wurde.
+    pub highlights: BTreeMap<(String, Uuid, Uuid), HighlightInfo>,
+}
+
+/// Eine Markierung im Volltext. Die Lage steht in Zehntausendsteln der Seite (`catalog::HIGHLIGHT_UNITS`).
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct HighlightInfo {
+    /// Prüfsumme der Datei, in der markiert wurde.
+    pub sha256: String,
+    pub page: i64,
+    /// Rechtecke `[x, y, Breite, Höhe]`, von links oben.
+    pub rects: Vec<[i64; 4]>,
+    pub text: String,
+    pub color: String,
+    pub note: String,
+    /// Zeitpunkt des ersten Setzens; eine Änderung von Farbe oder Kommentar lässt ihn stehen.
+    pub at: String,
 }
 
 /// Ein KI-Vorschlag, wie ihn eine Person zu einem Eintrag eingeholt hat.
@@ -277,6 +294,7 @@ impl StageState {
             consensus: BTreeMap::new(),
             flags: BTreeMap::new(),
             suggestions: BTreeMap::new(),
+            highlights: BTreeMap::new(),
         };
         for e in events {
             let record = e.payload_str("record_id").map(str::to_string);
@@ -325,6 +343,27 @@ impl StageState {
                     let id = e.payload_str("suggestion").and_then(|id| Uuid::parse_str(id).ok());
                     if let Some(s) = state.suggestions.get_mut(&(record, e.actor_id)).filter(|s| Some(s.id) == id) {
                         s.outcome = e.payload_str("outcome").map(str::to_string);
+                    }
+                }
+                ("FullTextHighlightAdded", Some(record)) => {
+                    let Some(id) = e.payload_str("highlight").and_then(|id| Uuid::parse_str(id).ok()) else { continue };
+                    let key = (record, e.actor_id, id);
+                    let at = state.highlights.get(&key).map_or_else(|| e.occurred_at.clone(), |old| old.at.clone());
+                    let rects = serde_json::from_value(e.payload.get("rects").cloned().unwrap_or_default());
+                    let info = HighlightInfo {
+                        sha256: e.payload_str("sha256").unwrap_or_default().to_string(),
+                        page: e.payload.get("page").and_then(Value::as_i64).unwrap_or(1),
+                        rects: rects.unwrap_or_default(),
+                        text: e.payload_str("text").unwrap_or_default().to_string(),
+                        color: e.payload_str("color").unwrap_or_default().to_string(),
+                        note: e.payload_str("note").unwrap_or_default().to_string(),
+                        at,
+                    };
+                    state.highlights.insert(key, info);
+                }
+                ("FullTextHighlightRemoved", Some(record)) => {
+                    if let Some(id) = e.payload_str("highlight").and_then(|id| Uuid::parse_str(id).ok()) {
+                        state.highlights.remove(&(record, e.actor_id, id));
                     }
                 }
                 _ => {}

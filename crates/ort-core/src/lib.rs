@@ -13,7 +13,7 @@
 //! Werte und den Abgleich je Feld, [`protocol`] die Registrierung des Protokolls, die Abweichungen danach
 //! und die Checkliste des Berichts. [`settings`] hält, was nur für diesen Rechner gilt: Einstellungen des
 //! Programms und je Review. [`ai`] baut den Prompt für einen KI-Vorschlag im Screening und liest die
-//! Antwort; gesendet wird in der App.
+//! Antwort; gesendet wird in der App. [`highlights`] hält Markierungen und Kommentare im Volltext.
 
 pub mod agreement;
 pub mod ai;
@@ -27,6 +27,7 @@ pub mod exchange;
 pub mod forms;
 pub mod fulltext;
 pub mod guidance;
+pub mod highlights;
 pub mod i18n;
 pub mod import;
 pub mod projection;

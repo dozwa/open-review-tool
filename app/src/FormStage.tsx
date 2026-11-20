@@ -23,6 +23,7 @@ import {
   showValue,
   term,
 } from "./api";
+import { useHighlights } from "./highlights";
 import { PdfView } from "./PdfView";
 import { stageState } from "./ReviewPage";
 import { HelpButton } from "./Guidance";
@@ -357,6 +358,8 @@ export function FormEntryPage() {
   }, [load]);
 
   const loadFulltext = useCallback(() => api.readFulltext(reviewId, reading), [reviewId, reading]);
+  const mayMark = entry !== null && canVote(entry.role) && !entry.stage.closed;
+  const marks = useHighlights(reviewId, reading === "abstract" ? null : reading, mayMark ? stageId : null, setError);
 
   if (!entry) return error ? <Banner kind="error">{error}</Banner> : null;
   const { stage, form, record, mode, compared } = entry;
@@ -433,7 +436,7 @@ export function FormEntryPage() {
             </div>
           )}
           {reading !== "abstract" ? (
-            <PdfView load={loadFulltext} onExternal={() => api.openFulltext(reviewId, reading).catch((e) => setError(errorText(e)))} />
+            <PdfView load={loadFulltext} marks={marks} onExternal={() => api.openFulltext(reviewId, reading).catch((e) => setError(errorText(e)))} />
           ) : (
             <div className="reading">
               {all.map((r, i) => (
