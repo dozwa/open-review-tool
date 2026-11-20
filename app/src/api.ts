@@ -239,6 +239,20 @@ export interface RegistrationDraft {
   can_edit: boolean;
 }
 
+/** Eine bestehende Registrierung bei OSF, auf die Felder des Formulars verteilt. */
+export interface OsfImport {
+  identifier: string;
+  url: string;
+  title: string;
+  /** Name des Formulars, mit dem bei OSF registriert wurde. */
+  schema: string;
+  registered_on: string;
+  answers: { key: string; text: string }[];
+  /** Texte, zu denen das Formular kein Feld hat. */
+  unmatched: { label: string; text: string }[];
+  files: string[];
+}
+
 export interface TemplateInfo {
   key: string;
   name: string;
@@ -1033,6 +1047,9 @@ export const api = {
   registrationDraft: (reviewId: string, lang?: string) => call<RegistrationDraft>("registration_draft", { reviewId, lang }),
   answerRegistration: (reviewId: string, key: string, text: string, lang?: string) =>
     call<RegistrationDraft>("registration_answer", { reviewId, key, text, lang }),
+  fetchOsfRegistration: (source: string) => call<OsfImport>("registration_osf_fetch", { source }),
+  importRegistration: (reviewId: string, answers: Record<string, string>, replace: boolean, lang?: string) =>
+    call<RegistrationDraft>("registration_import", { reviewId, answers, replace, lang }),
   exportRegistration: (reviewId: string, path: string, lang?: string) =>
     call<void>("registration_export", { reviewId, path, lang }),
 

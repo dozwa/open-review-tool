@@ -79,7 +79,7 @@ Tauri 2 mit der WebView von macOS, React 18.
 
 ## Wie es geprüft ist
 
-- **Kern:** 164 Tests, dazu 6 in der App (Lesen der Zotero-Antworten, Anfrage und Antwort der KI, Link der Rückmeldung). Darunter die Referenzwerte der früheren SQL-Tests (Cohen's Kappa gegen scikit-learn,
+- **Kern:** 166 Tests, dazu 7 in der App (Lesen der Zotero-Antworten, Anfrage und Antwort der KI, Link der Rückmeldung, Kennung einer OSF-Registrierung). Darunter die Referenzwerte der früheren SQL-Tests (Cohen's Kappa gegen scikit-learn,
   Fleiss' Kappa am Wikipedia-Beispiel, Krippendorffs Alpha am publizierten Beispiel mit 0,743, PABAK, Prozent,
   sechs `final_decision`-Szenarien, Maybe-Regel). Die Werte erzeugt `crates/ort-core/tests/fixtures/make_agreement_fixtures.py`.
 - **Austausch:** veränderte Datei, nachträglich neu gehashte Datei ohne Signatur, Außenstehende, Lücken in einer
@@ -266,10 +266,19 @@ Nur für Entwicklung und Tests.
 - **Registrierung vorbereiten:** Die App führt durch die 65 Felder des Formulars „Generalized Systematic Review
   Registration“ von OSF (van den Akker et al. 2023) und schlägt vor, was das Review schon weiß: Titel, Team,
   Stationen und Regeln, Kriterien, Suchen, Formularfelder. Vorschläge sind eine Projektion; eigene Texte der
-  Leitung stehen als `ProtocolDrafted` im Log, je Feld gilt der letzte. Die App reicht nichts ein und spricht
-  nicht mit OSF: Die Texte werden kopiert oder als Markdown gespeichert. Feldnamen, Hinweise und Vorschläge erscheinen in der
+  Leitung stehen als `ProtocolDrafted` im Log, je Feld gilt der letzte. Die App reicht nichts ein: Die Texte
+  werden kopiert oder als Markdown gespeichert. Feldnamen, Hinweise und Vorschläge erscheinen in der
   gewählten Ausgabesprache; eigene Texte bleiben, wie sie geschrieben wurden. Namen der Mitwirkenden kommen aus der lokalen Personentabelle und
   stehen nur dann im Log, wenn die Leitung sie in ein Feld schreibt.
+- **Bestehende Registrierung einlesen:** „Aus OSF einlesen“ im Bereich Registrierung holt eine öffentliche
+  Registrierung über die Schnittstelle von OSF (`api.osf.io`, ohne Konto; gesendet wird nur die Kennung) und
+  verteilt ihre Texte auf die 65 Felder. Zugeordnet wird über den Namen des Feldes, bei gleichen Namen über die
+  Seite; so passen auch ältere Fassungen des Formulars. Titel, Mitwirkende und Fachgebiete kommen aus den
+  Angaben der Registrierung. Texte aus anderen Formularen (etwa „Open-Ended Registration“) bleiben ohne Feld und
+  lassen sich in der Vorschau von Hand zuordnen. Übernommen wird erst nach der Vorschau, als ein
+  `ProtocolDrafted`; eigene Texte bleiben, außer auf Wunsch. Auf Wunsch wird die Registrierung gleich mit Datum
+  und Kennung eingetragen. Angehängte Dateien lädt die App nicht; private und gesperrte Registrierungen sind
+  nicht lesbar. Kriterien, Suchen und Formular füllt das Einlesen nicht.
 - **Rapid Review:** Die Vorlage folgt den Empfehlungen der Cochrane Rapid Reviews Methods Group (Garritty et al.,
   BMJ 2024) mit den vorhandenen Bausteinen. Die doppelt bewertete Stichprobe ist die Pilot-Station (Vorgabe 50
   Einträge, beim Öffnen änderbar; die Leitlinie nennt etwa 20 %). Gesperrt wird über 80 % Übereinstimmung; die

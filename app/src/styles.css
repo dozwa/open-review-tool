@@ -997,7 +997,8 @@ button.small { height: 26px; padding: 0 10px; }
 .shortcut.recording { border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); color: var(--ink-2); font-size: 12px; }
 
 /* Dialog über der Seite, etwa der KI-Vorschlag im Screening. */
-.modal-layer { position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, 0.28); display: grid; place-items: center; padding: 24px; }
+/* Die Zeile hat eine feste Höhe; sonst gälte die Höchsthöhe des Dialogs in Prozent nicht, und ein langer Dialog ragte aus dem Fenster. */
+.modal-layer { position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, 0.28); display: grid; grid-template-rows: minmax(0, 1fr); place-items: center; padding: 24px; }
 .modal {
   width: min(560px, 100%); max-height: min(720px, 100%); display: flex; flex-direction: column; background: var(--content);
   border: 0.5px solid var(--line-strong); border-radius: 14px; box-shadow: var(--shadow), 0 24px 60px rgba(0, 0, 0, 0.22); animation: rise 0.16s ease-out;
@@ -1008,6 +1009,20 @@ button.small { height: 26px; padding: 0 10px; }
 .modal-body > .banner { margin: 0; }
 .modal > footer { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px; border-top: 0.5px solid var(--line); }
 .modal > footer kbd { margin-left: 4px; }
+
+/* Registrierung aus OSF einlesen */
+.osf-import { display: flex; flex-direction: column; gap: 8px; }
+.osf-import > label:not(.osf-check) { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 500; }
+.osf-import input:not([type="checkbox"]) { width: 100%; }
+.osf-import > .muted { font-size: 12px; }
+.osf-import h3 { font-size: 12px; font-weight: 600; color: var(--ink-2); margin: 6px 0 0; }
+.osf-row { border: 0.5px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+.osf-row summary { cursor: pointer; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.osf-row summary .pill, .osf-row summary select { margin-left: auto; }
+.osf-row summary select { max-width: 55%; }
+.osf-row .reg-text { margin-top: 6px; font-size: 12.5px; max-height: 220px; overflow-y: auto; }
+.osf-check { display: flex; align-items: flex-start; gap: 8px; margin-top: 4px; }
+.osf-check small { display: block; color: var(--ink-3); }
 
 /* Rückmeldung an die Entwicklung */
 .feedback { display: flex; flex-direction: column; gap: 10px; }

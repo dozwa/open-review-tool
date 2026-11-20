@@ -402,7 +402,7 @@
       "key": "extractor_blinding",
       "section": "extraction",
       "label": "Verblindung bei der Extraktion",
-      "original": "Extractor blinding",
+      "original": "Extractor masking",
       "hint": "Sehen die Extrahierenden die Angaben der anderen, bevor sie fertig sind?"
     },
     {

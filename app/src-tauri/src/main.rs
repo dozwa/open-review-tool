@@ -7,6 +7,7 @@ mod bridge;
 mod commands;
 mod feedback;
 mod identity;
+mod osf;
 mod zotero;
 
 use std::path::PathBuf;
@@ -85,6 +86,8 @@ fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send
         commands::guidance_list,
         commands::registration_draft,
         commands::registration_answer,
+        commands::registration_osf_fetch,
+        commands::registration_import,
         commands::registration_export,
         commands::forms,
         commands::form_publish,

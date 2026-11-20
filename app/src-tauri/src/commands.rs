@@ -1,5 +1,6 @@
 //! Befehle für die Oberfläche. Jede Review liegt als SQLite-Datei unter `reviews/<id>.ortreview`.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use ort_core::criteria::Criteria;
@@ -12,7 +13,7 @@ use ort_core::guidance::{self, Guideline};
 use ort_core::highlights::{Highlight, NewHighlight};
 use ort_core::projection::SuggestionInfo;
 use ort_core::protocol::Protocol;
-use ort_core::registration::RegistrationDraft;
+use ort_core::registration::{OsfImport, RegistrationDraft};
 use ort_core::report::Report;
 use ort_core::search::Search;
 use ort_core::service::{
@@ -29,7 +30,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Runtime, State};
 use uuid::Uuid;
 
-use crate::{ai, zotero, AppState};
+use crate::{ai, osf, zotero, AppState};
 
 type Res<T> = Result<T, String>;
 
@@ -628,6 +629,27 @@ pub async fn registration_answer(
 ) -> Res<RegistrationDraft> {
     let review = open(&state, &review_id)?;
     in_language(lang.as_deref(), || review.draft_registration(&key, &text))?.map_err(err)
+}
+
+/// Liest eine öffentliche Registrierung bei OSF und verteilt ihre Texte auf die Felder des Formulars.
+/// Im Review ändert sich dabei nichts; das geschieht erst mit `registration_import`.
+#[tauri::command]
+pub async fn registration_osf_fetch(source: String) -> Res<OsfImport> {
+    tauri::async_runtime::spawn_blocking(move || osf::fetch(&source)).await.map_err(err)?
+}
+
+/// Übernimmt Texte aus einer bestehenden Registrierung als eigene Texte. Ohne `replace` bleiben Felder,
+/// die schon einen eigenen Text haben, wie sie sind.
+#[tauri::command]
+pub async fn registration_import(
+    state: State<'_, AppState>,
+    review_id: String,
+    answers: BTreeMap<String, String>,
+    replace: bool,
+    lang: Option<String>,
+) -> Res<RegistrationDraft> {
+    let review = open(&state, &review_id)?;
+    in_language(lang.as_deref(), || review.import_registration(&answers, replace))?.map_err(err)
 }
 
 /// Schreibt die Vorbereitung als Markdown: je Feld der Name im Register und der Text zum Kopieren.

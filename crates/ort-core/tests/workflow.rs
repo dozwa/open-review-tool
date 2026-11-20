@@ -1700,6 +1700,28 @@ fn registration_is_prepared_from_the_review_and_own_texts_win() {
     let draft = t.owner.draft_registration("title", "").unwrap();
     assert_eq!((find(&draft, "title").status, draft.n_answered), ("suggested", 1));
 
+    // Texte aus einer bestehenden Registrierung kommen in einem Ereignis; eigene Texte bleiben, außer
+    // auf Wunsch, und ein leerer Text nimmt nichts zurück.
+    let texts = |pairs: &[(&str, &str)]| -> std::collections::BTreeMap<String, String> {
+        pairs.iter().map(|(key, text)| (key.to_string(), text.to_string())).collect()
+    };
+    let osf = texts(&[("background", "Aus der Registrierung"), ("funding", " Keine Förderung "), ("end_date", "")]);
+    assert!(matches!(t.r1.import_registration(&osf, false), Err(Error::Forbidden(_))));
+    assert!(matches!(
+        t.owner.import_registration(&texts(&[("lieblingsfarbe", "blau")]), false),
+        Err(Error::Invalid(_))
+    ));
+    let before = drafted(&t.owner);
+    let draft = t.owner.import_registration(&osf, false).unwrap();
+    assert_eq!(find(&draft, "background").text(), "Warum es das Review braucht");
+    assert_eq!(find(&draft, "funding").answer.as_deref(), Some("Keine Förderung"));
+    assert_eq!((find(&draft, "end_date").status, draft.n_answered), ("open", 2));
+    t.owner.import_registration(&osf, false).unwrap();
+    assert_eq!(drafted(&t.owner), before + 1, "nichts Neues ist kein neues Ereignis");
+    let draft = t.owner.import_registration(&osf, true).unwrap();
+    assert_eq!(find(&draft, "background").text(), "Aus der Registrierung");
+    t.owner.draft_registration("background", "Warum es das Review braucht").unwrap();
+
     // Das Team liest mit; ein untergeschobener Eintrag eines Reviewers wird beim Einlesen abgewiesen.
     send_package(&t.owner, &t.r1);
     let seen = t.r1.registration_draft().unwrap();

@@ -135,6 +135,177 @@ pub fn answers(events: &[Event]) -> (BTreeMap<String, String>, Option<String>) {
     (out, updated)
 }
 
+/// Ein Text aus einer Registrierung bei OSF, einem Feld des Formulars zugeordnet.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct ImportedAnswer {
+    pub key: String,
+    pub text: String,
+}
+
+/// Ein Text aus einer Registrierung bei OSF, zu dem das Formular kein Feld hat.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct UnmatchedAnswer {
+    /// Name des Feldes bei OSF.
+    pub label: String,
+    pub text: String,
+}
+
+/// Eine bestehende Registrierung bei OSF, auf die Felder des Formulars verteilt. Nichts davon steht im
+/// Log, bis die Leitung die Texte übernimmt (`Review::import_registration`).
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct OsfImport {
+    /// Kurze Adresse, etwa `osf.io/abc12`.
+    pub identifier: String,
+    pub url: String,
+    pub title: String,
+    /// Name des Formulars, mit dem bei OSF registriert wurde.
+    pub schema: String,
+    /// Tag der Registrierung, `JJJJ-MM-TT`.
+    pub registered_on: String,
+    /// Texte in der Reihenfolge des Formulars.
+    pub answers: Vec<ImportedAnswer>,
+    pub unmatched: Vec<UnmatchedAnswer>,
+    /// Namen der Dateien, die an der Registrierung hängen. Die App lädt sie nicht.
+    pub files: Vec<String>,
+}
+
+/// Kleinbuchstaben und Ziffern, Wörter durch ein Leerzeichen getrennt: So lassen sich Feldnamen
+/// vergleichen, auch wenn OSF Leerzeichen oder Schrägstriche anders setzt.
+fn plain(text: &str) -> String {
+    let lower = text.to_lowercase();
+    lower.split(|c: char| !c.is_alphanumeric()).filter(|word| !word.is_empty()).collect::<Vec<_>>().join(" ")
+}
+
+/// Frühere Namen von Feldern bei OSF und der Name, den das Feld heute trägt.
+const OSF_FORMER_NAMES: [(&str, &str); 1] = [("extractor blinding", "extractor masking")];
+
+/// Verteilt eine Registrierung von OSF auf die Felder des Formulars. `registration` ist die Antwort von
+/// `/v2/registrations/<id>/`, `schema` die des Formulars, `blocks` sind dessen Blöcke (`schema_blocks`,
+/// alle Seiten hintereinander), `contributors` die genannten Mitwirkenden (`bibliographic_contributors`).
+///
+/// Zugeordnet wird über den Namen des Feldes, nicht über dessen Kennung: So passen auch ältere Fassungen
+/// des Formulars. Heißen zwei Felder gleich, entscheidet die Seite, auf der sie stehen. Texte aus
+/// anderen Formularen bleiben ohne Feld und werden nur gezeigt.
+pub fn osf_import(registration: &Value, schema: &Value, blocks: &[Value], contributors: &[Value]) -> Result<OsfImport> {
+    let form = osf_form();
+    let data = &registration["data"];
+    let attributes = &data["attributes"];
+    let text = |value: &Value, key: &str| value.get(key).and_then(Value::as_str).unwrap_or_default().trim().to_string();
+    let id = data.get("id").and_then(Value::as_str).unwrap_or_default();
+    let responses = attributes.get("registration_responses").and_then(Value::as_object);
+    let (Some(responses), false) = (responses, id.is_empty()) else {
+        return Err(invalid(tr!("Unter dieser Adresse liegt keine lesbare Registrierung.")));
+    };
+    if attributes.get("withdrawn").and_then(Value::as_bool) == Some(true) {
+        return Err(invalid(tr!("Diese Registrierung ist zurückgezogen; OSF gibt ihre Texte nicht mehr heraus.")));
+    }
+
+    let mut answers: BTreeMap<String, String> = BTreeMap::new();
+    let mut unmatched = Vec::new();
+    let mut files = Vec::new();
+    let mut place = |label: &str, page: &str, value: String, answers: &mut BTreeMap<String, String>| {
+        if value.is_empty() {
+            return;
+        }
+        let mut name = plain(label);
+        if let Some((_, now)) = OSF_FORMER_NAMES.iter().find(|(former, _)| *former == name) {
+            name = now.to_string();
+        }
+        let same: Vec<&Item> = form.items.iter().filter(|i| plain(&i.original) == name).collect();
+        let on_page =
+            |item: &&&Item| form.sections.iter().any(|s| s.key == item.section && plain(&s.original) == plain(page));
+        let item = match same.len() {
+            1 => same.first(),
+            _ => same.iter().find(on_page),
+        };
+        match item.filter(|i| !answers.contains_key(&i.key) && value.chars().count() <= MAX_ANSWER) {
+            Some(item) => drop(answers.insert(item.key.clone(), value)),
+            None => unmatched.push(UnmatchedAnswer { label: label.trim().to_string(), text: value }),
+        }
+    };
+
+    // Metadaten stehen bei OSF nicht im Formular, sondern an der Registrierung selbst.
+    let title = text(attributes, "title");
+    place("Title", "", title.clone(), &mut answers);
+    let names: Vec<String> = contributors
+        .iter()
+        .map(|c| {
+            let user = text(&c["embeds"]["users"]["data"]["attributes"], "full_name");
+            if user.is_empty() {
+                text(&c["attributes"], "unregistered_contributor")
+            } else {
+                user
+            }
+        })
+        .filter(|name| !name.is_empty())
+        .collect();
+    place("Contributors", "", names.join("; "), &mut answers);
+    let mut subjects: Vec<String> = Vec::new();
+    for path in attributes.get("subjects").and_then(Value::as_array).into_iter().flatten() {
+        let leaf = path.as_array().and_then(|p| p.last()).map(|s| text(s, "text")).unwrap_or_default();
+        if !leaf.is_empty() && !subjects.contains(&leaf) {
+            subjects.push(leaf);
+        }
+    }
+    place("Subjects", "", subjects.join("; "), &mut answers);
+    place("Description", "", text(attributes, "description"), &mut answers);
+
+    // Die Blöcke des Formulars in ihrer Reihenfolge: Seite, Name des Feldes, dann das Feld selbst.
+    let mut from_form = 0;
+    let mut sorted: Vec<&Value> = blocks.iter().collect();
+    sorted.sort_by_key(|b| b["attributes"]["index"].as_i64().unwrap_or(i64::MAX));
+    let (mut page, mut label) = (String::new(), String::new());
+    for block in sorted {
+        let block = &block["attributes"];
+        let shown = text(block, "display_text");
+        match block.get("block_type").and_then(Value::as_str).unwrap_or_default() {
+            "page-heading" => (page, label) = (shown.clone(), shown),
+            "section-heading" | "subsection-heading" | "question-label" if !shown.is_empty() => label = shown,
+            _ => {}
+        }
+        let Some(value) = block.get("registration_response_key").and_then(Value::as_str).and_then(|k| responses.get(k))
+        else {
+            continue;
+        };
+        match value {
+            Value::String(s) => {
+                from_form += usize::from(!s.trim().is_empty());
+                place(&label, &page, s.trim().to_string(), &mut answers);
+            }
+            Value::Array(list) => {
+                let mut chosen = Vec::new();
+                for entry in list {
+                    match entry {
+                        Value::String(s) if !s.trim().is_empty() => chosen.push(s.trim().to_string()),
+                        Value::Object(_) => files.extend(Some(text(entry, "file_name")).filter(|n| !n.is_empty())),
+                        _ => {}
+                    }
+                }
+                from_form += chosen.len();
+                place(&label, &page, chosen.join("; "), &mut answers);
+            }
+            _ => {}
+        }
+    }
+    if from_form == 0 {
+        return Err(invalid(tr!("Diese Registrierung enthält keine Texte, die sich übernehmen lassen.")));
+    }
+    Ok(OsfImport {
+        identifier: format!("osf.io/{id}"),
+        url: format!("https://osf.io/{id}/"),
+        title,
+        schema: text(&schema["data"]["attributes"], "name"),
+        registered_on: text(attributes, "date_registered").chars().take(10).collect(),
+        answers: form
+            .items
+            .iter()
+            .filter_map(|i| answers.remove(&i.key).map(|text| ImportedAnswer { key: i.key.clone(), text }))
+            .collect(),
+        unmatched,
+        files,
+    })
+}
+
 fn list(items: impl IntoIterator<Item = String>) -> String {
     items.into_iter().map(|i| format!("- {i}")).collect::<Vec<_>>().join("\n")
 }
@@ -229,6 +400,35 @@ impl Review {
         let (current, _) = answers(&self.store().events_of_types(&["ProtocolDrafted"])?);
         if current.get(key).map(String::as_str).unwrap_or_default() != text {
             self.append("ProtocolDrafted", None::<Uuid>, json!({"form": OSF_FORM, "answers": {key: text}}))?;
+        }
+        self.registration_draft()
+    }
+
+    /// Übernimmt Texte aus einer bestehenden Registrierung als eigene Texte, in einem Ereignis. Ein Feld,
+    /// das schon einen eigenen Text hat, bleibt, außer mit `replace`. Leere Texte nehmen nichts zurück.
+    pub fn import_registration(&self, texts: &BTreeMap<String, String>, replace: bool) -> Result<RegistrationDraft> {
+        require(&self.state()?, &self.me().actor_id, &MANAGE_ROLES)?;
+        let form = osf_form();
+        let (current, _) = answers(&self.store().events_of_types(&["ProtocolDrafted"])?);
+        let mut new = serde_json::Map::new();
+        for (key, text) in texts {
+            if !form.items.iter().any(|i| &i.key == key) {
+                return Err(invalid(tr!("Dieses Feld kennt das Registrierungsformular nicht.")));
+            }
+            let text = text.trim();
+            if text.chars().count() > MAX_ANSWER {
+                return Err(invalid(tr!(
+                    "Ein Feld fasst höchstens {} Zeichen. Längeres gehört in einen Anhang.",
+                    MAX_ANSWER
+                )));
+            }
+            let own = current.get(key).map(String::as_str);
+            if !text.is_empty() && own != Some(text) && (replace || own.is_none()) {
+                new.insert(key.clone(), Value::String(text.to_string()));
+            }
+        }
+        if !new.is_empty() {
+            self.append("ProtocolDrafted", None::<Uuid>, json!({"form": OSF_FORM, "answers": new}))?;
         }
         self.registration_draft()
     }
@@ -567,6 +767,95 @@ mod tests {
                 "{code}: Feld ohne Beschriftung oder Hinweis"
             );
         }
+    }
+
+    /// Eine Registrierung, wie OSF sie herausgibt, auf das Nötige gekürzt.
+    fn osf_answer() -> (Value, Value, Vec<Value>, Vec<Value>) {
+        let registration = json!({"data": {"id": "abc12", "attributes": {
+            "title": "Schlaf und Kopfschmerz: Protokoll eines Scoping Reviews",
+            "description": "Kurzfassung",
+            "date_registered": "2026-03-04T10:11:12.000000",
+            "withdrawn": false,
+            "subjects": [[{"text": "Medicine and Health Sciences"}, {"text": "Neurology"}]],
+            "registration_responses": {
+                "q-8": " Scoping Review nach JBI ", "q-86": "Zotero und Tabellen", "q-100": "Keine Verblindung",
+                "q-108": "Tabellen im Projekt", "q-76": [{"file_name": "Protokoll.pdf"}], "q-98": [],
+                "q-9": "", "q-200": "Nur bei OSF gefragt", "q-201": ["a", "b"],
+            },
+        }}});
+        let schema = json!({"data": {"attributes": {"name": "Generalized Systematic Review Registration"}}});
+        let block = |index: i64, kind: &str, shown: &str, key: Option<&str>| json!({"attributes": {"index": index, "block_type": kind, "display_text": shown, "registration_response_key": key}});
+        let blocks = vec![
+            // Die Reihenfolge der Antwort zählt nicht, nur `index`.
+            block(8, "long-text-input", "", Some("q-8")),
+            block(5, "page-heading", "Review Methods", None),
+            block(7, "question-label", "Type of review ", None),
+            block(9, "long-text-input", "", Some("q-9")),
+            block(65, "page-heading", "Screening", None),
+            block(73, "question-label", "Screener instructions", None),
+            block(75, "question-label", "", None),
+            block(76, "file-input", "", Some("q-76")),
+            block(85, "question-label", "Data management and sharing ", None),
+            block(86, "long-text-input", "", Some("q-86")),
+            block(89, "page-heading", "Extraction", None),
+            block(97, "question-label", "", None),
+            block(98, "file-input", "", Some("q-98")),
+            block(99, "question-label", "Extractor blinding", None),
+            block(100, "long-text-input", "", Some("q-100")),
+            block(107, "question-label", "Data management and sharing", None),
+            block(108, "long-text-input", "", Some("q-108")),
+            block(199, "question-label", "Preferred colour", None),
+            block(200, "long-text-input", "", Some("q-200")),
+            block(201, "multi-select-input", "", Some("q-201")),
+        ];
+        let contributors = vec![
+            json!({"attributes": {}, "embeds": {"users": {"data": {"attributes": {"full_name": "Ada Beispiel"}}}}}),
+            json!({"attributes": {"unregistered_contributor": "Ben Muster"}}),
+        ];
+        (registration, schema, blocks, contributors)
+    }
+
+    #[test]
+    fn an_osf_registration_is_spread_over_the_fields_by_name_and_page() {
+        let (registration, schema, blocks, contributors) = osf_answer();
+        let found = osf_import(&registration, &schema, &blocks, &contributors).unwrap();
+        assert_eq!((found.identifier.as_str(), found.url.as_str()), ("osf.io/abc12", "https://osf.io/abc12/"));
+        assert_eq!(
+            (found.registered_on.as_str(), found.schema.as_str()),
+            ("2026-03-04", "Generalized Systematic Review Registration")
+        );
+        let pairs: Vec<(&str, &str)> = found.answers.iter().map(|a| (a.key.as_str(), a.text.as_str())).collect();
+        assert_eq!(
+            pairs,
+            [
+                ("title", "Schlaf und Kopfschmerz: Protokoll eines Scoping Reviews"),
+                ("contributors", "Ada Beispiel; Ben Muster"),
+                ("subjects", "Neurology"),
+                ("review_type", "Scoping Review nach JBI"),
+                ("screening_data", "Zotero und Tabellen"),
+                ("extractor_blinding", "Keine Verblindung"),
+                ("extraction_data", "Tabellen im Projekt"),
+            ]
+        );
+        let rest: Vec<(&str, &str)> = found.unmatched.iter().map(|u| (u.label.as_str(), u.text.as_str())).collect();
+        assert_eq!(
+            rest,
+            [("Description", "Kurzfassung"), ("Preferred colour", "Nur bei OSF gefragt"), ("Preferred colour", "a; b")]
+        );
+        assert_eq!(found.files, ["Protokoll.pdf"]);
+    }
+
+    #[test]
+    fn unreadable_withdrawn_and_empty_registrations_are_refused() {
+        let (registration, schema, blocks, contributors) = osf_answer();
+        assert!(osf_import(&json!({"errors": [{"detail": "Not found."}]}), &schema, &blocks, &contributors).is_err());
+        let mut withdrawn = registration.clone();
+        withdrawn["data"]["attributes"]["withdrawn"] = json!(true);
+        assert!(osf_import(&withdrawn, &schema, &blocks, &contributors).is_err());
+        let mut empty = registration;
+        empty["data"]["attributes"]["registration_responses"] = json!({});
+        empty["data"]["attributes"]["description"] = json!("");
+        assert!(osf_import(&empty, &schema, &blocks, &[]).is_err());
     }
 
     #[test]

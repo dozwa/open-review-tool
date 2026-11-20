@@ -4,10 +4,10 @@
 import React, { useEffect, useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 
-import { api, errorText, RegistrationDraft, RegistrationItem, ReviewDetail, safeFileName } from "./api";
+import { api, errorText, OsfImport, RegistrationDraft, RegistrationItem, ReviewDetail, safeFileName } from "./api";
 import { inFolder, saveProjectSettings, useProjectSettings } from "./settings";
 import { formatDate, outputLanguage, t, tIn, tn, tx } from "./i18n";
-import { Banner, Group, Icon, LanguageSelect, Pill, Row } from "./ui";
+import { Banner, Group, Icon, LanguageSelect, Modal, Pill, Row } from "./ui";
 
 type Run = (action: () => Promise<string | void>, done?: string) => Promise<void>;
 
@@ -108,9 +108,162 @@ function RegisterForm({ draft, onSave }: { draft: RegistrationDraft; onSave: (da
   );
 }
 
+/** Bestehende Registrierung bei OSF einlesen: Adresse eintragen, Zuordnung prüfen, Texte übernehmen. */
+function OsfImportDialog({ review, draft, lang, onClose, onImported }: {
+  review: ReviewDetail;
+  draft: RegistrationDraft;
+  lang: string;
+  onClose: () => void;
+  onImported: (draft: RegistrationDraft, register: OsfImport | null) => void;
+}) {
+  const [source, setSource] = useState("");
+  const [found, setFound] = useState<OsfImport | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [replace, setReplace] = useState(false);
+  const [register, setRegister] = useState(false);
+  // Texte ohne eigenes Feld: von Hand gewähltes Feld je Position, leer heißt nicht übernehmen.
+  const [chosen, setChosen] = useState<Record<number, string>>({});
+
+  // Was übernommen würde: zugeordnete Texte, dazu die von Hand zugeordneten, im selben Feld untereinander.
+  const texts: Record<string, string> = {};
+  for (const a of found?.answers ?? []) texts[a.key] = a.text;
+  (found?.unmatched ?? []).forEach((u, i) => {
+    const key = chosen[i];
+    if (key) texts[key] = texts[key] ? `${texts[key]}\n\n${u.text}` : u.text;
+  });
+  const rows = draft.items.filter((item) => texts[item.key] !== undefined).map((item) => {
+    const text = texts[item.key];
+    const state = item.answer === null ? "new" : item.answer.trim() === text.trim() ? "same" : replace ? "replaces" : "kept";
+    return { item, text, state };
+  });
+  const own = rows.filter((r) => r.state === "replaces" || r.state === "kept").length;
+  const taken = rows.filter((r) => r.state === "new" || r.state === "replaces").length;
+  const STATE: Record<string, [string, string | undefined]> = {
+    new: [t("neu"), "green"], same: [t("unverändert"), undefined], replaces: [t("ersetzt eigenen Text"), "yellow"], kept: [t("eigener Text bleibt"), undefined],
+  };
+
+  async function fetch() {
+    if (!source.trim() || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      setFound(await api.fetchOsfRegistration(source));
+      setChosen({});
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function apply() {
+    if (!found || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      onImported(await api.importRegistration(review.id, texts, replace, lang), register ? found : null);
+    } catch (e) {
+      setError(errorText(e));
+      setBusy(false);
+    }
+  }
+
+  const footer = found ? (
+    <>
+      <button onClick={() => setFound(null)}>{t("Zurück")}</button>
+      <button className="primary" disabled={busy || (taken === 0 && !register)} onClick={apply}>
+        {taken === 0 && register ? t("Registrierung eintragen") : tn("{n} Feld übernehmen", "{n} Felder übernehmen", taken)}
+      </button>
+    </>
+  ) : (
+    <>
+      <button onClick={onClose}>{t("Abbrechen")}</button>
+      <button className="primary" disabled={busy || !source.trim()} onClick={fetch}>{busy ? t("Wird gelesen …") : t("Lesen")}</button>
+    </>
+  );
+
+  return (
+    <Modal title={t("Registrierung aus OSF einlesen")} onClose={onClose} onEnter={found ? undefined : fetch} footer={footer}>
+      {error && <Banner kind="error">{error}</Banner>}
+      {!found ? (
+        <div className="osf-import">
+          <label>
+            <span>{t("Adresse, Kennung oder DOI der Registrierung")}</span>
+            <input value={source} autoFocus placeholder="osf.io/abc12" onChange={(e) => setSource(e.target.value)} />
+          </label>
+          <p className="muted">
+            {t("Die App liest die Registrierung über die öffentliche Schnittstelle von OSF und sendet dabei nur die Kennung. Private oder gesperrte Registrierungen lassen sich so nicht lesen. Im Review ändert sich erst etwas, wenn du die Texte im nächsten Schritt übernimmst.")}
+          </p>
+        </div>
+      ) : (
+        <div className="osf-import">
+          <p>
+            <strong>{found.title}</strong><br />
+            <span className="muted">
+              {t("{schema} · registriert am {date}", { schema: found.schema, date: formatDate(found.registered_on) })} ·{" "}
+              <button className="link" onClick={() => api.openUrl(found.url)} title={found.url}>{found.identifier}</button>
+            </span>
+          </p>
+          {found.schema !== draft.name && (
+            <Banner kind="notice">
+              {t("Diese Registrierung nutzt ein anderes Formular. Zugeordnet sind nur Felder mit demselben Namen; die übrigen Texte kannst du unten selbst einem Feld zuordnen.")}
+            </Banner>
+          )}
+          {rows.map(({ item, text, state }) => (
+            <details key={item.key} className="osf-row">
+              <summary>
+                <span className="reg-number">{item.number}</span> {item.label} <Pill tone={STATE[state][1]}>{STATE[state][0]}</Pill>
+              </summary>
+              <pre className="reg-text">{text}</pre>
+            </details>
+          ))}
+          {found.unmatched.length > 0 && <h3>{t("Ohne passendes Feld")}</h3>}
+          {found.unmatched.map((u, i) => (
+            <details key={i} className="osf-row">
+              <summary>
+                {u.label || t("Ohne Namen")}
+                <select
+                  value={chosen[i] ?? ""}
+                  aria-label={t("Feld für diesen Text")}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => setChosen({ ...chosen, [i]: e.target.value })}
+                >
+                  <option value="">{t("nicht übernehmen")}</option>
+                  {draft.items.map((item) => <option key={item.key} value={item.key}>{item.number} {item.label}</option>)}
+                </select>
+              </summary>
+              <pre className="reg-text">{u.text}</pre>
+            </details>
+          ))}
+          {found.files.length > 0 && (
+            <p className="muted">{t("An der Registrierung hängen Dateien, die die App nicht lädt: {files}", { files: found.files.join(", ") })}</p>
+          )}
+          {own > 0 && (
+            <label className="osf-check">
+              <input type="checkbox" checked={replace} onChange={(e) => setReplace(e.target.checked)} />
+              <span>{tn("Eigenen Text in {n} Feld durch den aus OSF ersetzen", "Eigene Texte in {n} Feldern durch die aus OSF ersetzen", own)}</span>
+            </label>
+          )}
+          {!draft.registration && found.registered_on && (
+            <label className="osf-check">
+              <input type="checkbox" checked={register} onChange={(e) => setRegister(e.target.checked)} />
+              <span>
+                {t("Registrierung eintragen: {date}, OSF, {identifier}", { date: formatDate(found.registered_on), identifier: found.identifier })}
+                <small>{t("Sie wird zum Bezugspunkt: Spätere neue Versionen von Kriterien, Suchen oder Ablauf erscheinen im Bericht als Abweichung vom Protokoll.")}</small>
+              </span>
+            </label>
+          )}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 export function RegistrationTab({ review, run }: { review: ReviewDetail; run: Run }) {
   const [draft, setDraft] = useState<RegistrationDraft | null>(null);
   const [step, setStep] = useState(0);
+  const [importing, setImporting] = useState(false);
   // Feldnamen, Hinweise und Vorschläge erscheinen in der Sprache, in der registriert wird.
   const [error, setError] = useState("");
   const lang = outputLanguage(useProjectSettings(review.id)?.effective.output_language);
@@ -150,11 +303,31 @@ export function RegistrationTab({ review, run }: { review: ReviewDetail; run: Ru
   return (
     <>
       {error && <Banner kind="error" onClose={() => setError("")}>{error}</Banner>}
+      {importing && (
+        <OsfImportDialog
+          review={review}
+          draft={draft}
+          lang={lang}
+          onClose={() => setImporting(false)}
+          onImported={(next, register) => {
+            setDraft(next);
+            setImporting(false);
+            void run(async () => {
+              if (register) await api.registerProtocol(review.id, register.registered_on, "OSF", register.identifier, "");
+            }, register ? t("Texte aus OSF übernommen und Registrierung festgehalten.") : t("Texte aus OSF übernommen."));
+          }}
+        />
+      )}
       <Group
         title={t("Registrierung vorbereiten: {name}", { name: draft.name })}
         action={
           <span className="inline-actions">
             <LanguageSelect value={lang} label={t("Sprache der Ausgabe")} onChange={setLang} />
+            {draft.can_edit && (
+              <button className="small" onClick={() => setImporting(true)} title={t("Texte einer bestehenden Registrierung bei OSF in die Felder holen")}>
+                <Icon name="upload" size={13} /> {t("Aus OSF einlesen")}
+              </button>
+            )}
             <button className="small" onClick={exportFile}><Icon name="download" size={13} /> {t("Als Markdown speichern")}</button>
           </span>
         }

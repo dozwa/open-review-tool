@@ -57,6 +57,8 @@ function draft(registration: unknown, canEdit: boolean) {
   };
 }
 
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /** Antwortet auf die Befehle zu Leitlinie und Registrierung; `undefined` heißt: nicht zuständig. */
 export function mockGuidance(cmd: string, a: Record<string, unknown>, registration: () => unknown): unknown {
   switch (cmd) {
@@ -66,6 +68,39 @@ export function mockGuidance(cmd: string, a: Record<string, unknown>, registrati
       const text = String(a.text).trim();
       if (text) answers[String(a.key)] = text;
       else delete answers[String(a.key)];
+      updatedAt = new Date().toISOString();
+      return draft(registration(), true);
+    }
+    // Beispiel einer Registrierung; „anders“ in der Adresse zeigt eine mit fremdem Formular, „fehler“ einen Fehler.
+    case "registration_osf_fetch": {
+      const source = String(a.source);
+      if (source.includes("fehler")) return wait(600).then(() => Promise.reject("OSF kennt unter dieser Adresse keine Registrierung."));
+      const other = source.includes("anders");
+      return wait(600).then(() => ({
+        identifier: "osf.io/k7m2x", url: "https://osf.io/k7m2x/", title: "Digitale Interventionen bei Migräne: Protokoll eines Scoping Reviews",
+        schema: other ? "Open-Ended Registration" : osf.name, registered_on: "2026-09-14",
+        answers: [
+          { key: "title", text: "Digitale Interventionen bei Migräne: Protokoll eines Scoping Reviews" },
+          { key: "contributors", text: "Dorothea Muster; Anna Berger; Ben Krüger" },
+          ...(other ? [] : [
+            { key: "review_type", text: "Scoping Review nach der Methodik des JBI, berichtet nach PRISMA-ScR." },
+            { key: "background", text: "Digitale Angebote für Menschen mit Migräne nehmen zu. Welche Arten untersucht sind, ist bisher nicht zusammengetragen." },
+            { key: "primary_questions", text: answers.primary_questions },
+            { key: "funding", text: "Keine Förderung durch Dritte." },
+            { key: "conflicts", text: "Keine." },
+            { key: "databases", text: "MEDLINE, Embase, CINAHL" },
+          ]),
+        ],
+        unmatched: other
+          ? [{ label: "Summary", text: "Das Protokoll liegt als Datei bei. Geplant ist ein Scoping Review zu digitalen Interventionen bei Migräne." }, { label: "Description", text: "Kurzfassung des Vorhabens." }]
+          : [{ label: "Description", text: "Kurzfassung des Vorhabens." }],
+        files: ["Protokoll_v3.pdf"],
+      }));
+    }
+    case "registration_import": {
+      for (const [key, text] of Object.entries(a.answers as Record<string, string>)) {
+        if (text.trim() && (a.replace || answers[key] === undefined)) answers[key] = text.trim();
+      }
       updatedAt = new Date().toISOString();
       return draft(registration(), true);
     }

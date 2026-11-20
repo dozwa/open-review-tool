@@ -892,5 +892,15 @@
   "Der Rückmeldung fehlt ein Titel.": "The feedback has no title.",
   "Die Rückmeldung ist zu lang. Kürze den Text oder schick Einzelheiten nach.": "The feedback is too long. Shorten the text or send details later.",
   "Unbekannte Art der Rückmeldung.": "Unknown kind of feedback.",
-  "Unbekannter Weg für die Rückmeldung.": "Unknown channel for the feedback."
+  "Unbekannter Weg für die Rückmeldung.": "Unknown channel for the feedback.",
+  "Unter dieser Adresse liegt keine lesbare Registrierung.": "There is no readable registration at this address.",
+  "Diese Registrierung ist zurückgezogen; OSF gibt ihre Texte nicht mehr heraus.": "This registration has been withdrawn; OSF no longer provides its texts.",
+  "Diese Registrierung enthält keine Texte, die sich übernehmen lassen.": "This registration contains no texts that can be imported.",
+  "Das ist keine Adresse einer Registrierung bei OSF. Erwartet wird etwa osf.io/abc12.": "This is not the address of an OSF registration. Expected is something like osf.io/abc12.",
+  "Antwort von OSF nicht lesbar: {}": "Could not read the answer from OSF: {}",
+  "Diese Registrierung ist nicht öffentlich. Die App liest nur, was bei OSF ohne Anmeldung zu sehen ist.": "This registration is not public. The app only reads what OSF shows without signing in.",
+  "OSF kennt unter dieser Adresse keine Registrierung.": "OSF knows no registration at this address.",
+  "OSF meldet einen Fehler ({}).": "OSF reports an error ({}).",
+  "OSF antwortet nicht: {}": "OSF does not answer: {}",
+  "Das ist ein Projekt mit mehreren Registrierungen. Trag eine davon ein: {}": "This is a project with several registrations. Enter one of them: {}"
 }
