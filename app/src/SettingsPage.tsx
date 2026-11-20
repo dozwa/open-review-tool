@@ -4,7 +4,7 @@
 import React, { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 
-import { api, errorText, Person, ReviewDetail } from "./api";
+import { api, canManage, errorText, Person, ReviewDetail } from "./api";
 import { LANGUAGES, setLanguage, t } from "./i18n";
 import {
   ACCENTS, Ai, DEFAULTS, forgetProjectSettings, PROJECT_COLORS, saveProjectSettings, saveSettings, ScreeningLayout, Settings, Shortcuts, storageInfo,
@@ -462,7 +462,7 @@ export function SettingsPage({ me, onIdentity }: { me: Person; onIdentity: () =>
 /** Auswahl der Ausgabesprache eines Reviews: Wert des Programms, Sprache der Oberfläche oder eine feste Sprache. */
 const PROGRAM = "program";
 
-export function ProjectSettingsTab({ review }: { review: ReviewDetail }) {
+export function ProjectSettingsTab({ review, run }: { review: ReviewDetail; run: (action: () => Promise<string | void>, done?: string) => Promise<void> }) {
   const view = useProjectSettings(review.id);
   const program = useSettings();
   const refreshSidebar = useRefreshSidebar();
@@ -491,6 +491,21 @@ export function ProjectSettingsTab({ review }: { review: ReviewDetail }) {
   return (
     <div className="tab-body">
       {error && <Banner kind="error" onClose={() => setError("")}>{error}</Banner>}
+      <Group title={t("Für das ganze Team")} footer={t("Diese Einstellung steht im Log und gilt für alle, sobald sie das nächste Paket eingelesen haben. Schon vermerkte Vorschläge bleiben im Log; der Bericht nennt, in welchem Umfang die KI genutzt wurde.")}>
+        {canManage(review.role) ? (
+          <Switch
+            label={t("KI-Vorschläge erlauben")}
+            hint={t("Ausgeschaltet kann im Screening dieses Reviews niemand einen KI-Vorschlag einholen.")}
+            checked={review.ai_allowed}
+            onChange={(allowed) => run(() => api.aiPolicySet(review.id, allowed))}
+          />
+        ) : (
+          <Setting label={t("KI-Vorschläge")} hint={t("Das legt die Leitung des Reviews fest.")}>
+            <span className="muted">{review.ai_allowed ? t("erlaubt") : t("abgeschaltet")}</span>
+          </Setting>
+        )}
+      </Group>
+
       <p className="hint settings-hint"><Icon name="lock" size={14} /> {t("Diese Einstellungen gelten nur für dich auf diesem Rechner. Sie stehen nicht im Log und gehen in kein Paket.")}</p>
 
       <Group title={t("Kennzeichnung")}>
@@ -536,7 +551,7 @@ export function ProjectSettingsTab({ review }: { review: ReviewDetail }) {
         <FolderSetting label={t("Pakete")} hint={t("Pakete und Rückmeldungen dieses Reviews.")} value={project.package_dir} inherited={program.package_dir} onChange={(package_dir) => change({ package_dir })} />
       </Group>
 
-      <Group title={t("KI-Unterstützung")} footer={t("Adresse, Modell und Schlüssel stehen in den Einstellungen des Programms.")}>
+      <Group title={t("KI-Unterstützung")} footer={review.ai_allowed ? t("Adresse, Modell und Schlüssel stehen in den Einstellungen des Programms.") : t("Die Leitung hat KI-Vorschläge für dieses Review abgeschaltet. Diese Angaben wirken erst wieder, wenn sie erlaubt sind.")}>
         <Setting label={t("Publikationsangaben mitsenden")} hint={t("Autoren, Jahr, Zeitschrift und DOI.")}>
           <select
             value={project.ai_publication === null ? PROGRAM : project.ai_publication ? "yes" : "no"}

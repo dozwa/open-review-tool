@@ -20,7 +20,7 @@ use crate::criteria::Criteria;
 use crate::error::{invalid, Result};
 use crate::forms::{Field, StageSummary};
 use crate::i18n;
-use crate::projection::{MaybeMode, StageState};
+use crate::projection::{MaybeMode, ReviewState, StageState};
 use crate::protocol::{self, Checklist, Evidence, Protocol};
 use crate::service::{csv_field, require, stage_criteria, Review, SourceCount, BOOTSTRAP_N, BOOTSTRAP_SEED, ROLES};
 use crate::sources::{self, TypeCount, Unit as SourceUnit};
@@ -254,6 +254,8 @@ struct ExcludedRow {
 }
 
 struct Data {
+    /// Für die Frage, wann KI-Vorschläge erlaubt waren.
+    state: ReviewState,
     workflow: Workflow,
     stages: Vec<StageState>,
     flow: Flow,
@@ -544,7 +546,7 @@ impl Review {
             source_term: i18n::text(workflow.template.term("source")),
             sources_term: i18n::text(workflow.template.term("sources")),
         };
-        Ok(Data { workflow, stages, flow, included: last_included, units, excluded: excluded_rows })
+        Ok(Data { state, workflow, stages, flow, included: last_included, units, excluded: excluded_rows })
     }
 
     /// Eingeschlossene der letzten Ebene. Entscheidungen verblindeter Stufen sind nicht dabei.
@@ -877,6 +879,10 @@ impl Review {
                 false => tr!(" Das Protokoll wurde am {} registriert: {} ({}).", on, r.registry, r.identifier),
             });
         }
+        if let Some(switch) = data.state.ai_switches.last().filter(|s| !s.allowed) {
+            let on = local_date(&switch.at[..switch.at.len().min(10)]);
+            out.push_str(&tr!(" KI-Vorschläge hat die Leitung für dieses Review am {} abgeschaltet.", on));
+        }
         if !flow.complete {
             out.push_str(&tr!(" Stand: Die Auswahl ist noch nicht abgeschlossen; die Zahlen sind vorläufig."));
         }
@@ -1127,6 +1133,8 @@ impl Review {
             out.push('\n');
         }
 
+        out.push_str(&ai_text(data, label, stages, limitations));
+
         if let Some(level) = level {
             out.push('\n');
             if let Some(r) = &level.retrieval {
@@ -1162,6 +1170,40 @@ impl Review {
         }
         out
     }
+}
+
+/// Was der Methodentext über KI-Vorschläge einer Station sagt. Verblindete Stufen bleiben außen vor;
+/// ohne Vorschlag steht nichts da.
+fn ai_text(data: &Data, label: &str, stages: &[&StageState], limitations: &mut Vec<String>) -> String {
+    let shown = || stages.iter().filter(|s| !s.blind_active()).flat_map(|s| &s.suggestions);
+    if shown().next().is_none() {
+        return String::new();
+    }
+    let records: BTreeSet<&str> = shown().map(|((record, _), _)| record.as_str()).collect();
+    let people: BTreeSet<Uuid> = shown().map(|((_, actor), _)| *actor).collect();
+    let models: BTreeSet<&str> = shown().map(|(_, s)| s.model.as_str()).collect();
+    let outcome = |wanted: Option<&str>| shown().filter(|(_, s)| s.outcome.as_deref() == wanted).count();
+    let late = shown().filter(|(_, s)| !data.state.ai_allowed_at(&s.at)).count();
+    limitations.push(tr!(
+        "- In „{}“ lagen zu einem Teil der Stimmen Vorschläge einer KI vor. Sie können die Entscheidungen beeinflusst haben.\n",
+        label
+    ));
+    if late > 0 {
+        limitations.push(tr!(
+            "- In „{}“ entstanden KI-Vorschläge, nachdem die Leitung sie abgeschaltet hatte: {}. Das kommt vor, solange die Abschaltung auf einem Rechner noch nicht angekommen ist.\n",
+            label,
+            late
+        ));
+    }
+    tr!(
+        "\nKI-Unterstützung: Vorschläge einer KI zu {}, eingeholt von {} (Modell: {}). Übernommen: {}, abgelehnt: {}, ohne Vermerk: {}. Ein Vorschlag zählte nie als Stimme; die Entscheidung traf stets die Person.\n",
+        count(records.len() as i64, &data.flow.record_term, &data.flow.records_term),
+        count(people.len() as i64, &tr!("Person"), &tr!("Personen")),
+        models.into_iter().collect::<Vec<_>>().join(", "),
+        outcome(Some("accepted")),
+        outcome(Some("declined")),
+        outcome(None)
+    )
 }
 
 /// Felder und Zeilen der Tabelle der eingeschlossenen Quellen. Die Werte kommen aus der letzten

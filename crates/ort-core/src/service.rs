@@ -34,8 +34,8 @@ pub const ROLES: [&str; 4] = ["owner", "admin", "reviewer", "viewer"];
 pub const MANAGE_ROLES: [&str; 2] = ["owner", "admin"];
 pub const WRITE_ROLES: [&str; 3] = ["owner", "admin", "reviewer"];
 const DECISIONS: [&str; 3] = ["include", "exclude", "maybe"];
-const MANAGEMENT_TYPES: [&str; 4] =
-    ["ReviewCreated", "MemberRoleSet", "CriteriaVersionPublished", "StageInstanceOpened"];
+const MANAGEMENT_TYPES: [&str; 5] =
+    ["ReviewCreated", "MemberRoleSet", "CriteriaVersionPublished", "StageInstanceOpened", "AiPolicySet"];
 pub const BOOTSTRAP_SEED: u64 = 20261117;
 pub const BOOTSTRAP_N: usize = 1000;
 
@@ -115,6 +115,8 @@ pub struct ReviewDetail {
     pub stages: Vec<StageView>,
     pub imports: Vec<ImportView>,
     pub workflow: WorkflowView,
+    /// Ob die Leitung KI-Vorschläge in diesem Review erlaubt.
+    pub ai_allowed: bool,
 }
 
 /// Import mit Herkunft und Suchversion aus dem Log.
@@ -280,6 +282,8 @@ pub struct StageDetail {
     pub members: Vec<MemberView>,
     /// Begriffe der Vorlage, z. B. „Einträge“ oder „Quellen“.
     pub terms: BTreeMap<String, String>,
+    /// Ob die Leitung KI-Vorschläge in diesem Review erlaubt.
+    pub ai_allowed: bool,
 }
 
 /// Filter der Liste auf der Screening-Seite. Leere Felder filtern nicht.
@@ -1384,6 +1388,7 @@ impl Review {
             stages: self.list_stages()?,
             imports,
             workflow: self.workflow_view(&state)?,
+            ai_allowed: state.ai_allowed(),
         })
     }
 
@@ -1868,6 +1873,7 @@ impl Review {
             criteria_schema: template.criteria_schema,
             members: self.members()?,
             terms: template.terms,
+            ai_allowed: state.ai_allowed(),
         })
     }
 

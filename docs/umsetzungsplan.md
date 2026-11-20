@@ -463,8 +463,14 @@ Stand 19.11.2026: umgesetzt für das Screening. Festlegungen beim Bau:
   vorgeschlagene Entscheidung, Grund, Begründung) beim Eintreffen der Antwort und `AiSuggestionResolved`
   (übernommen oder abgelehnt). Während der Verblindung gehen sie an niemanden sonst.
 - Der Prompt selbst steht nicht im Log, nur seine Prüfsumme.
-- Offen: Vorschläge zum Volltext und zur Extraktion, Vorschläge für viele Einträge auf einmal, Nennung der
-  KI-Nutzung im Methodentext, ein vom Team geteilter Prompt, Abschalten durch die Leitung.
+- Die Leitung kann KI-Vorschläge für das Review abschalten (`AiPolicySet`, Verwaltungskette). Die App
+  verweigert sie dann. Ein Vorschlag, der auf einem anderen Rechner noch vor dem Eintreffen der Abschaltung
+  entstand, wird beim Einlesen nicht abgewiesen, weil sonst die Stimmen derselben Kette verloren gingen;
+  der Bericht nennt ihn.
+- Der Methodentext nennt je Station den Umfang der KI-Nutzung (Einträge, Personen, Modelle, Ausgang) und
+  führt sie unter den Limitationen. Verblindete Stufen bleiben außen vor.
+- Offen: Vorschläge zum Volltext und zur Extraktion, Vorschläge für viele Einträge auf einmal, ein vom Team
+  geteilter Prompt.
 
 ## Erweiterung um weitere Review-Typen
 

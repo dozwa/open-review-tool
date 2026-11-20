@@ -13,11 +13,11 @@ use uuid::Uuid;
 
 use crate::catalog::MAX_RATIONALE;
 use crate::criteria::Criteria;
-use crate::error::{conflict, invalid, not_found, Result};
+use crate::error::{conflict, forbidden, invalid, not_found, Result};
 use crate::event::sha256_hex;
-use crate::projection::SuggestionInfo;
+use crate::projection::{ReviewState, SuggestionInfo};
 use crate::registration;
-use crate::service::{require, stage_criteria, RecordItem, Review, WRITE_ROLES};
+use crate::service::{require, stage_criteria, RecordItem, Review, MANAGE_ROLES, WRITE_ROLES};
 use crate::tr;
 
 /// Platzhalter einer Vorlage, in der Reihenfolge der Standardvorlage.
@@ -221,11 +221,31 @@ pub fn parse(text: &str, criteria: &Criteria) -> std::result::Result<Answer, Str
     Ok(Answer { suggested, reason, rationale })
 }
 
+/// KI-Vorschläge gibt es nur, solange die Leitung sie im Review nicht abgeschaltet hat.
+fn require_ai(state: &ReviewState) -> Result<()> {
+    if !state.ai_allowed() {
+        return Err(forbidden(tr!("Die Leitung hat KI-Vorschläge für dieses Review abgeschaltet.")));
+    }
+    Ok(())
+}
+
 impl Review {
+    /// Erlaubt KI-Vorschläge im Review oder schaltet sie ab (nur Leitung). Gilt für alle, sobald das
+    /// Ereignis bei ihnen angekommen ist; schon vermerkte Vorschläge bleiben im Log.
+    pub fn set_ai_policy(&self, allowed: bool) -> Result<()> {
+        let state = self.state()?;
+        require(&state, &self.me().actor_id, &MANAGE_ROLES)?;
+        if state.ai_allowed() != allowed {
+            self.append("AiPolicySet", None, json!({ "allowed": allowed }))?;
+        }
+        Ok(())
+    }
+
     /// Baut die Anfrage für einen Eintrag einer Screening-Stufe. Schreibt nichts.
     pub fn ai_request(&self, stage_id: &Uuid, record_id: &str, options: &Options) -> Result<Request> {
         let state = self.state()?;
         require(&state, &self.me().actor_id, &WRITE_ROLES)?;
+        require_ai(&state)?;
         let stage = self.stage_state(stage_id)?;
         if stage.config.form_id.is_some() {
             return Err(invalid(tr!("Diese Stufe arbeitet mit einem Formular, nicht mit Stimmen.")));
@@ -281,6 +301,7 @@ impl Review {
     ) -> Result<SuggestionInfo> {
         let state = self.state()?;
         require(&state, &self.me().actor_id, &WRITE_ROLES)?;
+        require_ai(&state)?;
         let stage = self.stage_state(stage_id)?;
         if stage.config.form_id.is_some() {
             return Err(invalid(tr!("Diese Stufe arbeitet mit einem Formular, nicht mit Stimmen.")));

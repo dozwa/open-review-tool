@@ -66,7 +66,8 @@ function Screening() {
   const [layout, setLayout] = useScreeningLayout(reviewId);
   const settings = useSettings();
   const keys = settings.shortcuts;
-  const aiOn = settings.ai.enabled;
+  // Eingeschaltet auf diesem Rechner und von der Leitung im Review nicht abgeschaltet.
+  const aiOn = settings.ai.enabled && (detail?.ai_allowed ?? false);
   // Der letzte eigene KI-Vorschlag zum offenen Eintrag und der Dialog dazu.
   const [suggestion, setSuggestion] = useState<Suggestion | null>(null);
   const [ai, setAi] = useState<AiState | null>(null);

@@ -388,6 +388,7 @@ const stageOf = (id: unknown) => [...stages, fulltextStage].find((x) => x.id ===
 // KI-Vorschläge der Vorschau: je Eintrag der letzte. Das Modell „fehler“ zeigt, wie eine Absage aussieht.
 const suggestions = new Map<string, Record<string, unknown>>();
 let aiKey = false;
+let aiAllowed = true;
 const AI_ANSWERS: [string, string | null, string][] = [
   ["include", null, "Die Studie untersucht Erwachsene mit Migräne und eine digitale Intervention. Sie berichtet Kopfschmerztage als Endpunkt und ist eine Primärstudie. Damit sind alle Einschlusskriterien erfüllt."],
   ["exclude", "E1", "Untersucht werden Jugendliche. Die Kriterien verlangen Erwachsene ab 18 Jahren, deshalb passt die Population nicht."],
@@ -425,7 +426,7 @@ export function installMock() {
       ];
       case "review_detail": return {
         id: a.reviewId, title: a.reviewId === "r2" ? "KI-gestützte Triage in der Notaufnahme" : "Digitale Interventionen bei Migräne",
-        role: "owner", me: me.actor_id, members, n_records: 40, n_duplicates: 2, criteria,
+        role: "owner", me: me.actor_id, members, n_records: 40, n_duplicates: 2, criteria, ai_allowed: aiAllowed,
         stages: a.reviewId === "r2" ? [] : [...stages, formStage],
         workflow: a.reviewId === "r2" ? freeWorkflow : jbiWorkflow,
         imports: [
@@ -466,7 +467,7 @@ export function installMock() {
         return {
           stage: s, role: "owner", progress: { done: doneCount(), total: records.length },
           criteria: old ? { ...criteria, version: 1, previous_version: null } : criteria, newer_criteria: old,
-          criteria_schema: criteriaSchema, members, terms,
+          criteria_schema: criteriaSchema, members, terms, ai_allowed: aiAllowed,
         };
       }
       case "stage_next": return { record: nextOpen(), progress: { done: doneCount(), total: records.length } };
@@ -529,6 +530,7 @@ export function installMock() {
         if (found) suggestions.set(String(a.recordId), { ...found, outcome: a.outcome });
         return null;
       }
+      case "ai_policy_set": aiAllowed = Boolean(a.allowed); return null;
       case "ai_test": return wait("OK", 700);
       case "ai_default_prompt": return "Du unterstützt das Screening für ein Review. Beurteile, ob der folgende Eintrag nach den Kriterien eingeschlossen oder ausgeschlossen werden soll.\n\n## Review\n{{review}}\n\n## Fragestellung\n{{questions}}\n\n## Kriterien\n{{criteria}}\n\n## Eintrag\n{{record}}\n\n## Antwort\n{{format}}";
       case "ai_key_status": return aiKey;

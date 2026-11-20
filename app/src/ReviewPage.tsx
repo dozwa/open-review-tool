@@ -134,7 +134,7 @@ export function ReviewPage() {
         {tab === "forms" && <FormsTab review={review} run={run} />}
         {tab === "report" && <ReportTab review={review} run={run} />}
         {tab === "proof" && <ProofTab review={review} />}
-        {tab === "settings" && <ProjectSettingsTab review={review} />}
+        {tab === "settings" && <ProjectSettingsTab review={review} run={run} />}
       </div>
     </>
   );

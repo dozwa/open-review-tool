@@ -9,7 +9,6 @@ geschätzt: **klein** (bis etwa ein Tag), **mittel** (einige Tage), **groß** (e
 
 | Aufwand | Wunsch | Anmerkung |
 | --- | --- | --- |
-| mittel | KI-Werkzeuge durch die Studienleitung abschalten | Braucht ein Ereignis im Log, damit es für alle im Team gilt und beim Einlesen geprüft wird. |
 | groß | KI-Vorschläge zur Extraktion aus Volltexten | Setzt voraus, dass der Text aus dem PDF gelesen wird; ein Vorschlag je Feld des Formulars. |
 | groß | Decision Model in der App für Screening-Entscheidungen | Noch zu klären: Was soll das Modell leisten (Reihenfolge der Einträge, Vorschlag, Stoppregel)? |
 | offen | Decision Model über eine API, z. B. JEV | Noch zu klären: welche API und welches Format. Hängt am Punkt darüber. |

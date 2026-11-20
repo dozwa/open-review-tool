@@ -353,6 +353,8 @@ export interface ReviewDetail {
   stages: Stage[];
   imports: ImportBatch[];
   workflow: Workflow;
+  /** Ob die Leitung KI-Vorschläge in diesem Review erlaubt. */
+  ai_allowed: boolean;
 }
 
 export interface RecordItem {
@@ -383,6 +385,7 @@ export interface StageDetail {
   criteria_schema: SchemaElement[];
   members: Member[];
   terms: Record<string, string>;
+  ai_allowed: boolean;
 }
 
 export interface Vote {
@@ -1041,6 +1044,7 @@ export const api = {
   aiSuggest: (reviewId: string, stageId: string, recordId: string) => call<AiSuggestion>("ai_suggest", { reviewId, stageId, recordId }),
   aiResolve: (reviewId: string, stageId: string, recordId: string, suggestion: string, outcome: "accepted" | "declined") =>
     call<void>("ai_resolve", { reviewId, stageId, recordId, suggestion, outcome }),
+  aiPolicySet: (reviewId: string, allowed: boolean) => call<void>("ai_policy_set", { reviewId, allowed }),
   aiTest: () => call<string>("ai_test"),
   aiDefaultPrompt: () => call<string>("ai_default_prompt"),
   aiKeyStatus: () => call<boolean>("ai_key_status"),

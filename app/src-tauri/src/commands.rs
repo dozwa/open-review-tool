@@ -858,6 +858,12 @@ pub async fn ai_resolve(
         .map_err(err)
 }
 
+/// Erlaubt KI-Vorschläge im Review oder schaltet sie für das ganze Team ab (nur Leitung).
+#[tauri::command]
+pub async fn ai_policy_set(state: State<'_, AppState>, review_id: String, allowed: bool) -> Res<()> {
+    open(&state, &review_id)?.set_ai_policy(allowed).map_err(err)
+}
+
 /// Schickt eine kurze Probe an die KI und gibt deren Antwort zurück.
 #[tauri::command]
 pub async fn ai_test(state: State<'_, AppState>) -> Res<String> {

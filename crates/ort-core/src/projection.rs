@@ -51,6 +51,15 @@ pub struct ReviewState {
     pub criteria_versions: BTreeMap<i64, Value>,
     /// Stufen in der Reihenfolge ihrer Eröffnung.
     pub stage_ids: Vec<Uuid>,
+    /// Wann die Leitung KI-Vorschläge erlaubt oder abgeschaltet hat, in der Ordnung des Logs.
+    pub ai_switches: Vec<AiSwitch>,
+}
+
+/// Eine Entscheidung der Leitung über KI-Vorschläge.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct AiSwitch {
+    pub at: String,
+    pub allowed: bool,
 }
 
 impl ReviewState {
@@ -79,6 +88,10 @@ impl ReviewState {
                     let version = e.payload.get("version").and_then(Value::as_i64).unwrap_or(0);
                     state.criteria_versions.insert(version, catalog::upcast(e));
                 }
+                "AiPolicySet" => {
+                    let allowed = e.payload.get("allowed").and_then(Value::as_bool).unwrap_or(true);
+                    state.ai_switches.push(AiSwitch { at: e.occurred_at.clone(), allowed });
+                }
                 "StageInstanceOpened" => {
                     if let Some(id) = e.stage_instance_id {
                         if seen_stages.insert(id) {
@@ -91,6 +104,16 @@ impl ReviewState {
         }
         state.criteria = state.criteria_versions.values().next_back().cloned();
         state
+    }
+
+    /// Ob KI-Vorschläge im Review erlaubt sind. Ohne Entscheidung der Leitung sind sie es.
+    pub fn ai_allowed(&self) -> bool {
+        self.ai_switches.last().is_none_or(|s| s.allowed)
+    }
+
+    /// Ob KI-Vorschläge zu einem Zeitpunkt erlaubt waren (`occurred_at` eines Ereignisses).
+    pub fn ai_allowed_at(&self, at: &str) -> bool {
+        self.ai_switches.iter().rfind(|s| s.at.as_str() <= at).is_none_or(|s| s.allowed)
     }
 
     pub fn role_of(&self, actor: &Uuid) -> Option<&str> {

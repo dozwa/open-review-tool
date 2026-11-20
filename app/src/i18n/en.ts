@@ -966,4 +966,13 @@ export const en = {
   "Ausgeschaltet bekommt dieses Review eine eigene Vorlage.": "When off, this review gets its own template.",
   "Prompt für dieses Review": "Prompt for this review",
   "Diese Person hatte zu dem Eintrag einen KI-Vorschlag eingeholt.": "This person had obtained an AI suggestion for the record.",
+  "Für das ganze Team": "For the whole team",
+  "Diese Einstellung steht im Log und gilt für alle, sobald sie das nächste Paket eingelesen haben. Schon vermerkte Vorschläge bleiben im Log; der Bericht nennt, in welchem Umfang die KI genutzt wurde.": "This setting is in the log and applies to everyone once they have read in the next package. Suggestions already recorded stay in the log; the report states to what extent AI was used.",
+  "KI-Vorschläge erlauben": "Allow AI suggestions",
+  "Ausgeschaltet kann im Screening dieses Reviews niemand einen KI-Vorschlag einholen.": "When off, nobody can request an AI suggestion while screening this review.",
+  "KI-Vorschläge": "AI suggestions",
+  "Das legt die Leitung des Reviews fest.": "The lead of the review decides this.",
+  "erlaubt": "allowed",
+  "abgeschaltet": "switched off",
+  "Die Leitung hat KI-Vorschläge für dieses Review abgeschaltet. Diese Angaben wirken erst wieder, wenn sie erlaubt sind.": "The lead has switched off AI suggestions for this review. These settings take effect again once they are allowed.",
 } satisfies Record<string, Entry>;

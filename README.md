@@ -79,7 +79,7 @@ Tauri 2 mit der WebView von macOS, React 18.
 
 ## Wie es geprüft ist
 
-- **Kern:** 160 Tests, dazu 3 in der App (Lesen der Zotero-Antworten, Anfrage und Antwort der KI). Darunter die Referenzwerte der früheren SQL-Tests (Cohen's Kappa gegen scikit-learn,
+- **Kern:** 161 Tests, dazu 3 in der App (Lesen der Zotero-Antworten, Anfrage und Antwort der KI). Darunter die Referenzwerte der früheren SQL-Tests (Cohen's Kappa gegen scikit-learn,
   Fleiss' Kappa am Wikipedia-Beispiel, Krippendorffs Alpha am publizierten Beispiel mit 0,743, PABAK, Prozent,
   sechs `final_decision`-Szenarien, Maybe-Regel). Die Werte erzeugt `crates/ort-core/tests/fixtures/make_agreement_fixtures.py`.
 - **Austausch:** veränderte Datei, nachträglich neu gehashte Datei ohne Signatur, Außenstehende, Lücken in einer
@@ -234,8 +234,12 @@ Nur für Entwicklung und Tests.
   sich Pfad, zusätzliche Felder der Anfrage und die Stelle des Antworttexts einstellen. Ein Dialog zeigt
   Entscheidung, Grund und Begründung; übernehmen gibt die eigene Stimme ab, ablehnen lässt den Eintrag offen.
   Jeder Vorschlag steht mit Modell, Prüfsumme des Prompts und Ausgang im Log, in der Kette der Stufe: Solange
-  die Stufe verblindet ist, sieht ihn niemand sonst. Ein Vorschlag zählt nie als Stimme. Noch nicht gebaut:
-  Vorschläge zum Volltext, für viele Einträge auf einmal, und die Nennung im Methodentext.
+  die Stufe verblindet ist, sieht ihn niemand sonst. Ein Vorschlag zählt nie als Stimme. Die Leitung kann
+  KI-Vorschläge für das ganze Review abschalten (Bereich „Einstellungen“); das steht im Log und gilt bei
+  allen, sobald sie das nächste Paket eingelesen haben. Der Methodentext nennt je Station, zu wie vielen
+  Einträgen Vorschläge eingeholt wurden, von wie vielen Personen, mit welchen Modellen und mit welchem
+  Ausgang, und führt die Nutzung unter den Limitationen. Noch nicht gebaut: Vorschläge zum Volltext und
+  für viele Einträge auf einmal.
 - **Fokusmodus:** Beim Screening und bei der Eingabe im Formular blendet „Fokus“ (anfangs Taste F) Seitenleiste, Liste
   und Nebensächliches aus und schaltet das Fenster in den Vollbildmodus; Esc beendet ihn.
 - **Leitlinien:** Zu jeder Vorlage außer dem freien Ablauf liegt eine Zusammenfassung ihrer Leitlinie in der App

@@ -452,6 +452,18 @@ fn ai_suggestions_need_write_rights_and_an_open_screening_stage() {
         assert!(report.rejected[0].contains(reason), "{:?}", report.rejected);
     }
 
+    // KI-Vorschläge abschalten: Von der Leitung kommt es an, von anderen nicht.
+    t.owner.set_ai_policy(false).unwrap();
+    let report = send_package(&t.owner, &t.r1);
+    assert!(report.rejected.is_empty(), "{:?}", report.rejected);
+    assert!(!t.r1.detail().unwrap().ai_allowed);
+    let (_dir, copy) = copy_of(&t, &t.r2);
+    copy.store().append(copy.me(), "AiPolicySet", None, json!({"allowed": true})).unwrap();
+    let report = merge(&t.owner, &wire(&export_return(&copy).unwrap())).unwrap();
+    assert!(report.rejected[0].contains("Owner und Admins"), "{:?}", report.rejected);
+    assert!(!t.owner.detail().unwrap().ai_allowed);
+    t.owner.set_ai_policy(true).unwrap();
+
     // Nach dem Schließen der Stufe kommt kein Vorschlag mehr an.
     let (_dir, late) = copy_of(&t, &t.r2);
     late.store().append(late.me(), "AiSuggestionReceived", Some(stage), received).unwrap();

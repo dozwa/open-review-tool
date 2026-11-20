@@ -64,7 +64,7 @@ pub struct Spec {
     check: fn(&Value) -> Check,
 }
 
-pub static CATALOG: [Spec; 32] = [
+pub static CATALOG: [Spec; 33] = [
     Spec {
         name: "ReviewCreated",
         label: "Review angelegt",
@@ -181,6 +181,15 @@ pub static CATALOG: [Spec; 32] = [
         writer: Writer::Write,
         stage: StageRule::Open,
         check: ai_suggestion_resolved,
+    },
+    Spec {
+        name: "AiPolicySet",
+        label: "KI-Vorschläge erlaubt oder abgeschaltet",
+        version: 1,
+        chain: Chain::Main,
+        writer: Writer::Manage,
+        stage: StageRule::None,
+        check: ai_policy_set,
     },
     Spec {
         name: "ConsensusRecorded",
@@ -901,6 +910,14 @@ fn record_flagged(p: &Value) -> Check {
 /// Längster Begründungstext eines KI-Vorschlags, in Zeichen.
 pub const MAX_RATIONALE: usize = 4000;
 
+/// Die Leitung erlaubt KI-Vorschläge im Review oder schaltet sie ab.
+fn ai_policy_set(p: &Value) -> Check {
+    match p.get("allowed") {
+        Some(Value::Bool(_)) => Ok(()),
+        _ => Err(tr!("Feld „{}“ fehlt oder ist kein Ja-Nein-Wert.", "allowed")),
+    }
+}
+
 // Die Entscheidung heißt hier `suggested` und nicht `decision`: Ein Vorschlag ist keine Stimme, und die
 // Regeln für Ausschlussgründe gelten für ihn nicht.
 fn ai_suggestion_received(p: &Value) -> Check {
@@ -1053,6 +1070,9 @@ mod tests {
         assert!(resolved("declined").is_ok());
         assert!(resolved("ignoriert").unwrap_err().contains("unzulässigen Wert"));
         assert!(is_blindable("AiSuggestionReceived") && is_blindable("AiSuggestionResolved"));
+        assert_eq!(validate("AiPolicySet", 1, None, &json!({"allowed": false})), Ok(()));
+        assert!(validate("AiPolicySet", 1, None, &json!({"allowed": "nein"})).is_err());
+        assert!(!is_blindable("AiPolicySet"));
     }
 
     #[test]

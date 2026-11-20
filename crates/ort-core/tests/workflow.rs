@@ -2113,3 +2113,66 @@ fn ai_suggestions_are_noted_stay_blind_and_never_count_as_votes() {
     t.owner.close_stage(&stage).unwrap();
     assert!(matches!(t.owner.ai_request(&stage, record, &options), Err(Error::Conflict(_))));
 }
+
+#[test]
+fn the_lead_switches_ai_off_and_the_methods_text_names_its_use() {
+    let t = Team::new();
+    t.owner.publish_criteria(&criteria("")).unwrap();
+    let stage = t.open_stage(|_| {}).id;
+    for member in [&t.r1, &t.r2] {
+        send_package(&t.owner, member);
+    }
+    let records = order_of(&t.r1, &stage);
+    let record = &records[0];
+    let options = ort_core::ai::Options::default();
+    let methods = |review: &Review| review.report_file("methods").unwrap().content;
+    let switches = |review: &Review| review.events().unwrap().iter().filter(|e| e.event_type == "AiPolicySet").count();
+
+    // Ohne Entscheidung der Leitung sind Vorschläge erlaubt. Eine Person holt einen ein und übernimmt ihn.
+    assert!(t.owner.detail().unwrap().ai_allowed);
+    let answer = r#"{"decision": "exclude", "reason": "E1", "rationale": "Es geht um Kinder."}"#;
+    let suggestion = t.r1.record_ai_suggestion(&stage, record, "llama3", "ab", answer).unwrap();
+    t.r1.resolve_ai_suggestion(&stage, record, &suggestion.id, "accepted").unwrap();
+    t.r1.cast_vote(&stage, record, "exclude", None, &["E1".to_string()], "").unwrap();
+    send_return(&t.r1, &t.owner);
+    assert!(!methods(&t.owner).contains("KI-Unterstützung"), "verblindet steht nichts im Bericht");
+
+    // Abschalten darf nur die Leitung; dasselbe noch einmal schreibt nichts.
+    assert!(matches!(t.r1.set_ai_policy(false), Err(Error::Forbidden(_))));
+    t.owner.set_ai_policy(false).unwrap();
+    t.owner.set_ai_policy(false).unwrap();
+    assert_eq!(switches(&t.owner), 1);
+    assert!(!t.owner.detail().unwrap().ai_allowed);
+    assert!(matches!(t.owner.ai_request(&stage, record, &options), Err(Error::Forbidden(_))));
+    assert!(matches!(t.owner.record_ai_suggestion(&stage, record, "llama3", "ab", answer), Err(Error::Forbidden(_))));
+
+    // Bei der zweiten Person ist die Abschaltung noch nicht angekommen. Ihr Vorschlag wird beim Einlesen
+    // nicht abgewiesen, damit ihre Stimmen nicht verloren gehen; der Bericht nennt ihn.
+    let late = t.r2.record_ai_suggestion(&stage, record, "qwen", "cd", r#"{"decision": "include"}"#).unwrap();
+    t.r2.resolve_ai_suggestion(&stage, record, &late.id, "declined").unwrap();
+    vote(&t.r2, &stage, record, "exclude");
+    assert!(send_return(&t.r2, &t.owner).rejected.is_empty());
+
+    // Mit dem nächsten Paket gilt die Abschaltung auch dort.
+    send_package(&t.owner, &t.r2);
+    assert!(!t.r2.detail().unwrap().ai_allowed);
+    assert!(matches!(t.r2.ai_request(&stage, record, &options), Err(Error::Forbidden(_))));
+
+    // Entblindet nennt der Methodentext Umfang, Modelle und Ausgang, und was nach dem Abschalten entstand.
+    t.owner.unblind_stage(&stage).unwrap();
+    let text = methods(&t.owner);
+    for part in [
+        "KI-Vorschläge hat die Leitung für dieses Review am",
+        "Vorschläge einer KI zu 1 Eintrag, eingeholt von 2 Personen (Modell: llama3, qwen)",
+        "Übernommen: 1, abgelehnt: 1, ohne Vermerk: 0",
+        "Sie können die Entscheidungen beeinflusst haben",
+        "nachdem die Leitung sie abgeschaltet hatte: 1",
+    ] {
+        assert!(text.contains(part), "{part} fehlt in:\n{text}");
+    }
+
+    // Wieder erlaubt: Vorschläge gehen wieder, der Satz zur Abschaltung entfällt.
+    t.owner.set_ai_policy(true).unwrap();
+    assert!(t.owner.ai_request(&stage, record, &options).is_ok());
+    assert!(!methods(&t.owner).contains("KI-Vorschläge hat die Leitung"));
+}
