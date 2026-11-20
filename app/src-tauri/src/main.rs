@@ -73,7 +73,7 @@ fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send
         commands::gate_override,
         commands::stage_conflicts,
         commands::stage_summary,
-        commands::stage_export_csv,
+        commands::stage_export,
         commands::sources,
         commands::study_link,
         commands::study_dissolve,

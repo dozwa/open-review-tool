@@ -1266,8 +1266,12 @@ impl Review {
         Ok(out)
     }
 
-    /// Tabelle (`table`) oder Häufigkeiten (`frequencies`) einer Stufe als CSV.
+    /// Tabelle (`table`) oder Häufigkeiten (`frequencies`) einer Stufe als CSV, oder beides samt Formular
+    /// als JSON (`json`). Im JSON stehen die Werte unter dem Schlüssel des Feldes und behalten ihren Typ.
     pub fn form_file(&self, stage_id: &Uuid, kind: &str) -> Result<FormFile> {
+        if kind == "json" {
+            return self.form_json(stage_id);
+        }
         let line = |cells: Vec<String>| cells.iter().map(|c| csv_field(c)).collect::<Vec<_>>().join(",") + "\n";
         if kind == "frequencies" {
             let mut content = line(vec!["field".into(), "label".into(), "value".into(), "n".into()]);
@@ -1309,6 +1313,42 @@ impl Review {
             content += &line(cells);
         }
         Ok(FormFile { filename: "extraktion-tabelle.csv".into(), content })
+    }
+
+    fn form_json(&self, stage_id: &Uuid) -> Result<FormFile> {
+        let view = self.form_stage(stage_id)?;
+        if view.stage.blind_active {
+            return Err(forbidden(tr!("Die Stufe ist verblindet. Exportiert wird erst nach dem Entblinden.")));
+        }
+        let rows: Vec<Value> = view
+            .rows
+            .iter()
+            .enumerate()
+            .map(|(index, row)| {
+                let mut values = serde_json::Map::new();
+                let mut differences = serde_json::Map::new();
+                for cell in &row.cells {
+                    values.insert(cell.field.clone(), cell.value.clone());
+                    if cell.status == "differs" {
+                        differences.insert(cell.field.clone(), json!(cell.values));
+                    }
+                }
+                json!({
+                    "nr": index + 1, "record_id": row.record_id, "authors": row.authors, "year": row.year,
+                    "title": row.title, "bundle": row.label, "source_type": row.source_type,
+                    "status": row.status, "values": values, "differences": differences,
+                })
+            })
+            .collect();
+        let file = json!({
+            "review": { "id": view.stage.review_id, "title": self.state()?.title },
+            "stage": { "id": view.stage.id, "name": view.stage.name, "closed": view.stage.closed },
+            "form": { "id": view.form.id, "name": view.form.name, "version": view.form.version, "fields": view.form.fields },
+            "sources": rows,
+            "frequencies": self.form_frequencies(stage_id)?,
+        });
+        let content = serde_json::to_string_pretty(&file).unwrap_or_default() + "\n";
+        Ok(FormFile { filename: "extraktion.json".into(), content })
     }
 }
 

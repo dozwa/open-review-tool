@@ -356,6 +356,27 @@ impl StageState {
             .collect()
     }
 
+    /// Hauptgrund eines Ausschlusses: der Grund der Klärung, sonst der gemeinsame Grund der Stimmen.
+    /// Nennen die Stimmen verschiedene Gründe, gilt der, der in `order` (Reihenfolge der Kriterien) zuerst steht.
+    pub fn exclusion_reason(&self, record: &str, order: &[String]) -> String {
+        if let Some(consensus) = self.consensus.get(record) {
+            return consensus.primary_reason.clone().unwrap_or_default();
+        }
+        let named: BTreeSet<&str> = self
+            .votes
+            .range((record.to_string(), Uuid::nil())..=(record.to_string(), Uuid::max()))
+            .filter(|(_, vote)| vote.decision == "exclude")
+            .filter_map(|(_, vote)| vote.primary_reason.as_deref())
+            .collect();
+        order
+            .iter()
+            .map(String::as_str)
+            .find(|code| named.contains(code))
+            .or_else(|| named.iter().next().copied())
+            .unwrap_or_default()
+            .to_string()
+    }
+
     /// Entscheidung je Record, der ein Votum, einen Konsens oder eine Markierung hat.
     pub fn final_decisions(&self) -> BTreeMap<String, FinalDecision> {
         let mut by_record: BTreeMap<String, Vec<String>> = BTreeMap::new();

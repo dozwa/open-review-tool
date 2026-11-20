@@ -975,4 +975,9 @@ export const en = {
   "erlaubt": "allowed",
   "abgeschaltet": "switched off",
   "Die Leitung hat KI-Vorschläge für dieses Review abgeschaltet. Diese Angaben wirken erst wieder, wenn sie erlaubt sind.": "The lead has switched off AI suggestions for this review. These settings take effect again once they are allowed.",
+  "JSON gespeichert.": "JSON saved.",
+  "extraktion.json": "extraction.json",
+  "Entscheidung und Stimmen je Eintrag als Tabelle": "Decision and votes per record as a table",
+  "Wie die CSV, dazu Gründe, Notizen und Klärung": "Like the CSV, plus reasons, notes and resolution",
+  "Formular, Werte je Quelle und Häufigkeiten in einer Datei": "Form, values per source and frequencies in one file",
 } satisfies Record<string, Entry>;

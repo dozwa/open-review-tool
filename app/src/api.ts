@@ -1059,8 +1059,8 @@ export const api = {
     call<void>("gate_override", { reviewId, station, reason }),
   conflicts: (reviewId: string, stageId: string) => call<Conflict[]>("stage_conflicts", { reviewId, stageId }),
   summary: (reviewId: string, stageId: string) => call<Summary>("stage_summary", { reviewId, stageId }),
-  exportCsv: (reviewId: string, stageId: string, path: string) =>
-    call<void>("stage_export_csv", { reviewId, stageId, path }),
+  exportStage: (reviewId: string, stageId: string, format: "csv" | "json", path: string) =>
+    call<void>("stage_export", { reviewId, stageId, format, path }),
 
   forms: (reviewId: string) => call<FormsView>("forms", { reviewId }),
   publishForm: (reviewId: string, data: Record<string, unknown>) => call<Form>("form_publish", { reviewId, data }),
@@ -1075,7 +1075,7 @@ export const api = {
   formConsensus: (reviewId: string, stageId: string, recordId: string, field: string, value: FormValue, note: string) =>
     call<void>("form_consensus", { reviewId, stageId, recordId, field, value, note }),
   formFrequencies: (reviewId: string, stageId: string) => call<Frequency[]>("form_frequencies", { reviewId, stageId }),
-  exportForm: (reviewId: string, stageId: string, kind: "table" | "frequencies", path: string) =>
+  exportForm: (reviewId: string, stageId: string, kind: "table" | "frequencies" | "json", path: string) =>
     call<void>("form_export", { reviewId, stageId, kind, path }),
 
   exportPackage: (reviewId: string, actorId: string, path: string) =>

@@ -341,22 +341,6 @@ fn units<'a>(workflow: &Workflow, stages: &'a [StageState]) -> Vec<Unit<'a>> {
     out
 }
 
-/// Hauptgrund eines Ausschlusses: der Grund der Klärung, sonst der gemeinsame Grund der Stimmen.
-/// Nennen die Stimmen verschiedene Gründe, gilt der, der in den Kriterien zuerst steht.
-fn exclusion_reason(stage: &StageState, record: &str, named: Option<&BTreeSet<&str>>, order: &[String]) -> String {
-    if let Some(consensus) = stage.consensus.get(record) {
-        return consensus.primary_reason.clone().unwrap_or_default();
-    }
-    let Some(named) = named else { return String::new() };
-    order
-        .iter()
-        .map(String::as_str)
-        .find(|code| named.contains(code))
-        .or_else(|| named.iter().next().copied())
-        .unwrap_or_default()
-        .to_string()
-}
-
 impl Review {
     fn report_data(&self) -> Result<Data> {
         let state = self.state()?;
@@ -394,12 +378,6 @@ impl Review {
                 }
                 let blind = stage.blind_active();
                 let finals = if blind { BTreeMap::new() } else { stage.final_decisions() };
-                let mut named: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
-                for ((record, _), vote) in &stage.votes {
-                    if let Some(reason) = vote.primary_reason.as_deref().filter(|_| vote.decision == "exclude") {
-                        named.entry(record.as_str()).or_default().insert(reason);
-                    }
-                }
                 for assignment in self.store.assignments(Some(&stage.config.id))? {
                     if !active.contains(&assignment.record_id) {
                         continue;
@@ -408,9 +386,7 @@ impl Review {
                     let outcome = match finals.get(&id).and_then(|d| d.decision.as_deref()) {
                         _ if blind => Outcome::Blind,
                         Some("include") => Outcome::Include,
-                        Some("exclude") => {
-                            Outcome::Exclude(exclusion_reason(stage, &id, named.get(id.as_str()), &order))
-                        }
+                        Some("exclude") => Outcome::Exclude(stage.exclusion_reason(&id, &order)),
                         _ => Outcome::Open,
                     };
                     latest.insert(assignment.record_id, outcome);

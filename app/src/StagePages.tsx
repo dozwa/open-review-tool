@@ -157,9 +157,9 @@ export function StagePage() {
     }
   }
 
-  async function exportCsv() {
-    const path = await save({ defaultPath: await inFolder("export", `${safeFileName(stage.name)}.csv`, reviewId), filters: [{ name: "CSV", extensions: ["csv"] }] });
-    if (path) await run(() => api.exportCsv(reviewId, stageId, path), t("CSV gespeichert."));
+  async function exportFile(format: "csv" | "json") {
+    const path = await save({ defaultPath: await inFolder("export", `${safeFileName(stage.name)}.${format}`, reviewId), filters: [{ name: format.toUpperCase(), extensions: [format] }] });
+    if (path) await run(() => api.exportStage(reviewId, stageId, format, path), format === "csv" ? t("CSV gespeichert.") : t("JSON gespeichert."));
   }
 
   const counts: Record<string, number> = d ? { ...d } : {};
@@ -184,7 +184,8 @@ export function StagePage() {
         }
         help={<HelpButton reviewId={reviewId} station={stage.station} context={stage.name} />}
       >
-        {!stage.blind_active && <button onClick={exportCsv}><Icon name="csv" size={14} /> CSV</button>}
+        {!stage.blind_active && <button onClick={() => exportFile("csv")} title={t("Entscheidung und Stimmen je Eintrag als Tabelle")}><Icon name="csv" size={14} /> CSV</button>}
+        {!stage.blind_active && <button onClick={() => exportFile("json")} title={t("Wie die CSV, dazu Gründe, Notizen und Klärung")}><Icon name="csv" size={14} /> JSON</button>}
         {manage && stage.blind_active && <button onClick={unblind}><Icon name="eye" size={14} /> {t("Entblinden")}</button>}
         {manage && !stage.closed && <button onClick={closeStage}><Icon name="lock" size={14} /> {t("Schließen")}</button>}
         {canVote(role) && !stage.closed && (

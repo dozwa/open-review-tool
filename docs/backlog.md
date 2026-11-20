@@ -24,8 +24,7 @@ geschätzt: **klein** (bis etwa ein Tag), **mittel** (einige Tage), **groß** (e
 
 | Aufwand | Wunsch | Anmerkung |
 | --- | --- | --- |
-| klein | Screening und Extraktion als CSV und JSON | Die Tabelle der eingeschlossenen Quellen gibt es schon als CSV. |
-| mittel | Screening und Extraktion als Excel | |
+| mittel | Screening und Extraktion als Excel | Je Stufe gibt es CSV und JSON. |
 | mittel | Screening und Extraktion für gängige Statistikprogramme | Noch zu klären: welche (R, SPSS, Stata). |
 
 ### Protokoll

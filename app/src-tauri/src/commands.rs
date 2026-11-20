@@ -527,15 +527,17 @@ pub async fn stage_summary(state: State<'_, AppState>, review_id: String, stage_
     open(&state, &review_id)?.summary(&uuid(&stage_id)?).map_err(err)
 }
 
+/// Schreibt den Stand einer Screening-Stufe als `csv` oder `json`.
 #[tauri::command]
-pub async fn stage_export_csv(
+pub async fn stage_export(
     state: State<'_, AppState>,
     review_id: String,
     stage_id: String,
+    format: String,
     path: String,
 ) -> Res<()> {
-    let csv = open(&state, &review_id)?.export_csv(&uuid(&stage_id)?).map_err(err)?;
-    std::fs::write(path, csv).map_err(err)
+    let content = open(&state, &review_id)?.stage_file(&uuid(&stage_id)?, &format).map_err(err)?;
+    std::fs::write(path, content).map_err(err)
 }
 
 // ---------------------------------------------------------------- Bericht
@@ -730,7 +732,8 @@ pub async fn form_frequencies(state: State<'_, AppState>, review_id: String, sta
     open(&state, &review_id)?.form_frequencies(&uuid(&stage_id)?).map_err(err)
 }
 
-/// Schreibt die Tabelle (`table`) oder die Häufigkeiten (`frequencies`) einer Formular-Stufe als CSV.
+/// Schreibt die Tabelle (`table`) oder die Häufigkeiten (`frequencies`) einer Formular-Stufe als CSV oder
+/// beides als JSON (`json`).
 #[tauri::command]
 pub async fn form_export(
     state: State<'_, AppState>,

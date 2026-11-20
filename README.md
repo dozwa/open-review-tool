@@ -16,11 +16,11 @@ Zusammenarbeit ohne Server über Austauschdateien.
 > von RIS, BibTeX und PubMed (nbib) mit Suchversion und Herkunft, exakte und unscharfe Dubletten, Stufen mit drei
 > Auswahlregeln, verblindetes Screening in drei Spalten mit Filtern, Volltexte aus einem Ordner oder aus Zotero
 > mit Prüfsumme und Vorschau in der App, Pflichtgrund im Volltext, Konflikte und Konsens (auch als
-> Dritt-Entscheid), Übereinstimmung, CSV-Export, Pakete und Rückmeldungen, Bericht mit Flussdiagramm (SVG),
+> Dritt-Entscheid), Übereinstimmung, Export je Stufe als CSV und JSON, Pakete und Rückmeldungen, Bericht mit Flussdiagramm (SVG),
 > ausgeschlossenen Volltexten mit Grund, Eingeschlossenen als RIS, Suchanhang und Methodentext zur Auswahl,
 > Zitationssuche als weitere Runde mit eigenem Zweig im Diagramm, Bündeln von Einträgen zu Quellen mit Quellenart,
 > Formulare mit Versionen, verblindetes Charting doppelt oder einfach mit Prüfung, Abgleich je Feld, Tabelle und
-> Häufigkeiten als CSV, Registrierung des Protokolls mit Liste der Abweichungen, Checkliste PRISMA-ScR mit Stand
+> Häufigkeiten als CSV und JSON, Registrierung des Protokolls mit Liste der Abweichungen, Checkliste PRISMA-ScR mit Stand
 > je Punkt, Methodentext zum Charting, Tabelle der eingeschlossenen Quellen, Update als weitere Runden,
 > Leitlinien zum Nachschlagen mit „?“ auf jedem Bildschirm, geführte Vorbereitung der Registrierung nach dem
 > OSF-Formular, Deutsch und Englisch für Oberfläche, Meldungen, Vorlagen, Leitlinien und Bericht.

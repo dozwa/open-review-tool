@@ -16,7 +16,7 @@ use ort_core::report::{Level, Retrieval};
 use ort_core::service::{ImportSource, OpenStage, PairDecision, RecordFilter, StageView};
 use ort_core::workflow::{builtin_template, StationView};
 use ort_core::Review;
-use serde_json::json;
+use serde_json::{json, Value};
 use uuid::Uuid;
 
 const JBI: Option<&str> = Some("jbi_scoping");
@@ -1472,6 +1472,16 @@ fn charting_runs_blind_and_differences_show_only_after_unblinding() {
     assert!(table.content.lines().next().unwrap().ends_with("status,Land,Design,Stichprobe,Themen,Setting"));
     assert_eq!(table.content.lines().filter(|l| l.contains(",done,Polen,RCT,,,Hausarztpraxis")).count(), 4);
     assert!(t.owner.form_file(&charting.id, "frequencies").unwrap().content.contains("design,Design,RCT,4"));
+    // Dasselbe als JSON: Werte unter dem Schlüssel des Feldes, mit ihrem Typ.
+    let file = t.owner.form_file(&charting.id, "json").unwrap();
+    let data: Value = serde_json::from_str(&file.content).unwrap();
+    assert_eq!(file.filename, "extraktion.json");
+    assert_eq!(data["form"]["fields"].as_array().unwrap().len(), 5);
+    let done: Vec<&Value> = data["sources"].as_array().unwrap().iter().filter(|s| s["status"] == "done").collect();
+    assert_eq!(done.len(), 4);
+    assert!(done.iter().all(|s| s["values"]["design"] == "RCT" && s["differences"].as_object().unwrap().is_empty()));
+    assert_eq!(data["frequencies"][0]["field"], "design");
+    assert!(matches!(t.owner.stage_file(&charting.id, "csv"), Err(Error::Invalid(_))), "keine Stimmen im Formular");
 
     let closed = t.owner.close_stage(&charting.id).unwrap();
     assert!(closed.gate.unwrap().passed);

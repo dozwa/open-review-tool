@@ -2093,33 +2093,106 @@ impl Review {
         Ok(stage.final_decisions())
     }
 
+    /// Tabelle einer Screening-Stufe als CSV: je Eintrag eine Zeile, je Person eine Spalte mit ihrer Stimme.
     pub fn export_csv(&self, stage_id: &Uuid) -> Result<String> {
+        self.stage_file(stage_id, "csv")
+    }
+
+    /// Stand einer Screening-Stufe als Datei, `csv` oder `json`. Beide zeigen dasselbe: je Eintrag die
+    /// Entscheidung, den Hauptgrund eines Ausschlusses und die Stimmen der Personen. Das JSON nennt dazu
+    /// alle Gründe, die Notizen und die Klärung.
+    pub fn stage_file(&self, stage_id: &Uuid, format: &str) -> Result<String> {
         let state = self.state()?;
         require(&state, &self.me.actor_id, &ROLES)?;
+        if !["csv", "json"].contains(&format) {
+            return Err(invalid(tr!("Unbekannte Datei.")));
+        }
         let stage = self.stage_state(stage_id)?;
+        if stage.config.form_id.is_some() {
+            return Err(invalid(tr!("Diese Stufe arbeitet mit einem Formular, nicht mit Stimmen.")));
+        }
         if stage.blind_active() {
             return Err(forbidden(tr!("Die Stufe ist verblindet. Der Export ist erst nach dem Entblinden möglich.")));
         }
         let finals = stage.final_decisions();
-        let mut out = String::from("record_id,title,authors,year,journal,doi,status,decision,n_votes\n");
+        let order: Vec<String> = stage_criteria(&state, &stage).reason_codes().into_iter().map(String::from).collect();
+        let mut voters: Vec<(String, Uuid)> = Vec::new();
+        for actor in stage.votes.keys().map(|(_, actor)| *actor).collect::<BTreeSet<_>>() {
+            voters.push((self.name_of(&actor)?, actor));
+        }
+        voters.sort_by_key(|(name, actor)| (name.to_lowercase(), *actor));
+
+        let mut csv: Vec<String> =
+            ["record_id", "title", "authors", "year", "journal", "doi", "status", "decision", "n_votes", "reason"]
+                .map(String::from)
+                .into();
+        csv.extend(voters.iter().map(|(name, _)| format!("vote_{name}")));
+        let mut csv = csv.iter().map(|f| csv_field(f)).collect::<Vec<_>>().join(",") + "\n";
+        let mut rows = Vec::new();
         for a in self.store.assignments(Some(stage_id))? {
             let Some(r) = self.store.record(&a.record_id)? else { continue };
-            let d = finals.get(&r.id.to_string());
-            let fields = [
-                r.id.to_string(),
-                r.title,
-                r.authors,
+            let id = r.id.to_string();
+            let d = finals.get(&id);
+            let status = d.map_or("pending", |d| d.status);
+            let decision = d.and_then(|d| d.decision.clone());
+            let n_votes = d.map_or(0, |d| d.n_votes);
+            let reason = match decision.as_deref() {
+                Some("exclude") => stage.exclusion_reason(&id, &order),
+                _ => String::new(),
+            };
+            let vote = |actor: &Uuid| stage.votes.get(&(id.clone(), *actor));
+            let mut fields = vec![
+                id.clone(),
+                r.title.clone(),
+                r.authors.clone(),
                 r.year.map(|y| y.to_string()).unwrap_or_default(),
-                r.journal,
-                r.doi,
-                d.map_or("pending", |d| d.status).to_string(),
-                d.and_then(|d| d.decision.clone()).unwrap_or_default(),
-                d.map_or(0, |d| d.n_votes).to_string(),
+                r.journal.clone(),
+                r.doi.clone(),
+                status.to_string(),
+                decision.clone().unwrap_or_default(),
+                n_votes.to_string(),
+                reason.clone(),
             ];
-            out.push_str(&fields.iter().map(|f| csv_field(f)).collect::<Vec<_>>().join(","));
-            out.push('\n');
+            fields.extend(voters.iter().map(|(_, actor)| vote(actor).map(|v| v.decision.clone()).unwrap_or_default()));
+            csv.push_str(&fields.iter().map(|f| csv_field(f)).collect::<Vec<_>>().join(","));
+            csv.push('\n');
+            if format == "json" {
+                let votes: Vec<Value> = voters
+                    .iter()
+                    .filter_map(|(name, actor)| {
+                        let v = vote(actor)?;
+                        Some(json!({
+                            "actor_id": actor, "name": name, "decision": v.decision,
+                            "primary_reason": v.primary_reason, "reasons": v.reasons, "note": v.note,
+                        }))
+                    })
+                    .collect();
+                let consensus = stage
+                    .consensus
+                    .get(&id)
+                    .map(|c| json!({ "decision": c.decision, "method": c.method, "primary_reason": c.primary_reason }));
+                rows.push(json!({
+                    "record_id": id, "title": r.title, "authors": r.authors, "year": r.year,
+                    "journal": r.journal, "doi": r.doi, "status": status, "decision": decision,
+                    "n_votes": n_votes, "reason": if reason.is_empty() { Value::Null } else { json!(reason) },
+                    "votes": votes, "consensus": consensus,
+                }));
+            }
         }
-        Ok(out)
+        if format == "csv" {
+            return Ok(csv);
+        }
+        let c = &stage.config;
+        let file = json!({
+            "review": { "id": self.id()?, "title": state.title },
+            "stage": {
+                "id": c.id, "name": c.name, "station": c.station, "round": c.round,
+                "decision_rule": c.decision_rule, "conflict_rule": c.conflict_rule,
+                "min_reviewers": c.min_reviewers, "closed": stage.closed,
+            },
+            "records": rows,
+        });
+        Ok(serde_json::to_string_pretty(&file).unwrap_or_default() + "\n")
     }
 
     /// Prüft alle Ketten: lückenlose Folge, Vorgänger-Hash, eigener Hash, Signatur.

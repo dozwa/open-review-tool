@@ -149,6 +149,18 @@ fn blind_screening_conflict_consensus_close() {
     let csv = t.owner.export_csv(&sid).unwrap();
     assert!(csv.lines().next().unwrap().starts_with("record_id,title"));
     assert_eq!(csv.lines().count(), 5);
+    let head = csv.lines().next().unwrap();
+    assert!(head.contains(",n_votes,reason,vote_"), "{head}");
+    assert_eq!(head.matches("vote_").count(), 2, "je Person, die gestimmt hat, eine Spalte: {head}");
+    // Das JSON zeigt dieselben Einträge, dazu die Stimmen je Person und die Klärung.
+    let file: serde_json::Value = serde_json::from_str(&t.owner.stage_file(&sid, "json").unwrap()).unwrap();
+    let records = file["records"].as_array().unwrap();
+    assert_eq!((records.len(), file["stage"]["id"].as_str()), (4, Some(sid.to_string().as_str())));
+    let cleared = records.iter().find(|r| r["record_id"] == *a).unwrap();
+    assert_eq!((&cleared["decision"], &cleared["consensus"]["method"]), (&json!("include"), &json!("discussion")));
+    assert_eq!(cleared["votes"].as_array().unwrap().len(), 2);
+    assert!(cleared["votes"][0]["name"].is_string() && cleared["votes"][0]["decision"].is_string());
+    assert!(matches!(t.owner.stage_file(&sid, "xlsx"), Err(Error::Invalid(_))));
 
     // Abschluss: Snapshot, danach keine Stimmen mehr.
     assert!(matches!(t.r1.close_stage(&sid), Err(Error::Forbidden(_))));

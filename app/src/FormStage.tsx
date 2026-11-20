@@ -114,10 +114,11 @@ export function FormStagePage() {
     if (ok) await run(() => api.close(reviewId, stageId), t("Stufe geschlossen, Snapshot erstellt."));
   }
 
-  async function exportFile(kind: "table" | "frequencies") {
-    const name = kind === "table" ? t("extraktion-tabelle.csv") : t("extraktion-haeufigkeiten.csv");
-    const path = await save({ defaultPath: await inFolder("export", name, reviewId), filters: [{ name: "CSV", extensions: ["csv"] }] });
-    if (path) await run(() => api.exportForm(reviewId, stageId, kind, path), t("CSV gespeichert."));
+  async function exportFile(kind: "table" | "frequencies" | "json") {
+    const name = kind === "table" ? t("extraktion-tabelle.csv") : kind === "frequencies" ? t("extraktion-haeufigkeiten.csv") : t("extraktion.json");
+    const format = kind === "json" ? "json" : "csv";
+    const path = await save({ defaultPath: await inFolder("export", name, reviewId), filters: [{ name: format.toUpperCase(), extensions: [format] }] });
+    if (path) await run(() => api.exportForm(reviewId, stageId, kind, path), kind === "json" ? t("JSON gespeichert.") : t("CSV gespeichert."));
   }
 
   return (
@@ -139,6 +140,7 @@ export function FormStagePage() {
       >
         {!stage.blind_active && <button onClick={() => exportFile("table")}><Icon name="csv" size={14} /> {t("Tabelle")}</button>}
         {!stage.blind_active && frequencies.length > 0 && <button onClick={() => exportFile("frequencies")}><Icon name="csv" size={14} /> {t("Häufigkeiten")}</button>}
+        {!stage.blind_active && <button onClick={() => exportFile("json")} title={t("Formular, Werte je Quelle und Häufigkeiten in einer Datei")}><Icon name="csv" size={14} /> JSON</button>}
         {manage && stage.blind_active && <button onClick={unblind}><Icon name="eye" size={14} /> {t("Entblinden")}</button>}
         {manage && !stage.closed && <button onClick={closeStage}><Icon name="lock" size={14} /> {t("Schließen")}</button>}
         {canVote(view.role) && !stage.closed && mineOpen && (
